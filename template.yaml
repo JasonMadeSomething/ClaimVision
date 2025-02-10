@@ -17,7 +17,6 @@ Globals:
     Runtime: python3.12
     Environment:
       Variables:
-        AWS_REGION: "us-east-1"
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
 
 Resources:
