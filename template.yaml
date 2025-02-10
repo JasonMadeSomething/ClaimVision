@@ -10,6 +10,9 @@ Parameters:
       - prod
     Description: 'Specify the environment: dev or prod'
 
+  Conditions:
+    IsDev: !Equals [!Ref Env, "dev"]
+
 Globals:
   Function:
     Timeout: 10
@@ -138,6 +141,23 @@ Resources:
             Path: /auth/resend-confirmation
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
+
+  PreSignUpFunction:
+    Type: AWS::Serverless::Function
+    Condition: IsDev
+    Properties:
+      Handler: pre_signup.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/auth/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        CognitoTrigger:
+          Type: Cognito
+          Properties:
+            UserPool: !Ref CognitoUserPool
+            Trigger: PreSignUp
+
 
   # Secure API Route (/items) with Cognito Authorizer
   GetItemsFunction:
