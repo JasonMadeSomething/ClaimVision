@@ -39,8 +39,9 @@ export default function Navigation() {
     }
   };
 
-  const handleClickOutside = (event: MouseEvent & { target: Element }): void => {
-    if (!event.target.closest('.menu-items')) {
+  const handleClickOutside = (event: React.MouseEvent<HTMLDivElement>): void => {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.menu-items')) {
       setShowSignIn(false);
       setShowSignUp(false);
     }
@@ -122,7 +123,7 @@ export default function Navigation() {
                 Sign Up
               </button>
 
-              <Menu as="div" className="relative inline-block" onClick={(event) => handleClickOutside(event)}>
+              <Menu as="div" className="relative inline-block" onClick={(event: React.MouseEvent<HTMLDivElement>) => handleClickOutside(event)}>
                 <Menu.Items
                   static
                   className={`${
