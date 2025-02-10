@@ -20,8 +20,10 @@ Globals:
     Runtime: python3.12
     Environment:
       Variables:
-        COGNITO_USER_POOL_CLIENT_ID: !ImportValue CognitoUserPoolClientId-${Env}
-        COGNITO_USER_POOL_ID: !ImportValue CognitoUserPoolId-${Env}
+        COGNITO_USER_POOL_CLIENT_ID: !ImportValue
+          Fn::Sub: CognitoUserPoolClientId-${Env}
+        COGNITO_USER_POOL_ID: !ImportValue
+          Fn::Sub: CognitoUserPoolId-${Env}
 
 Resources:
   # API Gateway (Now Includes Cognito Authorizer)
@@ -37,7 +39,9 @@ Resources:
       Auth:
         Authorizers:
           CognitoAuthorizer:
-            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${!ImportValue CognitoUserPoolId-${Env}}"
+            UserPoolArn: !Sub 
+              - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
+              - UserPoolId: !ImportValue CognitoUserPoolId-${Env}
 
   LoginFunction:
     Type: AWS::Serverless::Function
