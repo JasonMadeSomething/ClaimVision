@@ -5,13 +5,25 @@ Globals:
   Function:
     Timeout: 10
     MemorySize: 128
+    Runtime: python3.12
     Environment:
       Variables:
         AWS_REGION: "us-east-1"
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
 
 Resources:
-  # Cognito User Pool
+  # API Gateway (CORS Defined Here)
+  ClaimVisionAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: ClaimVisionAPI
+      StageName: dev
+      Cors:
+        AllowMethods: "'OPTIONS,POST,GET'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
+
+  #  Cognito User Pool (Restored)
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -40,16 +52,28 @@ Resources:
         - openid
         - profile
       CallbackURLs:
-        - "http://localhost:3000"  # Update with actual frontend URL
+        - "http://localhost:3000"
       LogoutURLs:
         - "http://localhost:3000"
 
-  # Lambda function for user login
+  # Cognito Authorizer for Secure Endpoints
+  CognitoAuthorizer:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: CognitoAuthorizer
+      StageName: dev
+      Auth:
+        DefaultAuthorizer: CognitoAuth
+        Authorizers:
+          CognitoAuth:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
+
+  # Login Lambda Function
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: auth.login.lambda_handler
-      Runtime: python3.9
+      Runtime: python3.12
       CodeUri: src/auth/
       Policies:
         - AWSLambdaBasicExecutionRole
@@ -60,18 +84,3 @@ Resources:
             Path: /auth/login
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Cors:
-              AllowMethods: "'OPTIONS,POST'"
-              AllowHeaders: "'Content-Type,Authorization'"
-              AllowOrigin: "'*'"
-
-  # API Gateway for ClaimVision
-  ClaimVisionAPI:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: ClaimVisionAPI
-      StageName: dev
-      Cors:
-        AllowMethods: "'OPTIONS,POST,GET'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'*'"
