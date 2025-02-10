@@ -13,6 +13,14 @@ Parameters:
 Conditions:
   IsDev: !Equals [!Ref Env, "dev"]
 
+
+Mappings:
+  CognitoExports:
+    dev:
+      UserPoolId: CognitoUserPoolId-dev
+    prod:
+      UserPoolId: CognitoUserPoolId-prod
+
 Globals:
   Function:
     Timeout: 10
@@ -20,28 +28,42 @@ Globals:
     Runtime: python3.12
     Environment:
       Variables:
-        COGNITO_USER_POOL_CLIENT_ID: !ImportValue
-          Fn::Sub: CognitoUserPoolClientId-${Env}
-        COGNITO_USER_POOL_ID: !ImportValue
-          Fn::Sub: CognitoUserPoolId-${Env}
+        COGNITO_USER_POOL_CLIENT_ID: !If
+          - IsDev
+          - !ImportValue CognitoUserPoolClientId-dev
+          - !ImportValue CognitoUserPoolClientId-prod
+        COGNITO_USER_POOL_ID: !If
+          - IsDev
+          - !ImportValue CognitoUserPoolId-dev
+          - !ImportValue CognitoUserPoolId-prod
 
 Resources:
+
+  UserPoolId:
+    Type: AWS::SSM::Parameter
+    Properties:
+      Name: !FindInMap [CognitoExports, !Ref Env, UserPoolId]
+      Type: String
+      Value: !ImportValue
+        Fn::FindInMap: [CognitoExports, !Ref Env, UserPoolId]
+
+
   # API Gateway (Now Includes Cognito Authorizer)
   ClaimVisionAPI:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub ClaimVisionAPI-${Env}
+      Name: !Sub "ClaimVisionAPI-${Env}"
       StageName: dev
       Cors:
-        AllowMethods: '''OPTIONS,POST,GET'''
-        AllowHeaders: '''Content-Type,Authorization'''
-        AllowOrigin: '''*'''
+        AllowMethods: "'OPTIONS,POST,GET'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowOrigin: "'*'"
       Auth:
         Authorizers:
           CognitoAuthorizer:
-            UserPoolArn: !Sub 
-              - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"
-              - UserPoolId: !ImportValue CognitoUserPoolId-${Env}
+            UserPoolId: !Ref UserPoolId
+            UserPoolArn: !Join ["", ["arn:aws:cognito-idp:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":userpool/", !Ref UserPoolId]]
+
 
   LoginFunction:
     Type: AWS::Serverless::Function
