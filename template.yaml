@@ -20,7 +20,8 @@ Globals:
     Runtime: python3.12
     Environment:
       Variables:
-        COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
+        COGNITO_USER_POOL_CLIENT_ID: !ImportValue CognitoUserPoolClientId-${Env}
+        COGNITO_USER_POOL_ID: !ImportValue CognitoUserPoolId-${Env}
 
 Resources:
   # API Gateway (Now Includes Cognito Authorizer)
@@ -37,52 +38,14 @@ Resources:
         # Define Cognito authorizer here
         Authorizers:
           CognitoAuthorizer:
-            UserPoolArn: !GetAtt CognitoUserPool.Arn
+            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${COGNITO_USER_POOL_ID}"
 
-  # Cognito User Pool
-  CognitoUserPool:
-    Type: AWS::Cognito::UserPool
-    Properties:
-      UserPoolName: !Sub ClaimVisionUserPool-${Env}
-      Policies:
-        PasswordPolicy:
-          MinimumLength: 8
-          RequireUppercase: true
-          RequireLowercase: true
-          RequireNumbers: true
-          RequireSymbols: false
-      AutoVerifiedAttributes:
-        - email
-
-  # Cognito App Client
-  CognitoUserPoolClient:
-    Type: AWS::Cognito::UserPoolClient
-    Properties:
-      ClientName: !Sub ClaimVisionClient-${Env}
-      UserPoolId: !Ref CognitoUserPool
-      GenerateSecret: false
-      ExplicitAuthFlows:
-        - ALLOW_USER_PASSWORD_AUTH
-        - ALLOW_REFRESH_TOKEN_AUTH
-        - ALLOW_CUSTOM_AUTH
-      AllowedOAuthFlows:
-        - implicit
-      AllowedOAuthScopes:
-        - email
-        - openid
-        - profile
-      CallbackURLs:
-        - http://localhost:3000
-      LogoutURLs:
-        - http://localhost:3000
-
-  # Login Lambda Function (PUBLIC - No Cognito Required)
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: login.lambda_handler
+      Handler: auth.login.lambda_handler
       Runtime: python3.12
-      CodeUri: src/auth/
+      CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -97,9 +60,9 @@ Resources:
   RegisterFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: register.lambda_handler
+      Handler: auth.register.lambda_handler
       Runtime: python3.12
-      CodeUri: src/auth/
+      CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -113,9 +76,9 @@ Resources:
   ConfirmFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: confirm.lambda_handler
+      Handler: auth.confirm.lambda_handler
       Runtime: python3.12
-      CodeUri: src/auth/
+      CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -129,9 +92,9 @@ Resources:
   ResendConfirmationFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: resend_confirmation.lambda_handler
+      Handler: auth.resend_confirmation.lambda_handler
       Runtime: python3.12
-      CodeUri: src/auth/
+      CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -146,16 +109,16 @@ Resources:
     Type: AWS::Serverless::Function
     Condition: IsDev
     Properties:
-      Handler: pre_signup.lambda_handler
+      Handler: auth.pre_signup.lambda_handler
       Runtime: python3.12
-      CodeUri: src/auth/
+      CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
         CognitoTrigger:
           Type: Cognito
           Properties:
-            UserPool: !Ref CognitoUserPool
+            UserPool: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${COGNITO_USER_POOL_ID}"
             Trigger: PreSignUp
 
 
@@ -163,9 +126,9 @@ Resources:
   GetItemsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: get_items.lambda_handler
+      Handler: items.get_items.lambda_handler
       Runtime: python3.12
-      CodeUri: src/items/
+      CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -183,9 +146,3 @@ Outputs:
   ApiGatewayInvokeURL:
     Description: API Gateway Invoke URL
     Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
-  CognitoUserPoolId:
-    Description: Cognito User Pool ID
-    Value: !Ref CognitoUserPool
-  CognitoUserPoolClientId:
-    Description: Cognito User Pool Client ID
-    Value: !Ref CognitoUserPoolClient
