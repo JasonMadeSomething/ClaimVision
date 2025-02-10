@@ -8,7 +8,7 @@ Parameters:
     AllowedValues:
       - dev
       - prod
-    Description: "Specify the environment: dev or prod"
+    Description: 'Specify the environment: dev or prod'
 
 Globals:
   Function:
@@ -24,13 +24,14 @@ Resources:
   ClaimVisionAPI:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub "ClaimVisionAPI-${Env}"
+      Name: !Sub ClaimVisionAPI-${Env}
       StageName: dev
       Cors:
-        AllowMethods: "'OPTIONS,POST,GET'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'*'"
-      Auth:  # Define Cognito authorizer here
+        AllowMethods: '''OPTIONS,POST,GET'''
+        AllowHeaders: '''Content-Type,Authorization'''
+        AllowOrigin: '''*'''
+      Auth:
+        # Define Cognito authorizer here
         Authorizers:
           CognitoAuthorizer:
             UserPoolArn: !GetAtt CognitoUserPool.Arn
@@ -39,7 +40,7 @@ Resources:
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
-      UserPoolName: !Sub "ClaimVisionUserPool-${Env}"
+      UserPoolName: !Sub ClaimVisionUserPool-${Env}
       Policies:
         PasswordPolicy:
           MinimumLength: 8
@@ -54,9 +55,13 @@ Resources:
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
-      ClientName: !Sub "ClaimVisionClient-${Env}"
+      ClientName: !Sub ClaimVisionClient-${Env}
       UserPoolId: !Ref CognitoUserPool
       GenerateSecret: false
+      ExplicitAuthFlows:
+        - ALLOW_USER_PASSWORD_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_CUSTOM_AUTH
       AllowedOAuthFlows:
         - implicit
       AllowedOAuthScopes:
@@ -64,9 +69,9 @@ Resources:
         - openid
         - profile
       CallbackURLs:
-        - "http://localhost:3000"
+        - http://localhost:3000
       LogoutURLs:
-        - "http://localhost:3000"
+        - http://localhost:3000
 
   # Login Lambda Function (PUBLIC - No Cognito Required)
   LoginFunction:
@@ -83,13 +88,13 @@ Resources:
           Properties:
             Path: /auth/login
             Method: POST
-            RestApiId: !Ref ClaimVisionAPI  # No Auth here!
+            RestApiId: !Ref ClaimVisionAPI # No Auth here!
 
   # Secure API Route (/items) with Cognito Authorizer
   GetItemsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: items.get_items.lambda_handler
+      Handler: get_items.lambda_handler
       Runtime: python3.12
       CodeUri: src/items/
       Policies:
@@ -102,16 +107,16 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
             Auth:
-              Authorizer: CognitoAuthorizer 
+              Authorizer: CognitoAuthorizer
 
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
-    Description: "API Gateway Invoke URL"
-    Value: !Sub "https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev"
+    Description: API Gateway Invoke URL
+    Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
   CognitoUserPoolId:
-    Description: "Cognito User Pool ID"
+    Description: Cognito User Pool ID
     Value: !Ref CognitoUserPool
   CognitoUserPoolClientId:
-    Description: "Cognito User Pool Client ID"
+    Description: Cognito User Pool Client ID
     Value: !Ref CognitoUserPoolClient
