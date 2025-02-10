@@ -39,6 +39,28 @@ Globals:
 
 Resources:
 
+  ClaimsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "ClaimsTable-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id  # ✅ Primary Key
+          AttributeType: S
+        - AttributeName: user_id  # ✅ Secondary Index (GlobalSecondaryIndexes uses this)
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH  # ✅ The main partition key
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+
   UserPoolId:
     Type: AWS::SSM::Parameter
     Properties:
@@ -160,6 +182,71 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
+  GetClaimsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: claims.claims.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          CLAIMS_TABLE: !Ref ClaimsTable
+      Events:
+        GetClaimsAPI:
+          Type: Api
+          Properties:
+            Path: /claims
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  ClaimFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: claims.claims.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Environment:
+        Variables:
+          CLAIMS_TABLE: !Ref ClaimsTable
+      Events:
+        GetClaimAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{id}
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+        CreateClaimAPI:
+          Type: Api
+          Properties:
+            Path: /claims
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+        UpdateClaimAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{id}
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+        DeleteClaimAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{id}
+            Method: DELETE
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
