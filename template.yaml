@@ -20,7 +20,7 @@ Globals:
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
 
 Resources:
-  # ✅ API Gateway (Must Define Authorizer Here First)
+  # API Gateway (Now Includes Cognito Authorizer)
   ClaimVisionAPI:
     Type: AWS::Serverless::Api
     Properties:
@@ -30,8 +30,12 @@ Resources:
         AllowMethods: "'OPTIONS,POST,GET'"
         AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
+      Auth:  # Define Cognito authorizer here
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
 
-  # ✅ Cognito User Pool
+  # Cognito User Pool
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -46,7 +50,7 @@ Resources:
       AutoVerifiedAttributes:
         - email
 
-  # ✅ Cognito App Client
+  # Cognito App Client
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
@@ -64,7 +68,7 @@ Resources:
       LogoutURLs:
         - "http://localhost:3000"
 
-  # ✅ Login Lambda Function (PUBLIC - No Auth Required)
+  # Login Lambda Function (PUBLIC - No Cognito Required)
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -79,9 +83,9 @@ Resources:
           Properties:
             Path: /auth/login
             Method: POST
-            RestApiId: !Ref ClaimVisionAPI
+            RestApiId: !Ref ClaimVisionAPI  # No Auth here!
 
-  # ✅ Secure API Route (/items) with Cognito Authorizer
+  # Secure API Route (/items) with Cognito Authorizer
   GetItemsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -98,20 +102,10 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
             Auth:
-              Authorizer: CognitoAuthorizer
-  
-  CognitoAuthorizer:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: CognitoAuthorizer
-      StageName: ${Env}
-      Auth:
-        DefaultAuthorizer: None  # ✅ Prevents API-wide authentication
-        Authorizers:
-          CognitoAuthorizer:
-            UserPoolArn: !GetAtt CognitoUserPool.Arn  # ✅ Now this works because it is defined in ClaimVisionAPI
+              Authorizer: CognitoAuthorizer 
+
 Outputs:
-  # Print API Gateway URL After Deployment
+  #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
     Description: "API Gateway Invoke URL"
     Value: !Sub "https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev"
