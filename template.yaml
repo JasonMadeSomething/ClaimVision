@@ -10,8 +10,8 @@ Parameters:
       - prod
     Description: 'Specify the environment: dev or prod'
 
-  Conditions:
-    IsDev: !Equals [!Ref Env, "dev"]
+Conditions:
+  IsDev: !Equals [!Ref Env, "dev"]
 
 Globals:
   Function:
