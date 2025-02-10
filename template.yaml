@@ -72,7 +72,7 @@ Resources:
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: auth.login.lambda_handler
+      Handler: login.lambda_handler
       Runtime: python3.12
       CodeUri: src/auth/
       Policies:
