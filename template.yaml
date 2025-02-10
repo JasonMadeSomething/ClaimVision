@@ -107,7 +107,37 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI 
 
+  ConfirmFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: confirm.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/auth/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        ConfirmAPI:
+          Type: Api
+          Properties:
+            Path: /auth/confirm
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
   
+  ResendConfirmationFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: resend_confirmation.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/auth/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        ResendConfirmationAPI:
+          Type: Api
+          Properties:
+            Path: /auth/resend-confirmation
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
 
   # Secure API Route (/items) with Cognito Authorizer
   GetItemsFunction:
