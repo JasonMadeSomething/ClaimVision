@@ -1,0 +1,49 @@
+# General
+.DS_Store
+.env
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# Python Virtual Environments
+venv/
+.env/
+*.venv
+
+# AWS SAM & Serverless Framework
+.aws-sam/
+.serverless/
+samconfig.toml
+
+# AWS Credentials & Config
+.aws/
+config/
+credentials/
+
+# Amplify
+amplify/
+aws-exports.js
+
+# Next.js Build
+frontend/.next/
+frontend/.env.local
+frontend/.env.production
+frontend/.env.development
+frontend/node_modules/
+frontend/.vercel/
+frontend/.dist/
+
+# VSCode & IDEs
+.vscode/
+.idea/
+*.iml
+
+# Coverage & Testing
+.coverage
+coverage.xml
+htmlcov/
+pytest_cache/
+junit.xml
