@@ -90,6 +90,25 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI # No Auth here!
 
+
+  RegisterFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: register.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/auth/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        RegisterAPI:
+          Type: Api
+          Properties:
+            Path: /auth/register
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI 
+
+  
+
   # Secure API Route (/items) with Cognito Authorizer
   GetItemsFunction:
     Type: AWS::Serverless::Function
