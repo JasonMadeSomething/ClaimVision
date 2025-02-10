@@ -21,7 +21,7 @@ Globals:
         COGNITO_USER_POOL_CLIENT_ID: !Ref CognitoUserPoolClient
 
 Resources:
-  # API Gateway (Define API Gateway Before Authorizer)
+  # ✅ API Gateway (Must Define Authorizer Here First)
   ClaimVisionAPI:
     Type: AWS::Serverless::Api
     Properties:
@@ -31,8 +31,13 @@ Resources:
         AllowMethods: "'OPTIONS,POST,GET'"
         AllowHeaders: "'Content-Type,Authorization'"
         AllowOrigin: "'*'"
+      Auth:
+        DefaultAuthorizer: CognitoAuthorizer
+        Authorizers:
+          CognitoAuthorizer:
+            UserPoolArn: !GetAtt CognitoUserPool.Arn
 
-  # Cognito User Pool
+  # ✅ Cognito User Pool
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -47,7 +52,7 @@ Resources:
       AutoVerifiedAttributes:
         - email
 
-  # Cognito App Client
+  # ✅ Cognito App Client
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
@@ -65,19 +70,7 @@ Resources:
       LogoutURLs:
         - "http://localhost:3000"
 
-  # Cognito Authorizer (Must Reference API Gateway!)
-  CognitoAuthorizer:
-    Type: AWS::Serverless::Api
-    Properties:
-      Name: !Sub "CognitoAuthorizer-${Env}"
-      StageName: dev
-      Auth:
-        DefaultAuthorizer: CognitoAuth
-        Authorizers:
-          CognitoAuth:
-            UserPoolArn: !GetAtt CognitoUserPool.Arn
-
-  # Login Lambda Function (PUBLIC - No Auth Required)
+  # ✅ Login Lambda Function (PUBLIC - No Auth Required)
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -94,7 +87,7 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
-  # Example Protected Route (Requires Cognito Authorization)
+  # ✅ Secure API Route (/items) with Cognito Authorizer
   GetItemsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -111,4 +104,4 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
             Auth:
-              Authorizer: CognitoAuthorizer  # Attach Cognito Authenticator
+              Authorizer: CognitoAuthorizer  # ✅ Now this works because it is defined in ClaimVisionAPI
