@@ -104,3 +104,14 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer  # ✅ Now this works because it is defined in ClaimVisionAPI
+Outputs:
+  # Print API Gateway URL After Deployment
+  ApiGatewayInvokeURL:
+    Description: "API Gateway Invoke URL"
+    Value: !Sub "https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev"
+  CognitoUserPoolId:
+    Description: "Cognito User Pool ID"
+    Value: !Ref CognitoUserPool
+  CognitoUserPoolClientId:
+    Description: "Cognito User Pool Client ID"
+    Value: !Ref CognitoUserPoolClient
