@@ -185,11 +185,19 @@ Resources:
   GetClaimsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: claims.claims.lambda_handler
+      Handler: claims.get_claims.lambda_handler  # ✅ Dedicated GET handler
       Runtime: python3.12
       CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:Query  # ✅ Fetch all claims for user
+              - dynamodb:GetItem  # ✅ Fetch specific claims
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}/index/UserIdIndex"
       Environment:
         Variables:
           CLAIMS_TABLE: !Ref ClaimsTable
@@ -202,19 +210,6 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-
-  ClaimFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: claims.claims.lambda_handler
-      Runtime: python3.12
-      CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-      Environment:
-        Variables:
-          CLAIMS_TABLE: !Ref ClaimsTable
-      Events:
         GetClaimAPI:
           Type: Api
           Properties:
@@ -223,6 +218,29 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
+              
+  CreateClaimFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: claims.modify_claims.lambda_handler  # ✅ Dedicated CRUD handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - AWSLambdaDynamoDBExecutionRole  # ✅ Full CRUD permissions for claims
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem  # ✅ Create claims
+              - dynamodb:GetItem  # ✅ Read claims
+              - dynamodb:UpdateItem  # ✅ Modify claims
+              - dynamodb:DeleteItem  # ✅ Remove claims
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}"
+      Environment:
+        Variables:
+          CLAIMS_TABLE: !Ref ClaimsTable
+      Events:
         CreateClaimAPI:
           Type: Api
           Properties:
