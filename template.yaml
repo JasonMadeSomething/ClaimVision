@@ -63,6 +63,10 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  ClaimVisionBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "claimvision-files-${AWS::AccountId}"
 
   UserPoolId:
     Type: AWS::SSM::Parameter
@@ -322,7 +326,32 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
-
+  UploadFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.upload_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}/*"
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref ClaimVisionBucket
+      Events:
+        UploadFileAPI:
+          Type: Api
+          Properties:
+            Path: /files/upload
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+              
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
