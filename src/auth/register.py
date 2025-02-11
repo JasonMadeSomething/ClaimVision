@@ -43,7 +43,7 @@ def lambda_handler(event, context):
         logger.info("User registration successful")
 
         return {
-            "statusCode": 200,
+            "statusCode": 201,
             "body": json.dumps({"message": "User registered successfully. Please confirm your email."})
         }
 
