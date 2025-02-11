@@ -42,6 +42,8 @@ Globals:
 
 Resources:
 
+  ####Tables####
+  # Claims
   ClaimsTable:
     Type: AWS::DynamoDB::Table
     Properties:
@@ -63,11 +65,36 @@ Resources:
           Projection:
             ProjectionType: ALL
 
+  # Files
+  FilesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "FilesTable-${Env}"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: S
+        - AttributeName: user_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: user_id
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  ###S3###
+  # Files Bucket
   ClaimVisionBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "claimvision-files-${AWS::AccountId}"
+      BucketName: !Sub "claimvision-files-${AWS::AccountId}-${Env}"
 
+  # User Pool ID
   UserPoolId:
     Type: AWS::SSM::Parameter
     Properties:
@@ -76,8 +103,8 @@ Resources:
       Value: !ImportValue
         Fn::FindInMap: [CognitoExports, !Ref Env, UserPoolId]
 
-
-  # API Gateway (Now Includes Cognito Authorizer)
+  ###API###
+  # API Gateway
   ClaimVisionAPI:
     Type: AWS::Serverless::Api
     Properties:
@@ -94,6 +121,9 @@ Resources:
             UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
             IdentitySource: method.request.header.Authorization
 
+  ###Lambdas###
+  ##Auth##
+  # Login Function
   LoginFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -110,7 +140,7 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI # No Auth here!
 
-
+  # Register Function
   RegisterFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -126,7 +156,7 @@ Resources:
             Path: /auth/register
             Method: POST
             RestApiId: !Ref ClaimVisionAPI 
-
+  # Confirm Email
   ConfirmFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -142,7 +172,7 @@ Resources:
             Path: /auth/confirm
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-  
+  # Resend Email Verification
   ResendConfirmationFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -158,8 +188,8 @@ Resources:
             Path: /auth/resend-confirmation
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-
-    PreSignUpFunction:
+  # Dev bypass email verification
+  PreSignUpFunction:
     Type: AWS::Serverless::Function
     Condition: IsDev
     Properties:
@@ -169,26 +199,7 @@ Resources:
       Policies:
         - AWSLambdaBasicExecutionRole
 
-
-  # Secure API Route (/items) with Cognito Authorizer
-  GetItemsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: items.get_items.lambda_handler
-      Runtime: python3.12
-      CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-      Events:
-        GetItemsAPI:
-          Type: Api
-          Properties:
-            Path: /items
-            Method: GET
-            RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: CognitoAuthorizer
-
+  # Get Claims Function
   GetClaimsFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -225,8 +236,9 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-
-  CreateClaimFunction:
+  
+  # Claims CRUD Function
+  ModifyClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: claims.modify_claims.lambda_handler  # ✅ Dedicated CRUD handler
@@ -272,7 +284,10 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-    GetUsersFunction:
+
+  ##Admin##
+  # Get Users Function
+  GetUsersFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: admin.get_users.lambda_handler
@@ -298,34 +313,36 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-              
+    # Update User Role Function      
     UpdateUserRoleFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: admin.update_user_role.lambda_handler
-      Runtime: python3.12
-      CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - Statement:
-            Effect: Allow
-            Action:
-              - cognito-idp:AdminAddUserToGroup
-              - cognito-idp:AdminRemoveUserFromGroup
-            Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
-      Events:
-        UpdateUserRoleAPI:
-          Type: Api
-          Properties:
-            Path: /admin/users/{username}/role
-            Method: PUT
-            RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: CognitoAuthorizer
+      Type: AWS::Serverless::Function
+      Properties:
+        Handler: admin.update_user_role.lambda_handler
+        Runtime: python3.12
+        CodeUri: src/
+        Policies:
+          - AWSLambdaBasicExecutionRole
+          - Statement:
+              Effect: Allow
+              Action:
+                - cognito-idp:AdminAddUserToGroup
+                - cognito-idp:AdminRemoveUserFromGroup
+              Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+        Environment:
+          Variables:
+            COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+        Events:
+          UpdateUserRoleAPI:
+            Type: Api
+            Properties:
+              Path: /admin/users/{username}/role
+              Method: PUT
+              RestApiId: !Ref ClaimVisionAPI
+              Auth:
+                Authorizer: CognitoAuthorizer
 
+  ##Files##
+  # Upload File Function
   UploadFileFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -351,9 +368,82 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-              
+
+  # Get Files Function
+  GetFilesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.get_files.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:Query  # List user's files
+              - dynamodb:GetItem  # Fetch file details
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex"
+    Events:
+      GetFilesAPI:
+        Type: Api
+        Properties:
+          Path: /files
+          Method: GET
+          RestApiId: !Ref ClaimVisionAPI
+          Auth:
+            Authorizer: CognitoAuthorizer
+      GetFileAPI:
+        Type: Api
+        Properties:
+          Path: /files/{id}
+          Method: GET
+          RestApiId: !Ref ClaimVisionAPI
+          Auth:
+            Authorizer: CognitoAuthorizer
+  # Get File Function
+  GetFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.get_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:Query  # List user's files
+              - dynamodb:GetItem  # Fetch file details
+            Resource:
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex"
+    Events:
+      GetFilesAPI:
+        Type: Api
+        Properties:
+          Path: /files
+          Method: GET
+          RestApiId: !Ref ClaimVisionAPI
+          Auth:
+            Authorizer: CognitoAuthorizer
+      GetFileAPI:
+        Type: Api
+        Properties:
+          Path: /files/{id}
+          Method: GET
+          RestApiId: !Ref ClaimVisionAPI
+          Auth:
+            Authorizer: CognitoAuthorizer    
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
     Description: API Gateway Invoke URL
     Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
+  ClaimVisionBucketName:
+    Description: "The S3 Bucket for storing claim-related files"
+    Value: !Ref ClaimVisionBucket
+    Export:
+      Name: "ClaimVisionBucketName"
