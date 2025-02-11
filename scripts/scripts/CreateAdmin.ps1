@@ -3,53 +3,72 @@ $payloadPath = "$PSScriptRoot\..\payloads\admin_user.json"
 $payload = Get-Content -Raw -Path $payloadPath | ConvertFrom-Json
 
 $baseUrl = $payload.BaseUrl
-$UserPoolId = $payload.UserPoolId
 $Username = $payload.Username
 $Password = $payload.Password
 $Email = $payload.Email
 $GroupName = $payload.GroupName
 
-Write-Host "Base API URL: $baseUrl"
+Write-Host "Starting test setup for admin user: $Username"
 
-# ✅ Step 1: Cleanup before running the test
+# ✅ Step 1: Cleanup Before Running Test (AWS CLI)
 Write-Host "Cleaning up existing admin users before test..."
-aws cognito-idp admin-delete-user --user-pool-id $UserPoolId --username $Username --no-cli-pager 2>$null
+aws cognito-idp admin-delete-user --user-pool-id $payload.UserPoolId --username $Username --no-cli-pager 2>$null
 
-# ✅ Step 2: Create Admin User (Setup)
+# ✅ Step 2: Create Admin User via API
 try {
-    Write-Host "Creating test admin user: $Username"
-    aws cognito-idp admin-create-user --user-pool-id $UserPoolId --username $Username `
-        --user-attributes Name="email",Value="$Email" Name="email_verified",Value="true" `
-        --message-action SUPPRESS
+    Write-Host "Creating admin user via API..."
+    $body = @{
+        username = $Username
+        password = $Password
+        email    = $Email
+    } | ConvertTo-Json -Compress
 
-    Write-Host "Setting password for test admin user: $Username"
-    aws cognito-idp admin-set-user-password --user-pool-id $UserPoolId --username $Username `
-        --password $Password --permanent
+    $registerResponse = Invoke-WebRequest -Uri "$baseUrl/auth/register" `
+        -Method Post `
+        -Headers @{"Content-Type"="application/json"} `
+        -Body $body `
+        -UseBasicParsing
 
-    Write-Host "Adding user to the admin group"
-    aws cognito-idp admin-add-user-to-group --user-pool-id $UserPoolId --username $Username --group-name $GroupName
+    if ($registerResponse.StatusCode -ne 201) {
+        throw "Failed to create user. Status Code: $($registerResponse.StatusCode)"
+    }
 
-    Start-Sleep -Seconds 5  # Ensures Cognito user creation has propagated
-
+    Write-Host "User registered successfully"
+    
 } catch {
-    Write-Host "ERROR: Failed to create admin user. Running cleanup..."
-    aws cognito-idp admin-delete-user --user-pool-id $UserPoolId --username $Username --no-cli-pager
+    Write-Host "ERROR: $_. Running cleanup..."
+    aws cognito-idp admin-delete-user --user-pool-id $payload.UserPoolId --username $Username --no-cli-pager 2>$null
     exit 1
 }
 
-# ✅ Step 3: Authenticate Admin and Retrieve Token
+# ✅ Step 3: Confirm User using AWS CLI (since confirmation code is not available via API)
 try {
-    $response = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
+    Write-Host "Confirming admin user using AWS CLI..."
+    
+    aws cognito-idp admin-confirm-sign-up --user-pool-id $payload.UserPoolId --username $Username --no-cli-pager
+
+    Write-Host "User confirmed successfully"
+
+} catch {
+    Write-Host "ERROR: $_. Running cleanup..."
+    aws cognito-idp admin-delete-user --user-pool-id $payload.UserPoolId --username $Username --no-cli-pager 2>$null
+    exit 1
+}
+
+
+# ✅ Step 4: Authenticate Admin and Retrieve Token via API
+try {
+    Write-Host "Authenticating admin user..."
+    $loginBody = @{ username = $Username; password = $Password } | ConvertTo-Json -Compress
+
+    $authResponse = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
         -Method Post `
         -Headers @{"Content-Type"="application/json"} `
-        -Body (ConvertTo-Json -Compress -Depth 2 @{
-            username = $Username
-            password = $Password
-        }) `
+        -Body $loginBody `
         -UseBasicParsing
 
     # Extract access token
-    $token = ($response.Content | ConvertFrom-Json).id_token
+    $token = ($authResponse.Content | ConvertFrom-Json).id_token
 
     if (-not $token) {
         throw "Failed to retrieve access token!"
@@ -58,42 +77,51 @@ try {
     Write-Host "Access token retrieved successfully"
 
 } catch {
-    Write-Host "ERROR: Failed to authenticate admin user. Running cleanup..."
-    aws cognito-idp admin-delete-user --user-pool-id $UserPoolId --username $Username --no-cli-pager
+    Write-Host "ERROR: $_. Running cleanup..."
+    aws cognito-idp admin-delete-user --user-pool-id $payload.UserPoolId --username $Username --no-cli-pager 2>$null
+    exit 1
+}
+Write-Host "Raw API Response: $($response.Content)"
+
+
+# ✅ Step 5: Assign Admin Role via API
+# Validate and Format the Token
+if (-not $token -or $token -eq "") {
+    Write-Host "ERROR: Access token is empty or null."
     exit 1
 }
 
-# ✅ Step 4: Assign Admin Role via API
+# Debug: Print first 50 chars of token for validation
+Write-Host "Retrieved Token (First 50 chars): $($token.Substring(0, [Math]::Min(50, $token.Length)))"
+
+# Ensure Proper Authorization Header Formatting
 $headers = @{
-    "Authorization" = "Bearer $token"
+    "Authorization" = ("Bearer " + $token).Trim()
     "Content-Type"  = "application/json"
 }
 
 $roleAssignmentUrl = "$baseUrl/admin/users/$Username/role"
 
 try {
-    Write-Host "Assigning admin role to user via API: $roleAssignmentUrl"
-    $body = @{ action = "add"; role = "admin" } | ConvertTo-Json -Compress
+    Write-Host "Assigning admin role via API..."
+    $roleBody = @{ action = "add"; role = $groupName } | ConvertTo-Json -Compress
 
     $roleResponse = Invoke-WebRequest -Uri $roleAssignmentUrl `
         -Method Put `
         -Headers $headers `
-        -Body $body `
+        -Body $roleBody `
         -UseBasicParsing
+
+    if ($roleResponse.StatusCode -ne 200) {
+        throw "Failed to assign admin role. Status Code: $($roleResponse.StatusCode)"
+    }
 
     Write-Host "Admin role assigned successfully"
 
 } catch {
-    Write-Host "ERROR: Failed to assign admin role. Running cleanup..."
-    aws cognito-idp admin-delete-user --user-pool-id $UserPoolId --username $Username --no-cli-pager
+    Write-Host "ERROR: $_. Running cleanup..."
+    aws cognito-idp admin-delete-user --user-pool-id $payload.UserPoolId --username $Username --no-cli-pager 2>$null
     exit 1
 }
 
-# ✅ Step 5: Cleanup after the test (Optional: Can be skipped if the user should persist)
-try {
-    Write-Host "Cleaning up test admin user..."
-    aws cognito-idp admin-delete-user --user-pool-id $UserPoolId --username $Username --no-cli-pager
-    Write-Host "Test completed successfully"
-} catch {
-    Write-Host "WARNING: Failed to clean up test admin user."
-}
+Write-Host "Admin user setup complete!"
