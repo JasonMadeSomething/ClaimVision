@@ -73,3 +73,6 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Payloads
+scripts/payloads/
