@@ -4,7 +4,7 @@ from datetime import datetime
 from claims.model import Claim
 
 dynamodb = boto3.resource("dynamodb")
-claims_table = dynamodb.Table("ClaimsTable-dev")  # Update for your environment
+claims_table = dynamodb.Table(os.environ["CLAIMS_TABLE"])  # Update for your environment
 
 def lambda_handler(event, context):
     """Handle retrieving claims for a user with optional filtering by date range."""
