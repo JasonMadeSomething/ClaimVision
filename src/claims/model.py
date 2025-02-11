@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field, field_validator
 from datetime import date
 from typing import Optional
-
+#Claim Model
 class Claim(BaseModel):
     id: Optional[str] = None  # Auto-generated UUID
     user_id: str

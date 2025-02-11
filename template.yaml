@@ -85,7 +85,7 @@ Resources:
           CognitoAuthorizer:
             UserPoolId: !Ref UserPoolId
             UserPoolArn: !Join ["", ["arn:aws:cognito-idp:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":userpool/", !Ref UserPoolId]]
-
+            IdentitySource: method.request.header.Authorization
 
   LoginFunction:
     Type: AWS::Serverless::Function
@@ -218,7 +218,7 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-              
+
   CreateClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
