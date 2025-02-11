@@ -9,6 +9,9 @@ Parameters:
       - dev
       - prod
     Description: 'Specify the environment: dev or prod'
+  CognitoUserPoolId:
+    Type: String
+    Description: "The Cognito User Pool ID from the external stack"
 
 Conditions:
   IsDev: !Equals [!Ref Env, "dev"]
@@ -83,8 +86,8 @@ Resources:
       Auth:
         Authorizers:
           CognitoAuthorizer:
-            UserPoolId: !Ref UserPoolId
-            UserPoolArn: !Join ["", ["arn:aws:cognito-idp:", !Ref "AWS::Region", ":", !Ref "AWS::AccountId", ":userpool/", !Ref UserPoolId]]
+            UserPoolId: !Ref CognitoUserPoolId
+            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
             IdentitySource: method.request.header.Authorization
 
   LoginFunction:
@@ -265,6 +268,34 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
+    GetUsersFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: admin.get_users.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:ListUsers  # ✅ Allow listing users in Cognito
+            Resource: 
+              - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId  # ✅ Fix reference issue
+      Events:
+        GetUsersAPI:
+          Type: Api
+          Properties:
+            Path: /admin/users
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
