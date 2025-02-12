@@ -1,0 +1,20 @@
+{
+    "base_url": "",
+    "username": "testuser",
+    "password": "Password123!",
+    "files": [
+        {
+            "name": "dog.jpg",
+            "path": "../images/dog.jpg"
+        },
+        {
+            "name": "outlet.jpg",
+            "path": "../images/outlet.jpg"
+        },
+        {
+            "name": "spoon.jpg",
+            "path": "../images/spoon.jpg"
+        }
+    ],
+    "user_pool_id": "us-east-1_5i1XCKqjU"
+}

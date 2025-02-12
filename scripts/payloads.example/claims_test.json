@@ -1,0 +1,16 @@
+{
+    "BaseUrl": "",
+    "Username": "testuser",
+    "Password": "Password123!",
+    "ClaimData": {
+      "title": "Test Claim",
+      "description": "This is a test claim",
+      "loss_date": "2025-02-10"
+    },
+    "UpdatedClaimData": {
+      "title": "Updated Test Claim",
+      "description": "Updated claim description",
+      "loss_date": "2025-02-15"
+    }
+  }
+  
