@@ -1,0 +1,9 @@
+{
+    "UserPoolId": "",
+    "Username": "adminuser",
+    "Password": "AdminPassword123!",
+    "Email": "admin@example.com",
+    "GroupName": "admin",
+    "BaseUrl": ""
+  }
+  

@@ -314,34 +314,34 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
     # Update User Role Function      
-    UpdateUserRoleFunction:
-      Type: AWS::Serverless::Function
-      Properties:
-        Handler: admin.update_user_role.lambda_handler
-        Runtime: python3.12
-        CodeUri: src/
-        Policies:
-          - AWSLambdaBasicExecutionRole
-          - Statement:
-              Effect: Allow
-              Action:
-                - cognito-idp:AdminAddUserToGroup
-                - cognito-idp:AdminRemoveUserFromGroup
-              Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
-        Environment:
-          Variables:
-            COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
-        Events:
-          UpdateUserRoleAPI:
-            Type: Api
-            Properties:
-              Path: /admin/users/{username}/role
-              Method: PUT
-              RestApiId: !Ref ClaimVisionAPI
-              Auth:
-                Authorizer: CognitoAuthorizer
+  UpdateUserRoleFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: admin.update_user_role.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:AdminAddUserToGroup
+              - cognito-idp:AdminRemoveUserFromGroup
+            Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+      Environment:
+        Variables:
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+      Events:
+        UpdateUserRoleAPI:
+          Type: Api
+          Properties:
+            Path: /admin/users/{username}/role
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
 
-  ##Files##
+##Files##
   # Upload File Function
   UploadFileFunction:
     Type: AWS::Serverless::Function
@@ -355,10 +355,16 @@ Resources:
             Effect: Allow
             Action:
               - s3:PutObject
-            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}/*"
+            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:PutItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
       Environment:
         Variables:
           S3_BUCKET_NAME: !Ref ClaimVisionBucket
+          FILES_TABLE: !Ref FilesTable
       Events:
         UploadFileAPI:
           Type: Api
@@ -369,7 +375,7 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
-  # Get Files Function
+  # Get Files Function (Paginated)
   GetFilesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -381,29 +387,22 @@ Resources:
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:Query  # List user's files
-              - dynamodb:GetItem  # Fetch file details
-            Resource:
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex"
-    Events:
-      GetFilesAPI:
-        Type: Api
-        Properties:
-          Path: /files
-          Method: GET
-          RestApiId: !Ref ClaimVisionAPI
-          Auth:
-            Authorizer: CognitoAuthorizer
-      GetFileAPI:
-        Type: Api
-        Properties:
-          Path: /files/{id}
-          Method: GET
-          RestApiId: !Ref ClaimVisionAPI
-          Auth:
-            Authorizer: CognitoAuthorizer
-  # Get File Function
+              - dynamodb:Query
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex"
+      Environment:
+        Variables:
+          FILES_TABLE: !Ref FilesTable
+      Events:
+        GetFilesAPI:
+          Type: Api
+          Properties:
+            Path: /files
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Get Single File Metadata Function
   GetFileFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -415,28 +414,119 @@ Resources:
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:Query  # List user's files
-              - dynamodb:GetItem  # Fetch file details
-            Resource:
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex"
-    Events:
-      GetFilesAPI:
-        Type: Api
-        Properties:
-          Path: /files
-          Method: GET
-          RestApiId: !Ref ClaimVisionAPI
-          Auth:
-            Authorizer: CognitoAuthorizer
-      GetFileAPI:
-        Type: Api
-        Properties:
-          Path: /files/{id}
-          Method: GET
-          RestApiId: !Ref ClaimVisionAPI
-          Auth:
-            Authorizer: CognitoAuthorizer    
+              - dynamodb:GetItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+      Environment:
+        Variables:
+          FILES_TABLE: !Ref FilesTable
+      Events:
+        GetFileAPI:
+          Type: Api
+          Properties:
+            Path: /files/{id}
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Update File Metadata Function (PATCH)
+  UpdateFileMetadataFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.update_file_metadata.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:UpdateItem
+              - dynamodb:GetItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+      Environment:
+        Variables:
+          FILES_TABLE: !Ref FilesTable
+      Events:
+        UpdateFileMetadataAPI:
+          Type: Api
+          Properties:
+            Path: /files/{id}
+            Method: PATCH
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Replace File Function (PUT)
+  ReplaceFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.replace_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:PutObject
+            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:UpdateItem
+              - dynamodb:GetItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+      Environment:
+        Variables:
+          FILES_TABLE: !Ref FilesTable
+          S3_BUCKET_NAME: !Ref ClaimVisionBucket
+      Events:
+        ReplaceFileAPI:
+          Type: Api
+          Properties:
+            Path: /files/{id}
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Delete File Function
+  DeleteFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.delete_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - s3:GetObject
+              - s3:DeleteObject
+            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+        - Statement:
+            Effect: Allow
+            Action:
+              - dynamodb:GetItem
+              - dynamodb:DeleteItem
+            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+      Environment:
+        Variables:
+          FILES_TABLE: !Ref FilesTable
+          S3_BUCKET_NAME: !Ref ClaimVisionBucket
+      Events:
+        DeleteFileAPI:
+          Type: Api
+          Properties:
+            Path: /files/{id}
+            Method: DELETE
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:

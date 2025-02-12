@@ -1,0 +1,16 @@
+{
+    "UserPoolId": "",
+    "AdminUser": {
+      "Username": "adminuser",
+      "Password": "AdminPassword123!",
+      "Email": "admin@example.com",
+      "Group": "admin"
+    },
+    "TestUser": {
+      "Username": "testuser",
+      "Password": "Password123!",
+      "Email": "testuser@example.com"
+    },
+    "S3Bucket": ""
+  }
+  

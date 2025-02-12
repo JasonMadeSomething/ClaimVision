@@ -8,8 +8,8 @@ $password = $payload.Password
 $filePath = $payload.FilePath
 $fileName = $payload.FileName
 
-Write-Host "🌍 Base API URL: $baseUrl"
-Write-Host "📂 Uploading File: $fileName from $filePath"
+Write-Host "Base API URL: $baseUrl"
+Write-Host "Uploading File: $fileName from $filePath"
 
 # Step 1: Authenticate and retrieve token
 $response = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
@@ -22,15 +22,15 @@ $token = ($response.Content | ConvertFrom-Json).id_token
 
 # Debug: Ensure token is retrieved
 if (-not $token) {
-    Write-Host "❌ ERROR: Access token is null or empty!"
+    Write-Host "ERROR: Access token is null or empty!"
     exit 1
 }
 
-Write-Host "🔑 Retrieved Access Token"
+Write-Host "Retrieved Access Token"
 
 # Step 2: Read file and encode in base64
 if (-Not (Test-Path $filePath)) {
-    Write-Host "❌ ERROR: File '$filePath' not found!"
+    Write-Host "ERROR: File '$filePath' not found!"
     exit 1
 }
 
@@ -56,7 +56,7 @@ try {
         -Body $body `
         -UseBasicParsing
 
-    Write-Host "✅ Upload Successful! Response: $($response.Content)"
+    Write-Host "Upload Successful! Response: $($response.Content)"
 } catch {
-    Write-Host "❌ Upload Failed: $($_.Exception.Message)"
+    Write-Host "ERROR: Upload Failed: $($_.Exception.Message)"
 }

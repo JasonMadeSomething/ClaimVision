@@ -1,0 +1,8 @@
+{
+    "BaseUrl": "",
+    "AdminUsername": "adminuser",
+    "AdminPassword": "AdminPassword123!",
+    "UserToModify": "testuser",
+    "Role": "admin"
+  }
+  

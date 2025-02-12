@@ -1,112 +1,178 @@
-# Define path to payload file
-$payloadFile = "$PSScriptRoot\..\payloads\files_payload.json"
+# Load API details and test files from payload file
+$payloadPath = "$PSScriptRoot\..\payloads\file_test.json"
+$payload = Get-Content -Raw -Path $payloadPath | ConvertFrom-Json
 
-# Load payload data
-$payload = Get-Content -Raw -Path $payloadFile | ConvertFrom-Json
-
-# Extract values from payload
 $baseUrl = $payload.base_url
-$username = $payload.username
-$password = $payload.password
-$files = $payload.files  # Array of file objects with paths & names
+$files = $payload.files
+$UserPoolId = $payload.user_pool_id
+$Username = $payload.username
+$Password =  $payload.password
 
-# Authenticate and retrieve the token
-$loginResponse = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
-    -Method Post `
-    -Headers @{"Content-Type"="application/json"} `
-    -Body (@{username=$username; password=$password} | ConvertTo-Json -Compress) `
-    -UseBasicParsing
+Write-Host "Creating test user: $Username"
 
-$token = ($loginResponse.Content | ConvertFrom-Json).id_token
-Write-Output "✅ Authentication successful!"
+# Step 1: Create user
+aws cognito-idp admin-create-user `
+    --user-pool-id $UserPoolId `
+    --username $Username `
+    --user-attributes Name="email",Value="$Username@example.com" Name="email_verified",Value="true" `
+    --message-action SUPPRESS > $null
 
-# Define headers for API requests
-$headers = @{
-    "Authorization" = "Bearer $token"
-    "Content-Type"  = "application/json"
+# Step 2: Set password
+aws cognito-idp admin-set-user-password `
+    --user-pool-id $UserPoolId `
+    --username $Username `
+    --password $Password `
+    --permanent
+
+Write-Host "User $Username created and password set."
+
+# ✅ Step 1: Authenticate User and Retrieve Token
+try {
+    Write-Host "Authenticating user..."
+    $loginResponse = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
+        -Method Post `
+        -Headers @{"Content-Type"="application/json"} `
+        -Body (@{username=$username; password=$password} | ConvertTo-Json -Compress) `
+        -UseBasicParsing
+
+    $token = ($loginResponse.Content | ConvertFrom-Json).id_token
+    if (-not $token) {
+        throw "Failed to retrieve access token!"
+    }
+
+    Write-Host "Access token retrieved successfully."
+} catch {
+    Write-Host "ERROR: $_"
+    exit 1
 }
 
-# Function to convert a file to Base64
-function Convert-FileToBase64($filePath) {
-    return [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($filePath))
-}
+# ✅ Step 2: Upload Multiple Files in One Request
+try {
+    Write-Host "Uploading files..."
+    $filePayload = @()
 
-# List to track uploaded file IDs
-$uploadedFileIds = @()
+    foreach ($file in $files) {
+        $filePath = "$PSScriptRoot\$($file.path)"
+        if (-Not (Test-Path $filePath)) {
+            Write-Host "WARNING: File not found -> $filePath. Skipping..."
+            continue
+        }
 
-# 1️⃣ Upload a Single File
-$singleFile = $files[0]  # First file from payload
-$singleFileData = @{
-    file_name = $singleFile.name
-    file_data = Convert-FileToBase64 -filePath $singleFile.path
-} | ConvertTo-Json -Compress -Depth 2
+        $fileData = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($filePath))
+        $filePayload += @{ file_name = $file.name; file_data = $fileData }
+    }
 
-$singleUploadResponse = Invoke-WebRequest -Uri "$baseUrl/files/upload" `
-    -Method POST `
-    -Headers $headers `
-    -Body $singleFileData `
-    -UseBasicParsing
-
-$singleFileId = ($singleUploadResponse.Content | ConvertFrom-Json).file_id
-$uploadedFileIds += $singleFileId
-Write-Output "✅ Single file uploaded: $singleFileId"
-
-# 2️⃣ Upload Multiple Files
-foreach ($file in $files[1..($files.Length - 1)]) {
-    $fileData = @{
-        file_name = $file.name
-        file_data = Convert-FileToBase64 -filePath $file.path
-    } | ConvertTo-Json -Compress -Depth 2
+    $uploadBody = @{ files = $filePayload } | ConvertTo-Json -Depth 3 -Compress
+    $uploadHeaders = @{
+        "Authorization" = "Bearer $token"
+        "Content-Type"  = "application/json"
+    }
 
     $uploadResponse = Invoke-WebRequest -Uri "$baseUrl/files/upload" `
         -Method POST `
-        -Headers $headers `
-        -Body $fileData `
+        -Headers $uploadHeaders `
+        -Body $uploadBody `
         -UseBasicParsing
 
-    $fileId = ($uploadResponse.Content | ConvertFrom-Json).file_id
-    $uploadedFileIds += $fileId
-    Write-Output "✅ File uploaded: $fileId"
+    $uploadedFiles = ($uploadResponse.Content | ConvertFrom-Json).files
+    Write-Host "Files uploaded successfully: $($uploadedFiles | ConvertTo-Json -Depth 3)"
+
+} catch {
+    Write-Host "ERROR: $_"
+    exit 1
 }
 
-# 3️⃣ Get All Files
-$getAllResponse = Invoke-WebRequest -Uri "$baseUrl/files" `
-    -Method GET `
-    -Headers $headers `
-    -UseBasicParsing
-
-$allFiles = $getAllResponse.Content | ConvertFrom-Json
-Write-Output "📂 Retrieved all files: $($allFiles | ConvertTo-Json -Depth 3)"
-
-# 4️⃣ Get a Single File’s Metadata
-$getSingleResponse = Invoke-WebRequest -Uri "$baseUrl/files/$singleFileId" `
-    -Method GET `
-    -Headers $headers `
-    -UseBasicParsing
-
-Write-Output "📄 Single file metadata: $($getSingleResponse.Content)"
-
-# 5️⃣ Update a File’s Metadata
-$updateFileData = @{
-    description = "Updated file description"
-} | ConvertTo-Json -Compress
-
-$updateResponse = Invoke-WebRequest -Uri "$baseUrl/files/$singleFileId" `
-    -Method PUT `
-    -Headers $headers `
-    -Body $updateFileData `
-    -UseBasicParsing
-
-Write-Output "✏ File metadata updated: $($updateResponse.Content)"
-
-# 6️⃣ Delete Each Uploaded File
-foreach ($fileId in $uploadedFileIds) {
-    $deleteResponse = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
-        -Method DELETE `
-        -Headers $headers `
+# ✅ Step 3: Verify Files Were Uploaded
+try {
+    Write-Host "Retrieving uploaded files..."
+    $getFilesResponse = Invoke-WebRequest -Uri "$baseUrl/files" `
+        -Method GET `
+        -Headers $uploadHeaders `
         -UseBasicParsing
 
-    Write-Output "🗑 File deleted: $fileId"
+    $retrievedFiles = ($getFilesResponse.Content | ConvertFrom-Json)
+    Write-Host "Retrieved files: $($retrievedFiles | ConvertTo-Json -Depth 3)"
+
+} catch {
+    Write-Host "ERROR: $_"
+    exit 1
 }
 
-Write-Output "✅ File CRUD test completed successfully!"
+# ✅ Step 4: Update Metadata via PATCH
+try {
+    Write-Host "Updating metadata for uploaded files..."
+    foreach ($file in $uploadedFiles) {
+        $fileId = $file.file_id
+        $metadataUpdate = @{
+            description = "Updated description for $($file.file_name)"
+            labels = @("updated-label-1", "updated-label-2")
+        }
+
+        $response = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
+            -Method PATCH `
+            -Headers $uploadHeaders `
+            -Body ($metadataUpdate | ConvertTo-Json -Depth 3 -Compress) `
+            -UseBasicParsing
+
+        $updatedFile = ($response.Content | ConvertFrom-Json)
+        Write-Host "Metadata for $($updatedFile.file_name) updated successfully."
+    }
+    Write-Host "Metadata updated successfully."
+} catch {
+    Write-Host "ERROR: $_"
+}
+
+# ✅ Step 5: Replace File via PUT
+try {
+    Write-Host "Replacing uploaded files..."
+    foreach ($file in $uploadedFiles) {
+        $fileId = $file.file_id
+        $newFilePath = Join-Path -Path $PSScriptRoot -ChildPath $files[0].path
+
+        if (-Not (Test-Path $newFilePath)) {
+            Write-Host "WARNING: Replacement file not found -> $newFilePath. Skipping..."
+            continue
+        }
+
+        $newFileData = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($newFilePath))
+        $replacePayload = @{ file_name = $file.file_name; file_data = $newFileData }
+
+        $response = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
+            -Method PUT `
+            -Headers $uploadHeaders `
+            -Body ($replacePayload | ConvertTo-Json -Depth 3 -Compress) `
+            -UseBasicParsing
+
+        $replacedFile = ($response.Content | ConvertFrom-Json)
+        Write-Host "File replaced successfully: $($replacedFile.file_name)"
+    }
+
+    Write-Host "Files replaced successfully."
+} catch {
+    Write-Host "ERROR: $_"
+}
+
+# ✅ Step 6: Cleanup - Delete Uploaded Files
+try {
+    Write-Host "Cleaning up uploaded files..."
+    foreach ($file in $uploadedFiles) {
+        $fileId = $file.file_id
+        Write-Host "Deleting file: $fileId"
+
+        $response = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
+            -Method DELETE `
+            -Headers $uploadHeaders `
+            -UseBasicParsing
+
+        $deletedFile = ($response.Content | ConvertFrom-Json)
+        Write-Host "File deleted successfully: $($deletedFile.file_name)."
+    }
+
+    Write-Host "Cleanup complete. All uploaded files deleted."
+} catch {
+    Write-Host "ERROR: $_"
+} finally {
+    aws cognito-idp admin-delete-user --user-pool-id $userpool --username $username
+}
+
+Write-Host "File upload test completed successfully."
