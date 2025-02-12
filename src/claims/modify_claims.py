@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, date
 from botocore.exceptions import ClientError
 from .model import Claim  # ✅ Import the Claim model
+from ..utils import response as response
 
 # DynamoDB setup
 dynamodb = boto3.resource("dynamodb")
@@ -24,7 +25,7 @@ def lambda_handler(event, context):
         claim_id = event["pathParameters"]["id"]
         return delete_claim(user_id, claim_id)
     else:
-        return {"statusCode": 405, "body": json.dumps({"error": "Method Not Allowed"})}
+        return response.api_response(405, message="Method Not Allowed")
 
 def create_claim(user_id, body):
     """Create a new claim with validation"""
@@ -46,12 +47,16 @@ def create_claim(user_id, body):
         )
 
         claims_table.put_item(Item=claim.to_dynamodb_dict())
-        return {"statusCode": 201, "body": json.dumps({"id": claim.id})}
+        return response.api_response(201, data={"id": claim.id})
 
     except ValueError as e:
-        return {"statusCode": 400, "body": json.dumps({"error": str(e)})}
+        return response.api_response(400, message="Bad Request", error_details=str(e))
     except ClientError as e:
-        return {"statusCode": 500, "body": json.dumps({"error": e.response['Error']['Message']})}
+        return response.api_response(
+            500,
+            message="Internal Server Error",
+            error_details=e.response['Error']['Message']
+        )
 
 def update_claim(user_id, claim_id, body):
     """Update an existing claim"""
@@ -59,31 +64,35 @@ def update_claim(user_id, claim_id, body):
     claim_data = response.get("Item")
 
     if not claim_data or claim_data["user_id"] != user_id:
-        return {"statusCode": 403, "body": json.dumps({"error": "Unauthorized"})}
+        return response.api_response(403, message="Unauthorized")
 
     try:
         update_data = json.loads(body)
         claim = Claim(**{**claim_data, **update_data})
 
         claims_table.put_item(Item=claim.to_dynamodb_dict())
-        return {"statusCode": 200, "body": json.dumps({"message": "Claim updated"})}
+        return response.api_response(200, data={"message": "Claim updated"})
     
     except ValueError as e:
-        return {"statusCode": 400, "body": json.dumps({"error": str(e)})}  
+        return response.api_response(400, message="Bad Request", error_details=str(e))
     except ClientError as e:
-        return {"statusCode": 500, "body": json.dumps({"error": e.response['Error']['Message']})}
+        return response.api_response(
+            500,
+            message="Internal Server Error",
+            error_details=e.response['Error']['Message']
+        )
 
 def delete_claim(user_id, claim_id):
     """Delete a claim"""
-    response = claims_table.get_item(Key={"id": claim_id})
-    claim_data = response.get("Item")
+    claim_response = claims_table.get_item(Key={"id": claim_id})
+    claim_data = claim_response.get("Item")
 
     if not claim_data or claim_data["user_id"] != user_id:
-        return {"statusCode": 403, "body": json.dumps({"error": "Unauthorized"})}
+        return response.api_response(403, message="Unauthorized")
 
     try:
         claims_table.delete_item(Key={"id": claim_id})
-        return {"statusCode": 200, "body": json.dumps({"message": "Claim deleted"})}
+        return response.api_response(200, data={"message": "Claim deleted"})
     
     except ClientError as e:
-        return {"statusCode": 500, "body": json.dumps({"error": e.response['Error']['Message']})}
+        return response.api_response(500, message="Internal Server Error", error_details=e.response['Error']['Message'])

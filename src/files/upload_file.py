@@ -6,6 +6,7 @@ import uuid
 import magic  # For file type detection
 from botocore.exceptions import BotoCoreError, ClientError
 from .model import File  # Ensure correct import path
+from ..utils import response as response
 
 s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
@@ -19,14 +20,14 @@ def lambda_handler(event, context):
 
         # Ensure request body exists
         if not event.get("body"):
-            return {"statusCode": 400, "body": json.dumps({"error": "Missing request body"})}
+            return response.api_response(400, message="Missing request body")
 
         body = json.loads(event["body"])
 
         # Validate files field
         files = body.get("files")
         if not files or not isinstance(files, list):
-            return {"statusCode": 400, "body": json.dumps({"error": "Invalid or missing 'files' array"})}
+            return response.api_response(400, message="Invalid or missing 'files' array")
 
         uploaded_files = []
 
@@ -37,10 +38,10 @@ def lambda_handler(event, context):
                 file_data = file.get("file_data")
 
                 if not file_name or not isinstance(file_name, str):
-                    return {"statusCode": 400, "body": json.dumps({"error": "Missing or invalid 'file_name'"})}
+                    return response.api_response(400, message="Missing or invalid 'file_name'")
                 
                 if not file_data or not isinstance(file_data, str):
-                    return {"statusCode": 400, "body": json.dumps({"error": "Missing or invalid 'file_data'"})}
+                    return response.api_response(400, message="Missing or invalid 'file_data'")
 
                 # Decode file
                 decoded_file = base64.b64decode(file_data)
@@ -76,22 +77,13 @@ def lambda_handler(event, context):
                 })
 
             except Exception as file_error:
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({"error": f"Error processing file '{file.get('file_name', 'UNKNOWN')}': {str(file_error)}"})
-                }
+                return response.api_response(400, message=f"Error processing file '{file.get('file_name', 'UNKNOWN')}': {str(file_error)}")
 
-        return {
-            "statusCode": 201,
-            "body": json.dumps({
-                "message": f"{len(uploaded_files)} file(s) uploaded successfully",
-                "files": uploaded_files
-            }),
-        }
+        return response.api_response(201, message=f"{len(uploaded_files)} file(s) uploaded successfully", data=uploaded_files)
 
     except (BotoCoreError, ClientError) as e:
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        return response.api_response(500, message="Internal Server Error", error_details=str(e))
     except json.JSONDecodeError:
-        return {"statusCode": 400, "body": json.dumps({"error": "Invalid JSON payload"})}
+        return response.api_response(400, message="Invalid JSON payload")
     except Exception as e:
-        return {"statusCode": 400, "body": json.dumps({"error": str(e)})}
+        return response.api_response(400, message="Internal Server Error", error_details=str(e))

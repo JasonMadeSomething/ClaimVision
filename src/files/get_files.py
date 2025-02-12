@@ -55,7 +55,8 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"error": "Bad request", "details": str(e)})
-        }
+        return response.api_response(
+            400,
+            message="Bad request",
+            error_details=str(e)
+        )

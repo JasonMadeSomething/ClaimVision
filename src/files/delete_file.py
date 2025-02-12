@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 from botocore.exceptions import BotoCoreError, ClientError
+from ..utils import response as response
 
 s3 = boto3.client("s3")
 dynamodb = boto3.resource("dynamodb")
@@ -16,11 +17,11 @@ def lambda_handler(event, context):
         file_id = event["pathParameters"]["id"]
 
         # Fetch existing file metadata
-        response = files_table.get_item(Key={"id": file_id})
-        file_data = response.get("Item")
+        file_response = files_table.get_item(Key={"id": file_id})
+        file_data = file_response.get("Item")
 
         if not file_data or file_data["user_id"] != user_id:
-            return {"statusCode": 403, "body": json.dumps({"error": "Unauthorized or File Not Found"})}
+            return response.api_response(403, message="Unauthorized or File Not Found")
 
         # Extract file name and S3 key
         file_name = file_data["file_name"]
@@ -32,12 +33,9 @@ def lambda_handler(event, context):
         # Delete metadata from DynamoDB
         files_table.delete_item(Key={"id": file_id})
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"message": "File deleted successfully", "file_id": file_id})
-        }
+        return response.api_response(200, message="File deleted successfully", data={"file_id": file_id})
 
     except (BotoCoreError, ClientError) as e:
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        return response.api_response(500, message="Internal Server Error", error_details=str(e))
     except Exception as e:
-        return {"statusCode": 400, "body": json.dumps({"error": str(e)})}
+        return response.api_response(400, message="Bad Request", error_details=str(e))

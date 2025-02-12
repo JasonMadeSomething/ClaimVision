@@ -1,7 +1,7 @@
 import json
 import boto3
 import os
-
+from ..utils import response as response
 # Initialize Cognito client
 cognito_client = boto3.client('cognito-idp', region_name=os.getenv("AWS_REGION", "us-east-1"))
 
@@ -20,13 +20,15 @@ def lambda_handler(event, context):
         password = body.get("password")
 
         if not username or not password:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": "Username and password are required."})
-            }
+            missing_fields = []
+            if not username:
+                missing_fields.append("username")
+            if not password:
+                missing_fields.append("password")
+            return response.api_response(400, missing_fields=missing_fields)
 
         # Authenticate the user with Cognito
-        response = cognito_client.initiate_auth(
+        cognito_response = cognito_client.initiate_auth(
             ClientId=USER_POOL_CLIENT_ID,
             AuthFlow="USER_PASSWORD_AUTH",
             AuthParameters={
@@ -36,28 +38,22 @@ def lambda_handler(event, context):
         )
 
         # Extract authentication token
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "message": "Login successful",
-                "access_token": response["AuthenticationResult"]["AccessToken"],
-                "id_token": response["AuthenticationResult"]["IdToken"],
-                "refresh_token": response["AuthenticationResult"]["RefreshToken"]
+        return response.api_response(200, message="Login successful", data={
+                "access_token": cognito_response["AuthenticationResult"]["AccessToken"],
+                "id_token": cognito_response["AuthenticationResult"]["IdToken"],
+                "refresh_token": cognito_response["AuthenticationResult"]["RefreshToken"]
             })
-        }
+        
 
     except cognito_client.exceptions.NotAuthorizedException:
         return {
-            "statusCode": 401,
-            "body": json.dumps({"message": "Invalid username or password."})
+            response.api_response(401, message="Invalid username or password")
         }
     except cognito_client.exceptions.UserNotFoundException:
         return {
-            "statusCode": 404,
-            "body": json.dumps({"message": "User does not exist."})
+            response.api_response(404, message="User does not exist.")
         }
     except Exception as e:
         return {
-            "statusCode": 500,
-            "body": json.dumps({"message": "An error occurred", "error": str(e)})
+            response.api_response(500, message="An error occurred", error_details=str(e))
         }

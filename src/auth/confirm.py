@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import logging
+from ..utils import response as response
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -24,12 +25,13 @@ def lambda_handler(event, context):
         body = json.loads(event.get("body", "{}"))
         username = body.get("username")
         confirmation_code = body.get("code")
-
         if not username or not confirmation_code:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": "Username and confirmation code are required."})
-            }
+            missingfields = []
+            if not username:
+                missingfields.append("username")
+            if not confirmation_code:
+                missingfields.append("confirmation_code")
+            return response.api_response(400, missing_fields=missingfields)
 
         # Confirm the user's email
         response = cognito_client.confirm_sign_up(
@@ -40,29 +42,19 @@ def lambda_handler(event, context):
 
         logger.info("User confirmed successfully")
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"message": "User confirmed successfully. You can now log in."})
-        }
+        return response.api_response(200, message="User confirmed successfully. You can now log in.")
 
     except cognito_client.exceptions.CodeMismatchException:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"message": "Invalid confirmation code."})
-        }
+        return response.api_response(400, message="Invalid confirmation code.")
+
     except cognito_client.exceptions.ExpiredCodeException:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"message": "Confirmation code expired. Please request a new one."})
-        }
+        return response.api_response(400, message="Confirmation code expired. Please request a new one.")
+
     except cognito_client.exceptions.UserNotFoundException:
-        return {
-            "statusCode": 404,
-            "body": json.dumps({"message": "User not found."})
-        }
+        return response.api_response(404, message="User not found.")
+
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
         return {
-            "statusCode": 500,
-            "body": json.dumps({"message": "An error occurred", "error": str(e)})
+            response.api_response(500, message="An error occurred", error_details=str(e))
         }

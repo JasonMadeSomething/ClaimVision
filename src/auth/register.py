@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import logging
+from ..utils import response as response
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -33,7 +34,7 @@ def lambda_handler(event, context):
             }
 
         # Register user in Cognito
-        response = cognito_client.sign_up(
+        cognito_response = cognito_client.sign_up(
             ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
             Username=username,
             Password=password,
@@ -42,24 +43,15 @@ def lambda_handler(event, context):
 
         logger.info("User registration successful")
 
-        return {
-            "statusCode": 201,
-            "body": json.dumps({"message": "User registered successfully. Please confirm your email."})
-        }
+        return response.api_response(201, message="User registered successfully. Please confirm your email.")
 
     except cognito_client.exceptions.UsernameExistsException:
-        return {
-            "statusCode": 409,
-            "body": json.dumps({"message": "User already exists."})
-        }
+        return response.api_response(409, message="User already exists.")
+
     except cognito_client.exceptions.InvalidPasswordException as e:
-        return {
-            "statusCode": 400,
-            "body": json.dumps({"message": "Password does not meet requirements.", "error": str(e)})
-        }
+        return response.api_response(400, message="Password does not meet requirements.", error_details=str(e))
+
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"message": "An error occurred", "error": str(e)})
-        }
+        return response.api_response(500, message="An error occurred", error_details=str(e)) 
+        

@@ -1,7 +1,6 @@
 import json
 import boto3
-from datetime import datetime
-from claims.model import Claim
+from ..utils import response as response
 
 dynamodb = boto3.resource("dynamodb")
 claims_table = dynamodb.Table(os.environ["CLAIMS_TABLE"])  # Update for your environment
@@ -25,10 +24,7 @@ def lambda_handler(event, context):
 
     except Exception as e:
         print("Error:", str(e))
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
+        return response.api_response(500, message="An error occurred", error_details=str(e))
 
 def get_user_claims(user_id, start_date=None, end_date=None):
     """Fetch claims for the authenticated user, with optional date filtering."""
@@ -49,7 +45,7 @@ def get_user_claims(user_id, start_date=None, end_date=None):
                 if start_date <= claim["loss_date"] <= end_date
             ]
 
-        return {"statusCode": 200, "body": json.dumps(claims)}
+        return response.api_response(200, data=claims)
 
     except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        return response.api_response(500, message="An error occurred", error_details=str(e))

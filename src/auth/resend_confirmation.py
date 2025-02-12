@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 import logging
+from ..utils import response as response
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -25,32 +26,25 @@ def lambda_handler(event, context):
         username = body.get("username")
 
         if not username:
-            return {
-                "statusCode": 400,
-                "body": json.dumps({"message": "Username is required."})
-            }
+            return response.api_response(400, message="Username is required.")
 
         # Resend confirmation code
-        response = cognito_client.resend_confirmation_code(
+        cognito_response = cognito_client.resend_confirmation_code(
             ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
             Username=username
         )
 
         logger.info("Confirmation code resent successfully")
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"message": "Confirmation code sent successfully. Check your email."})
-        }
+        return response.api_response(200, message="Confirmation code sent successfully. Check your email.")
 
     except cognito_client.exceptions.UserNotFoundException:
-        return {
-            "statusCode": 404,
-            "body": json.dumps({"message": "User not found."})
-        }
+        return response.api_response(404, message="User not found.")
+
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"message": "An error occurred", "error": str(e)})
-        }
+        return response.api_response(
+            500,
+            message="An error occurred",
+            error_details=str(e)
+        )

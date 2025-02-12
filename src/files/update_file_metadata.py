@@ -2,6 +2,7 @@ import json
 import boto3
 import os
 from boto3.dynamodb.conditions import Key
+from ..utils import response as response
 
 dynamodb = boto3.resource("dynamodb")
 files_table = dynamodb.Table(os.getenv("FILES_TABLE"))
@@ -15,11 +16,11 @@ def lambda_handler(event, context):
         body = json.loads(event["body"])
 
         # Fetch existing file
-        response = files_table.get_item(Key={"id": file_id})
-        file_data = response.get("Item")
+        file_response = files_table.get_item(Key={"id": file_id})
+        file_data = file_response.get("Item")
 
         if not file_data or file_data["user_id"] != user_id:
-            return {"statusCode": 403, "body": json.dumps({"error": "Unauthorized or File Not Found"})}
+            return response.api_response(404, message="File Not Found")
 
         # Prepare update expression
         update_expression = "SET "
@@ -33,7 +34,7 @@ def lambda_handler(event, context):
                 expression_attribute_values[f":{key}"] = body[key]
 
         if not expression_attribute_values:
-            return {"statusCode": 400, "body": json.dumps({"error": "No valid fields to update"})}
+            return response.api_response(400, message="No valid fields to update")
 
         update_expression = update_expression.rstrip(", ")
 
@@ -44,10 +45,7 @@ def lambda_handler(event, context):
             ExpressionAttributeValues=expression_attribute_values
         )
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"message": "File metadata updated successfully"})
-        }
+        return response.api_response(200, message="File metadata updated successfully", data={"file_id": file_id})
 
     except Exception as e:
-        return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
+        return response.api_response(500, message="Internal Server Error", error_details=str(e))
