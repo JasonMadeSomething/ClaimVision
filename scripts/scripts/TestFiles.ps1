@@ -26,8 +26,6 @@ aws cognito-idp admin-set-user-password `
 
 Write-Host "User $Username created and password set."
 
-
-
 # ✅ Step 1: Authenticate User and Retrieve Token
 try {
     Write-Host "Authenticating user..."
@@ -100,28 +98,81 @@ try {
     exit 1
 }
 
-# ✅ Step 4: Cleanup - Delete Uploaded Files
+# ✅ Step 4: Update Metadata via PATCH
+try {
+    Write-Host "Updating metadata for uploaded files..."
+    foreach ($file in $uploadedFiles) {
+        $fileId = $file.file_id
+        $metadataUpdate = @{
+            description = "Updated description for $($file.file_name)"
+            labels = @("updated-label-1", "updated-label-2")
+        }
+
+        $response = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
+            -Method PATCH `
+            -Headers $uploadHeaders `
+            -Body ($metadataUpdate | ConvertTo-Json -Depth 3 -Compress) `
+            -UseBasicParsing
+
+        $updatedFile = ($response.Content | ConvertFrom-Json)
+        Write-Host "Metadata for $($updatedFile.file_name) updated successfully."
+    }
+    Write-Host "Metadata updated successfully."
+} catch {
+    Write-Host "ERROR: $_"
+}
+
+# ✅ Step 5: Replace File via PUT
+try {
+    Write-Host "Replacing uploaded files..."
+    foreach ($file in $uploadedFiles) {
+        $fileId = $file.file_id
+        $newFilePath = Join-Path -Path $PSScriptRoot -ChildPath $files[0].path
+
+        if (-Not (Test-Path $newFilePath)) {
+            Write-Host "WARNING: Replacement file not found -> $newFilePath. Skipping..."
+            continue
+        }
+
+        $newFileData = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($newFilePath))
+        $replacePayload = @{ file_name = $file.file_name; file_data = $newFileData }
+
+        $response = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
+            -Method PUT `
+            -Headers $uploadHeaders `
+            -Body ($replacePayload | ConvertTo-Json -Depth 3 -Compress) `
+            -UseBasicParsing
+
+        $replacedFile = ($response.Content | ConvertFrom-Json)
+        Write-Host "File replaced successfully: $($replacedFile.file_name)"
+    }
+
+    Write-Host "Files replaced successfully."
+} catch {
+    Write-Host "ERROR: $_"
+}
+
+# ✅ Step 6: Cleanup - Delete Uploaded Files
 try {
     Write-Host "Cleaning up uploaded files..."
     foreach ($file in $uploadedFiles) {
         $fileId = $file.file_id
         Write-Host "Deleting file: $fileId"
 
-        Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
+        $response = Invoke-WebRequest -Uri "$baseUrl/files/$fileId" `
             -Method DELETE `
             -Headers $uploadHeaders `
             -UseBasicParsing
+
+        $deletedFile = ($response.Content | ConvertFrom-Json)
+        Write-Host "File deleted successfully: $($deletedFile.file_name)."
     }
 
     Write-Host "Cleanup complete. All uploaded files deleted."
 } catch {
     Write-Host "ERROR: $_"
 } finally {
-    aws cognito-idp admin-delete-user `
-        --user-pool-id $userpool `
-        --username $username
+    aws cognito-idp admin-delete-user --user-pool-id $userpool --username $username
 }
 
-
-
-Write-Host "✅ File upload test completed successfully."
+Write-Host "File upload test completed successfully."
