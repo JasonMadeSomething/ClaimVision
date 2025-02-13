@@ -26,7 +26,7 @@ import json
 import logging
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from utils import response
+from utils import response, dynamodb_utils
 
 logger = logging.getLogger()
 logger.setLevel(logging.ERROR)
@@ -174,8 +174,7 @@ def get_files_table():
     Returns:
         boto3.Table: DynamoDB table instance.
     """
-    dynamodb = boto3.resource("dynamodb")
-    return dynamodb.Table(os.getenv("FILES_TABLE"))
+    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
 
 def upload_file_to_s3(s3, s3_key, file_data_encoded):
     """

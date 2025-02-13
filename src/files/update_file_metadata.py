@@ -24,7 +24,7 @@ Example Usage:
 import os
 import json
 import boto3
-from utils import response
+from utils import response, dynamodb_utils
 
 def get_s3():
     """
@@ -42,8 +42,7 @@ def get_files_table():
     Returns:
         boto3.Table: DynamoDB table instance.
     """
-    dynamodb = boto3.resource("dynamodb")
-    return dynamodb.Table(os.getenv("FILES_TABLE"))
+    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
 
 def lambda_handler(event, _context):
     """

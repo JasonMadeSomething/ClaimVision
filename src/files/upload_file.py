@@ -4,7 +4,7 @@ import os
 import base64
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from utils import response
+from utils import response, dynamodb_utils
 
 # ✅ Helper functions to get AWS resources
 def get_s3():
@@ -13,8 +13,7 @@ def get_s3():
 
 def get_files_table():
     """Get the DynamoDB table for files"""
-    dynamodb = boto3.resource("dynamodb")
-    return dynamodb.Table(os.getenv("FILES_TABLE"))
+    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
 
 def lambda_handler(event, _context):
     """Handles file uploads"""

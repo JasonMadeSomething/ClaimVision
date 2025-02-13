@@ -23,7 +23,7 @@ import os
 from decimal import Decimal
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.dynamodb.conditions import Key
-from utils import response
+from utils import response, dynamodb_utils
 
 def decimal_to_int(obj):
     """
@@ -46,8 +46,7 @@ def get_files_table():
     Returns:
         boto3.Table: DynamoDB table instance.
     """
-    dynamodb = boto3.resource("dynamodb")
-    return dynamodb.Table(os.getenv("FILES_TABLE"))
+    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
 
 def lambda_handler(event, _context):
     """
