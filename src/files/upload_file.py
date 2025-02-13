@@ -2,88 +2,123 @@ import json
 import boto3
 import os
 import base64
-import uuid
-import magic  # For file type detection
 from botocore.exceptions import BotoCoreError, ClientError
-from .model import File  # Ensure correct import path
-from ..utils import response as response
+from utils import response
 
-s3 = boto3.client("s3")
-dynamodb = boto3.resource("dynamodb")
-files_table = dynamodb.Table(os.getenv("FILES_TABLE"))
-BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+# ✅ Helper functions to get AWS resources
+def get_s3():
+    return boto3.client("s3")
+
+def get_files_table():
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.getenv("FILES_TABLE"))
 
 def lambda_handler(event, context):
-    """Handle single or multiple file uploads to S3 and store metadata in DynamoDB."""
+    """Handles file uploads"""
+    
+    # ✅ Step 1: Ensure Authenticated Request
+    if not event.get("requestContext") or not event["requestContext"].get("authorizer"):
+        return response.api_response(401, message="Unauthorized: Missing authentication")
+
+    user_id = event["requestContext"]["authorizer"]["claims"].get("sub")
+    if not user_id:
+        return response.api_response(401, message="Unauthorized: Missing user ID")
+
+    # ✅ Step 2: Parse JSON Body Safely
     try:
-        user_id = event["requestContext"]["authorizer"]["claims"]["sub"]  # Extract user ID from token
-
-        # Ensure request body exists
-        if not event.get("body"):
-            return response.api_response(400, message="Missing request body")
-
-        body = json.loads(event["body"])
-
-        # Validate files field
-        files = body.get("files")
-        if not files or not isinstance(files, list):
-            return response.api_response(400, message="Invalid or missing 'files' array")
-
-        uploaded_files = []
-
-        for file in files:
-            try:
-                # Validate individual file fields
-                file_name = file.get("file_name")
-                file_data = file.get("file_data")
-
-                if not file_name or not isinstance(file_name, str):
-                    return response.api_response(400, message="Missing or invalid 'file_name'")
-                
-                if not file_data or not isinstance(file_data, str):
-                    return response.api_response(400, message="Missing or invalid 'file_data'")
-
-                # Decode file
-                decoded_file = base64.b64decode(file_data)
-
-                mime_type = magic.Magic(mime=True).from_buffer(decoded_file[:2048])  # Detect MIME type
-
-                # Generate unique file ID and S3 key
-                file_id = str(uuid.uuid4())
-                s3_key = f"uploads/{user_id}/{file_id}/{file_name}"
-
-                # Upload to S3
-                s3.put_object(Bucket=BUCKET_NAME, Key=s3_key, Body=decoded_file)
-
-                # Create File metadata
-                file_metadata = File(
-                    id=file_id,
-                    user_id=user_id,
-                    file_name=file_name,
-                    s3_key=s3_key,
-                    mime_type=mime_type,
-                    size=len(decoded_file),
-                    file_url=f"https://{BUCKET_NAME}.s3.amazonaws.com/{s3_key}",
-                    labels=[]  # Default empty list
-                )
-
-                # Store metadata in DynamoDB
-                files_table.put_item(Item=file_metadata.to_dynamodb_dict())
-
-                uploaded_files.append({
-                    "file_id": file_id,
-                    "file_name": file_name,
-                    "file_url": file_metadata.file_url
-                })
-
-            except Exception as file_error:
-                return response.api_response(400, message=f"Error processing file '{file.get('file_name', 'UNKNOWN')}': {str(file_error)}")
-
-        return response.api_response(201, message=f"{len(uploaded_files)} file(s) uploaded successfully", data=uploaded_files)
-
-    except (BotoCoreError, ClientError) as e:
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
+        body = json.loads(event.get("body") or "{}")  # Ensure body is a dict
+        if not isinstance(body, dict):
+            return response.api_response(400, message="Invalid request body format")
     except json.JSONDecodeError:
-        return response.api_response(400, message="Invalid JSON payload")
-    except Exception as e:
-        return response.api_response(400, message="Internal Server Error", error_details=str(e))
+        return response.api_response(400, message="Invalid JSON format in request body")
+
+    # ✅ Step 3: Ensure "files" is Present & Always a List
+    files = body.get("files")
+    if not files:
+        return response.api_response(400, message="Missing or invalid 'files' field")
+
+    if isinstance(files, dict):  # Convert single file dict to list
+        files = [files]
+
+    
+
+    # ✅ Step 4: Validate Each File
+    for file in files:
+        missing_fields = []
+        if "file_name" not in file:
+            missing_fields.append("file_name")
+        if "file_data" not in file:
+            missing_fields.append("file_data")
+
+        if missing_fields:
+            return response.api_response(400, missing_fields=missing_fields)
+
+    # ✅ Step 4: Prevent duplicate file names within the batch
+    file_names = set()
+    for file in files:
+        if file["file_name"] in file_names:
+            return response.api_response(400, message=f"Duplicate file '{file['file_name']}' in request")
+        file_names.add(file["file_name"])
+
+    # ✅ Step 5: Initialize AWS Clients **(Only if Files Are Valid)**
+    files_table = get_files_table()
+    s3 = get_s3()
+    uploaded_files = []
+    failed_files = []
+
+    for file in files:
+
+        if "file_name" not in file:
+            failed_files.append({"file_name": file.get("file_name", "UNKNOWN"), "reason": "Missing 'file_name' field"})
+            continue
+
+        print(f"Checking file format: {file['file_name']}")  # 🔍 Debugging log
+
+        if not file["file_name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
+            print(f"❌ Unsupported format detected: {file['file_name']}")  # 🔍 Debug log
+            failed_files.append({"file_name": file["file_name"], "reason": "Unsupported file format"})
+            continue  # ⬅️ **Skip this file, but continue with others**
+
+        # ✅ Step 5: Decode Base64 Data
+        try:
+            file_bytes = base64.b64decode(file["file_data"])
+        except Exception:
+            failed_files.append({"file_name": file["file_name"], "reason": "Invalid base64 encoding"})
+            continue
+
+        # ✅ Step 6: Upload to S3
+        s3_key = f"uploads/{user_id}/{file['file_name']}"
+        try:
+            s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_bytes)
+        except (BotoCoreError, ClientError) as e:
+            return response.api_response(500, message="AWS S3 error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
+
+        # ✅ Step 7: Save File Metadata in DynamoDB
+        file_item = {
+            "id": s3_key,
+            "user_id": user_id,
+            "file_name": file["file_name"],
+            "s3_key": s3_key,
+            "status": "uploaded"
+        }
+
+        try:
+            files_table.put_item(Item=file_item)
+            uploaded_files.append(file_item)  # ✅ Add successful upload to list
+        except (BotoCoreError, ClientError) as e:
+            return response.api_response(500, message="AWS DynamoDB error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
+
+    # ✅ If all files are invalid
+    if not uploaded_files and failed_files:
+        return response.api_response(400, message="No valid files uploaded", data={"files_failed": failed_files})
+
+    # ✅ If some files succeeded, some failed (due to user error)
+    if uploaded_files and failed_files:
+        return response.api_response(
+            207,  # Multi-Status (Partial Success)
+            message="Some files uploaded successfully, others failed",
+            data={"files_uploaded": uploaded_files, "files_failed": failed_files}
+        )
+
+    # ✅ If all files uploaded successfully
+    return response.api_response(200, message="File(s) uploaded successfully", data={"files_uploaded": uploaded_files})

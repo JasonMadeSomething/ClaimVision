@@ -3,10 +3,7 @@ import boto3
 import os
 from decimal import Decimal
 from botocore.exceptions import BotoCoreError, ClientError
-from ..utils import response as response
-
-dynamodb = boto3.resource("dynamodb")
-files_table = dynamodb.Table(os.getenv("FILES_TABLE"))
+from utils import response as response
 
 def decimal_to_int(obj):
     """Convert Decimal types to int for JSON serialization."""
@@ -14,9 +11,14 @@ def decimal_to_int(obj):
         return int(obj)
     return obj
 
+def get_files_table():
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.getenv("FILES_TABLE"))
+
 def lambda_handler(event, context):
     """Retrieve metadata of a single file"""
     try:
+        files_table = get_files_table()
         user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
         file_id = event["pathParameters"]["id"]
 
@@ -24,10 +26,10 @@ def lambda_handler(event, context):
         file_data = file_response.get("Item")
 
         if not file_data:
-            return response.api_response(404, message="File not found", missing_fields=["id"])
+            return response.api_response(404)
 
         if file_data["user_id"] != user_id:
-            return response.api_response(404, message="File not found")
+            return response.api_response(404)
 
         return response.api_response(200, message="File found", data=file_data)
 

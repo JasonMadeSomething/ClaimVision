@@ -2,18 +2,26 @@ import json
 import boto3
 import os
 from botocore.exceptions import BotoCoreError, ClientError
-from ..utils import response as response
+from utils import response
 
-s3 = boto3.client("s3")
-dynamodb = boto3.resource("dynamodb")
-files_table = dynamodb.Table(os.getenv("FILES_TABLE"))
-BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+def get_files_table():
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.getenv("FILES_TABLE"))
+
+def get_s3():
+    s3 = boto3.client("s3")
+    return s3
+
 
 def lambda_handler(event, context):
     """Delete a file (DELETE)"""
 
+    BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
     try:
-        user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
+        s3 = get_s3()
+        files_table = get_files_table()
+
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
         file_id = event["pathParameters"]["id"]
 
         # Fetch existing file metadata
@@ -21,7 +29,7 @@ def lambda_handler(event, context):
         file_data = file_response.get("Item")
 
         if not file_data or file_data["user_id"] != user_id:
-            return response.api_response(403, message="Unauthorized or File Not Found")
+            return response.api_response(404, message="File Not Found")
 
         # Extract file name and S3 key
         file_name = file_data["file_name"]
@@ -33,7 +41,7 @@ def lambda_handler(event, context):
         # Delete metadata from DynamoDB
         files_table.delete_item(Key={"id": file_id})
 
-        return response.api_response(200, message="File deleted successfully", data={"file_id": file_id})
+        return response.api_response(204, message="File deleted successfully", data={"file_id": file_id})
 
     except (BotoCoreError, ClientError) as e:
         return response.api_response(500, message="Internal Server Error", error_details=str(e))

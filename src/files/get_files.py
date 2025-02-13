@@ -4,9 +4,7 @@ import os
 from decimal import Decimal
 from botocore.exceptions import BotoCoreError, ClientError
 from boto3.dynamodb.conditions import Key
-
-dynamodb = boto3.resource("dynamodb")
-files_table = dynamodb.Table(os.getenv("FILES_TABLE"))
+from utils import response
 
 def decimal_to_int(obj):
     """Convert Decimal types to int for JSON serialization."""
@@ -14,9 +12,14 @@ def decimal_to_int(obj):
         return int(obj)
     return obj
 
+def get_files_table():
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.getenv("FILES_TABLE"))
+
 def lambda_handler(event, context):
     """Retrieve paginated list of files for the authenticated user"""
     try:
+        files_table = get_files_table()
         user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
         query_params = event.get("queryStringParameters", {}) or {}
 
@@ -33,26 +36,30 @@ def lambda_handler(event, context):
             try:
                 query_kwargs["ExclusiveStartKey"] = json.loads(last_evaluated_key)
             except json.JSONDecodeError:
-                return {
-                    "statusCode": 400,
-                    "body": json.dumps({"error": "Invalid pagination key format"})
-                }
+                return response.api_response(
+                    400,
+                    message="Invalid pagination key format"
+                )
 
-        response = files_table.query(**query_kwargs)
+        files_response = files_table.query(**query_kwargs)
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "files": response.get("Items", []),
-                "last_key": response.get("LastEvaluatedKey") if "LastEvaluatedKey" in response else None
-            }, default=decimal_to_int)
-        }
+        filtered_files = [file for file in files_response.get("Items", []) if file["user_id"] == user_id]
+
+        return response.api_response(
+            200,
+            message="Files retrieved successfully",
+            data={
+                "files": filtered_files,
+                "last_key": files_response.get("LastEvaluatedKey") if "LastEvaluatedKey" in files_response else None
+            }
+        )
 
     except (BotoCoreError, ClientError) as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": "AWS error", "details": str(e)})
-        }
+        return response.api_response(
+            500,
+            message="AWS error",
+            error_details=str(e)
+        )
 
     except Exception as e:
         return response.api_response(

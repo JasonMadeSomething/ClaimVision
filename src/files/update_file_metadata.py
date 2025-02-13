@@ -2,10 +2,15 @@ import json
 import boto3
 import os
 from boto3.dynamodb.conditions import Key
-from ..utils import response as response
+from utils import response
 
-dynamodb = boto3.resource("dynamodb")
-files_table = dynamodb.Table(os.getenv("FILES_TABLE"))
+def get_s3():
+    s3 = boto3.client("s3")
+    return s3
+
+def get_files_table():
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.getenv("FILES_TABLE"))
 
 def lambda_handler(event, context):
     """Update metadata fields of a file (PATCH)"""
@@ -13,8 +18,15 @@ def lambda_handler(event, context):
     try:
         user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
         file_id = event["pathParameters"]["id"]
-        body = json.loads(event["body"])
+        try:
+            if not event.get("body"):
+                return response.api_response(400, message="Missing required field(s)", missing_fields=["body"])
+            body = json.loads(event["body"])
+        except json.JSONDecodeError:
+            return response.api_response(400, message="Invalid JSON format")
 
+        files_table = get_files_table()
+        
         # Fetch existing file
         file_response = files_table.get_item(Key={"id": file_id})
         file_data = file_response.get("Item")
