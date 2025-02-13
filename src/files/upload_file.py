@@ -35,7 +35,7 @@ def lambda_handler(event, context):
     # ✅ Step 3: Ensure "files" is Present & Always a List
     files = body.get("files")
     if not files:
-        return response.api_response(400, message="Missing or invalid 'files' field")
+        return response.api_response(400, missing_fields=["files"])
 
     if isinstance(files, dict):  # Convert single file dict to list
         files = [files]
