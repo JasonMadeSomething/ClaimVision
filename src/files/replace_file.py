@@ -12,47 +12,31 @@ def get_files_table():
     return dynamodb.Table(os.getenv("FILES_TABLE"))
 
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """Replace an existing file"""
 
     try:
         s3 = get_s3()
         files_table = get_files_table()
 
-        if "requestContext" not in event or "authorizer" not in event["requestContext"]:
-            return response.api_response(401, message="Unauthorized: Missing authentication")
-        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        user_id = get_authenticated_user(event)
         if not user_id:
-            return response.api_response(401, message="Unauthorized: Missing user ID")
-        file_id = event["pathParameters"]["id"]
+            return response.api_response(401)
 
-        try:
-            body = json.loads(event["body"]) if "body" in event else {}
-        except (json.JSONDecodeError, KeyError) as e:
-            return response.api_response(
-                400,
-                message="Invalid JSON format in request body",
-                error_details=str(e)
-            )
-
-
-        # Build a list of missing fields dynamically
-        missing_fields = []
-        if "file_name" not in body:
-            missing_fields.append("file_name")
-        if "file_data" not in body:
-            missing_fields.append("file_data")
-
-        # If any fields are missing, return a 400 response
-        if missing_fields:
-            return response.api_response(400, missing_fields=missing_fields)
+        extracted = extract_request_data(event)
         
-        ALLOWED_FILE_EXTENSIONS = {".jpg", ".jpeg", ".png"}
+        if not isinstance(extracted, tuple):
+            return response.api_response(400, message="Invalid request payload")
 
-        if not any(body["file_name"].lower().endswith(ext) for ext in ALLOWED_FILE_EXTENSIONS):
-            return response.api_response(400, message="Invalid file format")  # ✅ Should happen first!
+        file_id, body = extracted
 
-        # ✅ Get existing file metadata
+        # If body contains an error message, return it
+        if "message" in body:
+            return response.api_response(400, message=body["message"])
+        
+        file_id, body = extracted
+
+        # ✅ Retrieve file metadata
         file_data = files_table.get_item(Key={"id": file_id}).get("Item")
         if not file_data:
             return response.api_response(404, message="File Not Found")
@@ -61,30 +45,18 @@ def lambda_handler(event, context):
         if file_data["user_id"] != user_id:
             return response.api_response(404, message="File Not Found")  # Security through obscurity
 
-        # ✅ Parse and validate request body
-        try:
-            body = json.loads(event["body"])
-            file_name = body.get("file_name")
-            file_data_encoded = body.get("file_data")
-        except (TypeError, json.JSONDecodeError):
-            return response.api_response(400, message="Invalid request payload format")
-
-        if not file_name or not file_data_encoded:
-            return response.api_response(400, message="Missing required field(s): file_name, file_data")
-
-        if not file_name.lower().endswith((".jpg", ".jpeg", ".png")):
-            return response.api_response(400, message="Unsupported file format")
-
+        print(body)
         # ✅ Upload to S3
-        s3_key = file_data["s3_key"]
-        file_binary = bytes(file_data_encoded, "utf-8")  # Decode from base64
-        s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_binary)
+        try:
+            upload_file_to_s3(s3, file_data["s3_key"], body["file_data"])
+        except (BotoCoreError, ClientError) as e:
+            return response.api_response(500, message="AWS error", error_details=str(e))
 
         # ✅ Update file metadata
         files_table.update_item(
             Key={"id": file_id},
             UpdateExpression="SET file_name = :name",
-            ExpressionAttributeValues={":name": file_name},
+            ExpressionAttributeValues={":name": body["file_name"]},
         )
 
         return response.api_response(200, message="File replaced successfully")
@@ -95,3 +67,36 @@ def lambda_handler(event, context):
     except Exception as e:
         print(f"Exception: {e}")
         return response.api_response(500, message="Internal Server Error", error_details=str(e))
+
+def get_authenticated_user(event):
+    """Extract and return the user ID from the event if authentication is valid."""
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    return claims.get("sub")
+
+def extract_request_data(event):
+    """Extract and validate request data from the event."""
+    if "pathParameters" not in event or "id" not in event["pathParameters"]:
+        return None
+
+    file_id = event["pathParameters"]["id"]
+
+    try:
+        body = json.loads(event["body"]) if "body" in event and event["body"] else {}
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+    file_name = body.get("file_name")
+
+    # ✅ Prioritize file format validation first
+    if file_name and not file_name.lower().endswith((".jpg", ".jpeg", ".png")): 
+        return None, {"message": "Invalid file format"}
+    required_fields = {"file_name", "file_data", "s3_key"}
+    missing_fields = required_fields - body.keys()
+    if missing_fields:  
+        return None, {"message": f"Missing required fields: {', '.join(missing_fields)}"}
+    return file_id, body
+
+def upload_file_to_s3(s3, s3_key, file_data_encoded):
+    """Upload a file to S3."""
+    file_binary = bytes(file_data_encoded, "utf-8")  # Decode from base64
+    s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_binary)

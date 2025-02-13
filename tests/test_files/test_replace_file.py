@@ -97,7 +97,7 @@ def test_replace_file_empty_payload(mock_dynamodb, mock_s3, api_gateway_event):
 
     response = lambda_handler(event, {})
     assert response["statusCode"] == 400
-    assert "Missing required field(s)" in json.loads(response["body"])["message"]
+    assert json.loads(response["body"])["message"].startswith("Missing required fields:")
 
 @patch("files.replace_file.get_s3")
 @patch("files.replace_file.get_files_table")
