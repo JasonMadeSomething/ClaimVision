@@ -1,7 +1,8 @@
 import json
+from typing import Any, Dict, List, Optional, Union
 
 # ✅ Predefined status code mappings
-STATUS_MESSAGES = {
+STATUS_MESSAGES: Dict[int, str] = {
     200: "OK",
     201: "Created",
     204: "No Content",
@@ -11,10 +12,16 @@ STATUS_MESSAGES = {
     403: "Forbidden",
     404: "Not Found",
     409: "Conflict",
-    500: "Internal Server Error"
+    500: "Internal Server Error",
 }
 
-def api_response(status_code: int, message=None, data=None, missing_fields=None, error_details=None):
+def api_response(
+    status_code: int,
+    message: Optional[str] = None,
+    data: Optional[Union[Dict[str, Any], List[Any]]] = None,
+    missing_fields: Optional[List[str]] = None,
+    error_details: Optional[str] = None,
+) -> Dict[str, Union[int, str, Dict[str, Any], List[Any]]]:
     """
     Generate a standardized API response.
 
@@ -36,19 +43,18 @@ def api_response(status_code: int, message=None, data=None, missing_fields=None,
     if missing_fields and status_code == 400:
         message = f"Missing required field(s): {', '.join(missing_fields)}"
 
-    response = {
+    response: Dict[str, Union[int, str, Dict[str, Any], List[Any]]] = {
         "status": STATUS_MESSAGES[status_code],
-        "code": status_code
+        "code": status_code,
+        "message": message,
     }
 
-    if message:
-        response["message"] = message
     if data is not None:
-        response["data"] = data
+        response["data"] = data  # Can be a dict or list
     if error_details:
         response["error_details"] = error_details
 
     return {
         "statusCode": status_code,
-        "body": json.dumps(response)
+        "body": json.dumps(response),
     }
