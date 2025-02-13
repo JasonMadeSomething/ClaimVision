@@ -72,8 +72,6 @@ def lambda_handler(event, context):
             failed_files.append({"file_name": file.get("file_name", "UNKNOWN"), "reason": "Missing 'file_name' field"})
             continue
 
-        print(f"Checking file format: {file['file_name']}")  # 🔍 Debugging log
-
         if not file["file_name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
             print(f"❌ Unsupported format detected: {file['file_name']}")  # 🔍 Debug log
             failed_files.append({"file_name": file["file_name"], "reason": "Unsupported file format"})
@@ -92,7 +90,8 @@ def lambda_handler(event, context):
             s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_bytes)
         except (BotoCoreError, ClientError) as e:
             return response.api_response(500, message="AWS S3 error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
-
+        except Exception as e:  # 🚨 Catch unexpected errors!
+            return response.api_response(500, message="Unexpected AWS S3 error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
         # ✅ Step 7: Save File Metadata in DynamoDB
         file_item = {
             "id": s3_key,
@@ -106,7 +105,11 @@ def lambda_handler(event, context):
             files_table.put_item(Item=file_item)
             uploaded_files.append(file_item)  # ✅ Add successful upload to list
         except (BotoCoreError, ClientError) as e:
+            print(f"🔥 DynamoDB Exception Caught: {e}")
             return response.api_response(500, message="AWS DynamoDB error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
+        except Exception as e:  # 🚨 Catch unexpected errors!
+            print(f"🚨 Unexpected Error: {e}")  # Debugging
+            return response.api_response(500, message="Unexpected internal error", error_details=str(e))
 
     # ✅ If all files are invalid
     if not uploaded_files and failed_files:
