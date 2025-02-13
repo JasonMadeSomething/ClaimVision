@@ -83,7 +83,7 @@ def test_upload_missing_filename(mock_dynamodb, mock_s3, api_gateway_event):
     response = lambda_handler(event, {})
     ## Assert
     assert response["statusCode"] == 400
-    assert "Missing required field(s)" in json.loads(response["body"])["message"]
+    assert "Bad Request" in json.loads(response["body"])["message"]
 
 
 # ❌ FAILURE: Invalid File Type
@@ -111,7 +111,7 @@ def test_upload_empty_payload(mock_dynamodb, mock_s3, api_gateway_event):
     response = lambda_handler(event, {})
     ## Assert
     assert response["statusCode"] == 400
-    assert "Missing required field(s): files" in json.loads(response["body"])["message"]
+    assert "Bad Request" in json.loads(response["body"])["message"]
 
 
 # ❌ FAILURE: Unauthorized Upload (No Auth Header)

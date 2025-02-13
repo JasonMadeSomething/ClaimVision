@@ -1,7 +1,8 @@
+"""✅ Upload File"""
 import json
-import boto3
 import os
 import base64
+import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from utils import response
 
@@ -19,12 +20,9 @@ def lambda_handler(event, _context):
     """Handles file uploads"""
     
     # ✅ Step 1: Ensure Authenticated Request
-    if not event.get("requestContext") or not event["requestContext"].get("authorizer"):
-        return response.api_response(401, message="Unauthorized: Missing authentication")
-
-    user_id = event["requestContext"]["authorizer"]["claims"].get("sub")
+    user_id = get_authenticated_user(event)
     if not user_id:
-        return response.api_response(401, message="Unauthorized: Missing user ID")
+        return response.api_response(401, message="Unauthorized: Missing authentication")
 
     # ✅ Step 2: Parse JSON Body Safely
     try:
@@ -132,3 +130,8 @@ def lambda_handler(event, _context):
 
     # ✅ If all files uploaded successfully
     return response.api_response(200, message="File(s) uploaded successfully", data={"files_uploaded": uploaded_files})
+
+def get_authenticated_user(event):
+    """Extract and return user ID if authentication is valid."""
+    auth = event.get("requestContext", {}).get("authorizer", {})
+    return auth.get("claims", {}).get("sub")

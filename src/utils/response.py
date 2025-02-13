@@ -1,4 +1,4 @@
-import json
+""" Response Utility to standardize API responses """
 from typing import Any, Dict, List, Optional, Union
 from .models import APIResponse
 
@@ -50,17 +50,26 @@ def api_response(
     if status_code not in STATUS_MESSAGES:
         raise ValueError(f"Invalid status code: {status_code}")
 
-    message = message or STATUS_MESSAGES[status_code]
+    response_message = message or STATUS_MESSAGES[status_code]
 
+    # ✅ Ensure missing_fields are explicitly tracked
+    extra_info = {}
     if missing_fields and status_code == 400:
-        message = f"Missing required field(s): {', '.join(missing_fields)}"
+        extra_info["missing_fields"] = missing_fields
 
+    # ✅ Standardize data format (ensure it's always a dict)
+    if isinstance(data, list):
+        data = {"results": data}
+    elif data is None:
+        data = {}
+
+    # ✅ Always include error_details, even if None
     response = APIResponse(
         status=STATUS_MESSAGES[status_code],
         code=status_code,
-        message=message,
-        data=data,
-        error_details=error_details,
+        message=response_message,
+        data={**data, **extra_info} if data else extra_info,
+        error_details=error_details or None,  # Ensures error_details is explicitly included
     )
 
     return {

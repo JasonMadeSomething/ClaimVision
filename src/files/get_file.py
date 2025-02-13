@@ -41,7 +41,7 @@ def lambda_handler(event, _context):
             error_details=str(e)
         )
 
-    except Exception as e:
+    except Exception as e: # pylint: disable=broad-except
         return response.api_response(
             400,
             message="Bad request",
