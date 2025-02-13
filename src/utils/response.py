@@ -1,5 +1,6 @@
 import json
 from typing import Any, Dict, List, Optional, Union
+from .models import APIResponse
 
 # ✅ Predefined status code mappings
 STATUS_MESSAGES: Dict[int, str] = {
@@ -32,29 +33,23 @@ def api_response(
     - `error_details`: (str, optional) debugging details for errors
     """
 
-    # Validate status code
     if status_code not in STATUS_MESSAGES:
         raise ValueError(f"Invalid status code: {status_code}")
 
-    # Default message from status code mapping
     message = message or STATUS_MESSAGES[status_code]
 
-    # Handle missing fields (auto-generate a 400 error message)
     if missing_fields and status_code == 400:
         message = f"Missing required field(s): {', '.join(missing_fields)}"
 
-    response: Dict[str, Union[int, str, Dict[str, Any], List[Any]]] = {
-        "status": STATUS_MESSAGES[status_code],
-        "code": status_code,
-        "message": message,
-    }
-
-    if data is not None:
-        response["data"] = data  # Can be a dict or list
-    if error_details:
-        response["error_details"] = error_details
+    response = APIResponse(
+        status=STATUS_MESSAGES[status_code],
+        code=status_code,
+        message=message,
+        data=data,
+        error_details=error_details,
+    )
 
     return {
         "statusCode": status_code,
-        "body": json.dumps(response),
+        "body": response.json(),
     }
