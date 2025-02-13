@@ -5,6 +5,7 @@ STATUS_MESSAGES = {
     200: "OK",
     201: "Created",
     204: "No Content",
+    207: "Multi-Status",
     400: "Bad Request",
     401: "Unauthorized",
     403: "Forbidden",
