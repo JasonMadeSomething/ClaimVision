@@ -24,7 +24,8 @@ def lambda_handler(event, context):
             body = json.loads(event["body"])
         except json.JSONDecodeError:
             return response.api_response(400, message="Invalid JSON format")
-
+        if not body:
+            return response.api_response(400, message="Missing required field(s)")
         files_table = get_files_table()
         
         # Fetch existing file
