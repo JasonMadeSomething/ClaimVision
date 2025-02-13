@@ -1,18 +1,13 @@
-import json
-import boto3
+"""✅ Replace File"""
 import os
+import json
+import logging
+import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from utils import response
 
-def get_s3():
-    """✅ Get S3 client"""
-    return boto3.client("s3")
-
-def get_files_table():
-    """✅ Get DynamoDB table"""
-    dynamodb = boto3.resource("dynamodb")
-    return dynamodb.Table(os.getenv("FILES_TABLE"))
-
+logger = logging.getLogger()
+logger.setLevel(logging.ERROR)
 
 def lambda_handler(event, _context):
     """Replace an existing file"""
@@ -66,8 +61,8 @@ def lambda_handler(event, _context):
             message="AWS error",
             error_details=str(e)
         )
-    except Exception as e:
-        print(f"Exception: {e}")
+    except Exception as e: #pylint: disable=broad-except
+        logger.error("Unhandled exception: %s", str(e), exc_info=True)  # ✅ Linter-friendly
         response_data = response.api_response(
             500,
             message="Internal Server Error",
@@ -102,6 +97,16 @@ def extract_request_data(event):
     if missing_fields:  
         return None, {"message": f"Missing required fields: {', '.join(missing_fields)}"}
     return file_id, body
+
+def get_s3():
+    """✅ Get S3 client"""
+    return boto3.client("s3")
+
+def get_files_table():
+    """✅ Get DynamoDB table"""
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.getenv("FILES_TABLE"))
+
 
 def upload_file_to_s3(s3, s3_key, file_data_encoded):
     """Upload a file to S3."""
