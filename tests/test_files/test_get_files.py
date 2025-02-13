@@ -1,5 +1,5 @@
+"""✅ Test retrieving files for a user"""
 import json
-import pytest
 from unittest.mock import patch
 from test_data.files_data import test_files, expected_files_response
 from files.get_files import lambda_handler
@@ -8,7 +8,11 @@ from files.get_files import lambda_handler
 def test_get_files(mock_dynamodb, api_gateway_event):
     """✅ Test retrieving files for a user"""
 
-    event = api_gateway_event(http_method="GET", query_params={"limit": "10"})
+    event = api_gateway_event(
+        http_method="GET",
+        query_params={"limit": "10"},
+        auth_user="user-123",
+    )
     mock_table = mock_dynamodb.return_value
     mock_table.query.return_value = {"Items": test_files}
 
@@ -25,8 +29,12 @@ def test_get_files(mock_dynamodb, api_gateway_event):
 @patch("files.get_files.get_files_table")
 def test_get_files_pagination(mock_dynamodb, api_gateway_event):
     """✅ Test retrieving files with pagination"""
-    
-    event = api_gateway_event(http_method="GET", query_params={"limit": "1", "last_key": '{"id": "file-1"}'})
+
+    event = api_gateway_event(
+        http_method="GET",
+        query_params={"limit": "1", "last_key": '{"id": "file-1"}'},
+        auth_user="user-123",
+    )
     mock_table = mock_dynamodb.return_value
     mock_table.query.return_value = {"Items": test_files[:1], "LastEvaluatedKey": "file-2"}
 
@@ -43,7 +51,11 @@ def test_get_files_pagination(mock_dynamodb, api_gateway_event):
 def test_get_files_empty(mock_dynamodb, api_gateway_event):
     """❌ Test retrieving files when none exist"""
 
-    event = api_gateway_event(http_method="GET", query_params={"limit": "10"})
+    event = api_gateway_event(
+        http_method="GET",
+        query_params={"limit": "10"},
+        auth_user="user-123",
+    )
     mock_table = mock_dynamodb.return_value
     mock_table.query.return_value = {"Items": []}
 

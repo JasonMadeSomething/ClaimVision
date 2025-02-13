@@ -1,9 +1,9 @@
-import json
-import boto3
+"""✅ Get File"""
 import os
 from decimal import Decimal
+import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from utils import response as response
+from utils import response
 
 def decimal_to_int(obj):
     """Convert Decimal types to int for JSON serialization."""
@@ -12,6 +12,7 @@ def decimal_to_int(obj):
     return obj
 
 def get_files_table():
+    """✅ Get Files Table"""
     dynamodb = boto3.resource("dynamodb")
     return dynamodb.Table(os.getenv("FILES_TABLE"))
 
@@ -37,7 +38,7 @@ def lambda_handler(event, context):
         return response.api_response(
             500,
             message="AWS error",
-            details=str(e)
+            error_details=str(e)
         )
 
     except Exception as e:

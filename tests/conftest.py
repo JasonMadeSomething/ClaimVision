@@ -77,30 +77,3 @@ def auth_event():
             "authorizer": {"claims": {"sub": "test-user-id"}}
         }
     }
-
-
-@pytest.fixture
-def mock_dynamodb(mock_boto3):
-    """Mock DynamoDB resource with tables."""
-    with mock_boto3:
-        dynamodb = boto3.resource("dynamodb", region_name="us-east-1")
-
-        tables = {
-            "FilesTable": dynamodb.create_table(
-                TableName="FilesTable",
-                KeySchema=[{"AttributeName": "id", "KeyType": "HASH"}],
-                AttributeDefinitions=[{"AttributeName": "id", "AttributeType": "S"}],
-                BillingMode="PAY_PER_REQUEST"
-            ),
-            "ClaimsTable": dynamodb.create_table(
-                TableName="ClaimsTable",
-                KeySchema=[{"AttributeName": "claim_id", "KeyType": "HASH"}],
-                AttributeDefinitions=[{"AttributeName": "claim_id", "AttributeType": "S"}],
-                BillingMode="PAY_PER_REQUEST"
-            ),
-        }
-
-        for table in tables.values():
-            table.wait_until_exists()
-
-        yield tables

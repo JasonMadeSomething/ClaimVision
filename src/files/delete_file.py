@@ -1,14 +1,15 @@
-import json
-import boto3
 import os
+import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from utils import response
 
 def get_files_table():
+    """✅ Get Files Table"""
     dynamodb = boto3.resource("dynamodb")
     return dynamodb.Table(os.getenv("FILES_TABLE"))
 
 def get_s3():
+    """✅ Get S3 client"""
     s3 = boto3.client("s3")
     return s3
 
