@@ -24,13 +24,27 @@ def api_response(
     error_details: Optional[str] = None,
 ) -> Dict[str, Union[int, str, Dict[str, Any], List[Any]]]:
     """
-    Generate a standardized API response.
+    Generates a standardized API response for HTTP endpoints.
 
-    - `status_code`: (int) HTTP status code
-    - `message`: (str, optional) custom message (defaults to standard message)
-    - `data`: (dict, list, optional) successful response payload
-    - `missing_fields`: (list, optional) auto-generates a 400 message
-    - `error_details`: (str, optional) debugging details for errors
+    Args:
+        status_code (int): HTTP status code.
+        message (Optional[str]): Custom response message.
+        data (Optional[Union[Dict, List]]): Payload data (if applicable).
+        missing_fields (Optional[List[str]]): Fields missing from request (if applicable).
+        error_details (Optional[str]): Debugging details for errors.
+
+    Returns:
+        Dict[str, Any]: Standardized API response.
+
+    Example:
+        ```
+        api_response(200, "Success", {"id": "123"})
+        # Returns:
+        {
+            "statusCode": 200,
+            "body": '{"status": "OK", "code": 200, "message": "Success", "data": {"id": "123"}}'
+        }
+        ```
     """
 
     if status_code not in STATUS_MESSAGES:
