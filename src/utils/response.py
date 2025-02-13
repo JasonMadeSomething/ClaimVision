@@ -1,4 +1,31 @@
-""" Response Utility to standardize API responses """
+"""
+Response Utility to Standardize API Responses
+
+This module provides a consistent structure for API responses across the application.
+It ensures all HTTP responses follow a predefined format, reducing inconsistencies
+between different endpoints.
+
+Features:
+- Maps standard HTTP status codes to human-readable messages.
+- Ensures a structured JSON format for all API responses.
+- Supports error details, missing fields tracking, and data payloads.
+- Converts list-based data responses into a dictionary for consistency.
+
+Usage Example:
+    ```
+    from utils.response import api_response
+
+    response = api_response(200, "Success", {"id": "123"})
+    print(response)
+    # {
+    #     "statusCode": 200,
+    #     "body": '{"status": "OK", "code": 200, "message": "Success", "data": {"id": "123"}}'
+    # }
+    ```
+
+The `api_response` function should be used for all API responses to enforce a standardized format.
+"""
+
 from typing import Any, Dict, List, Optional, Union
 from .models import APIResponse
 

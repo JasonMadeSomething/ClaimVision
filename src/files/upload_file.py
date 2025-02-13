@@ -57,7 +57,11 @@ def lambda_handler(event, _context):
     file_names = set()
     for file in files:
         if file["file_name"] in file_names:
-            return response.api_response(400, message=f"Duplicate file '{file['file_name']}' in request")
+            return response.api_response(
+                400,
+                message=f"Duplicate file '{file['file_name']}' in request",
+                error_details=f"File '{file['file_name']}' is a duplicate"
+            )
         file_names.add(file["file_name"])
 
     # ✅ Step 5: Initialize AWS Clients **(Only if Files Are Valid)**
@@ -79,14 +83,24 @@ def lambda_handler(event, _context):
 
         if not file["file_name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
             print(f"❌ Unsupported format detected: {file['file_name']}")  # 🔍 Debug log
-            failed_files.append({"file_name": file["file_name"], "reason": "Unsupported file format"})
+            failed_files.append(
+                {
+                    "file_name": file["file_name"],
+                    "reason": "Unsupported file format"
+                }
+            )
             continue  # ⬅️ **Skip this file, but continue with others**
 
         # ✅ Step 5: Decode Base64 Data
         try:
             file_bytes = base64.b64decode(file["file_data"])
-        except Exception:
-            failed_files.append({"file_name": file["file_name"], "reason": "Invalid base64 encoding"})
+        except Exception: # pylint: disable=broad-except
+            failed_files.append(
+                {
+                    "file_name": file["file_name"],
+                    "reason": "Invalid base64 encoding"
+                }
+            )
             continue
 
         # ✅ Step 6: Upload to S3
@@ -95,7 +109,7 @@ def lambda_handler(event, _context):
             s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_bytes)
         except (BotoCoreError, ClientError) as e:
             return response.api_response(500, message="AWS S3 error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
-        except Exception as e:  # 🚨 Catch unexpected errors!
+        except Exception as e:   # pylint: disable=broad-except
             return response.api_response(500, message="Unexpected AWS S3 error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
         # ✅ Step 7: Save File Metadata in DynamoDB
         file_item = {
@@ -112,7 +126,7 @@ def lambda_handler(event, _context):
         except (BotoCoreError, ClientError) as e:
             print(f"🔥 DynamoDB Exception Caught: {e}")
             return response.api_response(500, message="AWS DynamoDB error", error_details=str(e))  # ❌ STOP ALL PROCESSING HERE
-        except Exception as e:  # 🚨 Catch unexpected errors!
+        except Exception as e:   # pylint: disable=broad-except
             print(f"🚨 Unexpected Error: {e}")  # Debugging
             return response.api_response(500, message="Unexpected internal error", error_details=str(e))
 
