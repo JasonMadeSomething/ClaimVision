@@ -27,10 +27,14 @@ def lambda_handler(event, context):
         file_id = event["pathParameters"]["id"]
 
         try:
-            body = json.loads(event["body"]) if event.get("body") else {}
-            print(type(body))
-        except Exception as e:
-            return response.api_response(400, message="Invalid JSON format in request body")
+            body = json.loads(event["body"]) if "body" in event else {}
+        except (json.JSONDecodeError, KeyError) as e:
+            return response.api_response(
+                400,
+                message="Invalid JSON format in request body",
+                error_details=str(e)
+            )
+
 
         # Build a list of missing fields dynamically
         missing_fields = []

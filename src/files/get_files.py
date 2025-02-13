@@ -13,10 +13,11 @@ def decimal_to_int(obj):
     return obj
 
 def get_files_table():
+    """✅ Get Files Table"""
     dynamodb = boto3.resource("dynamodb")
     return dynamodb.Table(os.getenv("FILES_TABLE"))
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """Retrieve paginated list of files for the authenticated user"""
     try:
         files_table = get_files_table()

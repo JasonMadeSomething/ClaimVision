@@ -1,10 +1,28 @@
-from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
-from typing import Optional, List
+"""File model for storing file metadata in DynamoDB"""
 import uuid
-
+from datetime import datetime
+from decimal import Decimal
+from typing import Optional, List
+from pydantic import BaseModel, Field, field_validator
 
 class File(BaseModel):
+    """File model
+    Attributes:
+        id: Optional[str] = None  # Auto-generated UUID
+        user_id: str
+        file_name: str = Field(..., min_length=1, max_length=255)
+        s3_key: str  # Path in S3 bucket
+        uploaded_at: Optional[str] = None  # Will be set in Lambda function
+        description: Optional[str] = None
+        claim_id: Optional[str] = None  # If associated with a claim
+        labels: List[str] = []  # Rekognition labels / user-provided labels
+        status: str = "uploaded"  # uploaded, processing, processed
+        file_url: str
+        mime_type: str
+        size: int
+        resolution: Optional[str] = None
+        detected_objects: Optional[List[str]] = None
+    """
     id: Optional[str] = None  # Auto-generated UUID
     user_id: str
     file_name: str = Field(..., min_length=1, max_length=255)
@@ -53,7 +71,7 @@ class File(BaseModel):
         },
     }
 
-        
+
     @classmethod
     def from_dynamodb_dict(cls, data):
         """Convert DynamoDB item back into a Pydantic model"""
@@ -61,8 +79,11 @@ class File(BaseModel):
             metadata = data["metadata"]
             data["metadata"] = {
                 "mime_type": metadata.get("mime_type"),
-            "size": int(metadata["size"]) if "size" in metadata and isinstance(metadata["size"], Decimal) else metadata["size"],
-            "resolution": metadata.get("resolution"),
-            "detected_objects": metadata.get("detected_objects", []),
-        }
+                "size": int(metadata["size"]) if "size" in metadata and isinstance(
+                    metadata["size"],
+                    Decimal
+                ) else metadata["size"],
+                "resolution": metadata.get("resolution"),
+                "detected_objects": metadata.get("detected_objects", []),
+            }
         return cls(**data)

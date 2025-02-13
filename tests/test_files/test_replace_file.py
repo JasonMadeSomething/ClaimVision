@@ -105,9 +105,9 @@ def test_replace_file_dynamodb_error(mock_dynamodb, mock_s3, api_gateway_event):
     """❌ Test handling a DynamoDB failure (should return 500)"""
 
     event = api_gateway_event(
-        http_method="PUT", 
-        path_params={"id": "file-1"}, 
-        body=test_replace_payload, 
+        http_method="PUT",
+        path_params={"id": "file-1"},
+        body=test_replace_payload,
         auth_user="user-123")
     mock_table = mock_dynamodb.return_value
     mock_table.get_item.return_value = {

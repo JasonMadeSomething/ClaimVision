@@ -1,3 +1,4 @@
+"""✅ Delete File"""
 import os
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -14,10 +15,9 @@ def get_s3():
     return s3
 
 
-def lambda_handler(event, context):
-    """Delete a file (DELETE)"""
-
-    BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+def lambda_handler(event, _context):
+    """Delete a file"""
+    s3_bucket_name = os.getenv("S3_BUCKET_NAME")
     try:
         s3 = get_s3()
         files_table = get_files_table()
@@ -37,7 +37,7 @@ def lambda_handler(event, context):
         s3_key = f"uploads/{user_id}/{file_name}"
 
         # Delete from S3
-        s3.delete_object(Bucket=BUCKET_NAME, Key=s3_key)
+        s3.delete_object(Bucket=s3_bucket_name, Key=s3_key)
 
         # Delete metadata from DynamoDB
         files_table.delete_item(Key={"id": file_id})

@@ -7,13 +7,15 @@ from utils import response
 
 # ✅ Helper functions to get AWS resources
 def get_s3():
+    """Get the S3 client"""
     return boto3.client("s3")
 
 def get_files_table():
+    """Get the DynamoDB table for files"""
     dynamodb = boto3.resource("dynamodb")
     return dynamodb.Table(os.getenv("FILES_TABLE"))
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """Handles file uploads"""
     
     # ✅ Step 1: Ensure Authenticated Request
@@ -69,7 +71,12 @@ def lambda_handler(event, context):
     for file in files:
 
         if "file_name" not in file:
-            failed_files.append({"file_name": file.get("file_name", "UNKNOWN"), "reason": "Missing 'file_name' field"})
+            failed_files.append(
+                {
+                    "file_name": file.get("file_name", "UNKNOWN"),
+                    "reason": "Missing 'file_name' field"
+                }
+            )
             continue
 
         if not file["file_name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):

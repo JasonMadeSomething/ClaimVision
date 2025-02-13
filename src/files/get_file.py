@@ -16,7 +16,7 @@ def get_files_table():
     dynamodb = boto3.resource("dynamodb")
     return dynamodb.Table(os.getenv("FILES_TABLE"))
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """Retrieve metadata of a single file"""
     try:
         files_table = get_files_table()
