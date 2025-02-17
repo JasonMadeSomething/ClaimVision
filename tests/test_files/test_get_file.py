@@ -1,11 +1,33 @@
-"""✅ Test retrieving a single file"""
+"""✅ Test retrieving a single file from PostgreSQL"""
 import json
-from unittest.mock import patch
-from test_data.files_data import test_files
+import pytest
 from files.get_file import lambda_handler
+from models import File  # Assuming your SQLAlchemy model is named File
 
-@patch("files.get_file.get_files_table")
-def test_get_file_success(mock_dynamodb, api_gateway_event):
+@pytest.fixture
+def seed_files(test_db):
+    """Insert test file data into the database."""
+    test_file = File(
+        id="file-1",
+        user_id="user-123",
+        file_name="test.pdf",
+        s3_key="test-key",
+        uploaded_at="2025-02-16T22:39:25.452734",
+        description=None,
+        claim_id=None,
+        labels=[],  # ✅ Ensure this is a list, not a string
+        status="uploaded",
+        file_url="https://example.com/test.pdf",  # ✅ Provide a default value
+        mime_type="application/pdf",  # ✅ Provide a default value
+        size=12345,  # ✅ Provide a default value
+        resolution=None,
+        detected_objects=[],
+    )
+    test_db.add(test_file)
+    test_db.commit()
+
+@pytest.mark.usefixtures("seed_files")
+def test_get_file_success(api_gateway_event, test_db):
     """✅ Test retrieving a single file successfully"""
 
     event = api_gateway_event(
@@ -13,8 +35,6 @@ def test_get_file_success(mock_dynamodb, api_gateway_event):
         path_params={"id": "file-1"},
         auth_user="user-123",
     )
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {"Item": test_files[0]}
 
     response = lambda_handler(event, {})
     body = json.loads(response["body"])
@@ -22,8 +42,7 @@ def test_get_file_success(mock_dynamodb, api_gateway_event):
     assert response["statusCode"] == 200
     assert body["data"]["id"] == "file-1"
 
-@patch("files.get_file.get_files_table")
-def test_get_file_not_found(mock_dynamodb, api_gateway_event):
+def test_get_file_not_found(api_gateway_event, test_db):
     """❌ Test retrieving a non-existent file"""
 
     event = api_gateway_event(
@@ -31,8 +50,6 @@ def test_get_file_not_found(mock_dynamodb, api_gateway_event):
         path_params={"id": "file-99"},
         auth_user="user-123",
     )
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {}
 
     response = lambda_handler(event, {})
     assert response["statusCode"] == 404

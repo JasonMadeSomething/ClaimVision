@@ -1,46 +1,59 @@
 import os
 import sys
-import boto3
-import pytest
 import json
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 from unittest.mock import patch, MagicMock
-from moto import mock_aws
+from testcontainers.postgres import PostgresContainer  # Optional if using Testcontainers
+from models import File, Base 
+from dotenv import load_dotenv
 
+load_dotenv()
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
+DATABASE_URL = "postgresql://testuser:testpassword@localhost:5432/testdb"
+
+
+# -----------------
+# ENVIRONMENT MOCKS
+# -----------------
+# -----------------
 @pytest.fixture(autouse=True)
 def mock_env():
     """Set required environment variables for testing."""
-    os.environ["FILES_TABLE"] = "test-files-table"
-    os.environ["CLAIMS_TABLE"] = "test-claims-table"
+    os.environ["DATABASE_URL"] = "postgresql://user:password@localhost:5432/testdb"
     os.environ["S3_BUCKET_NAME"] = "test-bucket"
     os.environ["COGNITO_USER_POOL_ID"] = "test-user-pool-id"
     os.environ["COGNITO_USER_POOL_CLIENT_ID"] = "test-user-pool-client-id"
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["COGNITO_USER_POOL_CLIENT_SECRET"] = "test-user-pool-client-secret"
+    
+# -----------------
+# DATABASE FIXTURE
+# -----------------
+@pytest.fixture(scope="session")
+def test_db():
+    """Provides a fresh test database for each test session."""
+    engine = create_engine(DATABASE_URL)
+    Session = sessionmaker(bind=engine)
+    
+    Base.metadata.drop_all(engine)
+    # ✅ Setup: Create tables before tests run
+    Base.metadata.create_all(engine)
+    
+    session = Session()
 
+    yield session  # ✅ Provide session for tests
 
-@pytest.fixture
-def mock_dynamodb():
-    """Mock the entire DynamoDB service and allow dynamic table creation."""
-    with patch("boto3.resource") as mock_resource:
-        mock_dynamodb = MagicMock()
-        mock_resource.return_value = mock_dynamodb
+    # ✅ Teardown: Drop all tables after tests complete
+    session.close()
+    Base.metadata.drop_all(engine)
+    engine.dispose()
 
-        tables = {}
-
-        def get_mock_table(table_name):
-            """Dynamically create a mock table if it doesn’t exist."""
-            if table_name not in tables:
-                mock_table = MagicMock()
-                tables[table_name] = mock_table
-            return tables[table_name]
-
-        # Set up the Table() function to return dynamically created tables
-        mock_dynamodb.Table.side_effect = get_mock_table
-
-        yield mock_dynamodb
-
+# -----------------
+# API GATEWAY MOCKS
+# -----------------
 @pytest.fixture
 def api_gateway_event():
     """Creates a mock API Gateway event for testing"""
@@ -61,14 +74,20 @@ def api_gateway_event():
 
     return _event
 
+# -----------------
+# MOCK S3
+# -----------------
 @pytest.fixture
 def mock_s3():
     """Mock S3 client for testing"""
-    with mock_aws():
-        s3 = boto3.client("s3", region_name="us-east-1")
-        s3.create_bucket(Bucket="test-bucket")
-        yield s3
+    with patch("boto3.client") as mock_client:
+        mock_s3 = MagicMock()
+        mock_client.return_value = mock_s3
+        yield mock_s3
 
+# -----------------
+# AUTH MOCKS
+# -----------------
 @pytest.fixture
 def auth_event():
     """Mock API Gateway event with an authenticated user."""
