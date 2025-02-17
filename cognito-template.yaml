@@ -11,7 +11,7 @@ Parameters:
     Description: "Specify the environment: dev or prod"
 
 Resources:
-  # ✅ Cognito User Pool
+
   CognitoUserPool:
     Type: AWS::Cognito::UserPool
     Properties:
@@ -25,6 +25,17 @@ Resources:
           RequireSymbols: false
       AutoVerifiedAttributes:
         - email
+      Schema:
+        - Name: household_id
+          AttributeDataType: String  # ✅ Store as a String
+          Mutable: true
+          Required: false
+          DeveloperOnlyAttribute: false
+      LambdaConfig:
+        PostConfirmation: !ImportValue
+          Fn::Sub: "ClaimVision-PostConfirmationLambdaArn-${Env}"
+
+
 
   # ✅ Cognito App Client
   CognitoUserPoolClient:
@@ -47,6 +58,12 @@ Resources:
         - "http://localhost:3000"
       LogoutURLs:
         - "http://localhost:3000"
+      WriteAttributes:
+        - email
+        - custom:household_id
+      ReadAttributes:
+        - email
+        - custom:household_id
 
 Outputs:
   CognitoUserPoolId:
