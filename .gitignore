@@ -77,4 +77,6 @@ Thumbs.db
 # Payloads
 scripts/payloads/
 
+# Templates
 template.yaml
+cognito-template.yaml
