@@ -11,11 +11,12 @@ Parameters:
     Description: 'Specify the environment: dev or prod'
   CognitoUserPoolId:
     Type: String
-    Description: "The Cognito User Pool ID from the external stack"
+    Description: The Cognito User Pool ID from the external stack
 
 Conditions:
-  IsDev: !Equals [!Ref Env, "dev"]
-
+  IsDev: !Equals
+    - !Ref Env
+    - dev
 
 Mappings:
   CognitoExports:
@@ -47,16 +48,16 @@ Resources:
   ClaimsTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "ClaimsTable-${Env}"
+      TableName: !Sub ClaimsTable-${Env}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
-        - AttributeName: id  # ✅ Primary Key
+        - AttributeName: id # ✅ Primary Key
           AttributeType: S
-        - AttributeName: user_id  # ✅ Secondary Index (GlobalSecondaryIndexes uses this)
+        - AttributeName: user_id # ✅ Secondary Index (GlobalSecondaryIndexes uses this)
           AttributeType: S
       KeySchema:
         - AttributeName: id
-          KeyType: HASH  # ✅ The main partition key
+          KeyType: HASH # ✅ The main partition key
       GlobalSecondaryIndexes:
         - IndexName: UserIdIndex
           KeySchema:
@@ -69,7 +70,7 @@ Resources:
   FilesTable:
     Type: AWS::DynamoDB::Table
     Properties:
-      TableName: !Sub "FilesTable-${Env}"
+      TableName: !Sub FilesTable-${Env}
       BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: id
@@ -92,36 +93,63 @@ Resources:
   ClaimVisionBucket:
     Type: AWS::S3::Bucket
     Properties:
-      BucketName: !Sub "claimvision-files-${AWS::AccountId}-${Env}"
+      BucketName: !Sub claimvision-files-${AWS::AccountId}-${Env}
 
   # User Pool ID
   UserPoolId:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !FindInMap [CognitoExports, !Ref Env, UserPoolId]
+      Name: !FindInMap
+        - CognitoExports
+        - !Ref Env
+        - UserPoolId
       Type: String
       Value: !ImportValue
-        Fn::FindInMap: [CognitoExports, !Ref Env, UserPoolId]
+        Fn::FindInMap:
+          - CognitoExports
+          - !Ref Env
+          - UserPoolId
 
   ###API###
   # API Gateway
   ClaimVisionAPI:
     Type: AWS::Serverless::Api
     Properties:
-      Name: !Sub "ClaimVisionAPI-${Env}"
+      Name: !Sub ClaimVisionAPI-${Env}
       StageName: dev
       Cors:
-        AllowMethods: "'OPTIONS,POST,GET'"
-        AllowHeaders: "'Content-Type,Authorization'"
-        AllowOrigin: "'*'"
+        AllowMethods: '''OPTIONS,POST,GET'''
+        AllowHeaders: '''Content-Type,Authorization'''
+        AllowOrigin: '''*'''
       Auth:
         Authorizers:
           CognitoAuthorizer:
             UserPoolId: !Ref CognitoUserPoolId
-            UserPoolArn: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+            UserPoolArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
             IdentitySource: method.request.header.Authorization
 
   ###Lambdas###
+  PostConfirmationLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub "ClaimVisionPostConfirmation-${Env}"
+      Runtime: python3.12
+      Handler: auth.post_confirmation.lambda_handler
+      CodeUri: src/
+      Timeout: 10
+      MemorySize: 128
+    Policies:
+      - AWSLambdaBasicExecutionRole
+      - Statement:
+          Effect: Allow
+          Action:
+            - cognito-idp:AdminUpdateUserAttributes
+          Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+    Environment:
+      Variables:
+        USER_POOL_ID: !Ref CognitoUserPoolId
+
+
   ##Auth##
   # Login Function
   LoginFunction:
@@ -155,7 +183,7 @@ Resources:
           Properties:
             Path: /auth/register
             Method: POST
-            RestApiId: !Ref ClaimVisionAPI 
+            RestApiId: !Ref ClaimVisionAPI
   # Confirm Email
   ConfirmFunction:
     Type: AWS::Serverless::Function
@@ -203,7 +231,7 @@ Resources:
   GetClaimsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: claims.get_claims.lambda_handler  # ✅ Dedicated GET handler
+      Handler: claims.get_claims.lambda_handler # ✅ Dedicated GET handler
       Runtime: python3.12
       CodeUri: src/
       Policies:
@@ -211,11 +239,11 @@ Resources:
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:Query  # ✅ Fetch all claims for user
-              - dynamodb:GetItem  # ✅ Fetch specific claims
+              - dynamodb:Query # ✅ Fetch all claims for user
+              - dynamodb:GetItem # ✅ Fetch specific claims
             Resource:
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}"
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}/index/UserIdIndex"
+              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}
+              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}/index/UserIdIndex
       Environment:
         Variables:
           CLAIMS_TABLE: !Ref ClaimsTable
@@ -236,26 +264,26 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-  
+
   # Claims CRUD Function
   ModifyClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: claims.modify_claims.lambda_handler  # ✅ Dedicated CRUD handler
+      Handler: claims.modify_claims.lambda_handler # ✅ Dedicated CRUD handler
       Runtime: python3.12
       CodeUri: src/
       Policies:
         - AWSLambdaBasicExecutionRole
-        - AWSLambdaDynamoDBExecutionRole  # ✅ Full CRUD permissions for claims
+        - AWSLambdaDynamoDBExecutionRole # ✅ Full CRUD permissions for claims
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:PutItem  # ✅ Create claims
-              - dynamodb:GetItem  # ✅ Read claims
-              - dynamodb:UpdateItem  # ✅ Modify claims
-              - dynamodb:DeleteItem  # ✅ Remove claims
+              - dynamodb:PutItem # ✅ Create claims
+              - dynamodb:GetItem # ✅ Read claims
+              - dynamodb:UpdateItem # ✅ Modify claims
+              - dynamodb:DeleteItem # ✅ Remove claims
             Resource:
-              - !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}"
+              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}
       Environment:
         Variables:
           CLAIMS_TABLE: !Ref ClaimsTable
@@ -298,12 +326,12 @@ Resources:
         - Statement:
             Effect: Allow
             Action:
-              - cognito-idp:ListUsers  # ✅ Allow listing users in Cognito
-            Resource: 
-              - !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+              - cognito-idp:ListUsers # ✅ Allow listing users in Cognito
+            Resource:
+              - !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       Environment:
         Variables:
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId  # ✅ Fix reference issue
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId # ✅ Fix reference issue
       Events:
         GetUsersAPI:
           Type: Api
@@ -327,7 +355,7 @@ Resources:
             Action:
               - cognito-idp:AdminAddUserToGroup
               - cognito-idp:AdminRemoveUserFromGroup
-            Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       Environment:
         Variables:
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
@@ -341,7 +369,7 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
-##Files##
+  ##Files##
   # Upload File Function
   UploadFileFunction:
     Type: AWS::Serverless::Function
@@ -355,12 +383,12 @@ Resources:
             Effect: Allow
             Action:
               - s3:PutObject
-            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+            Resource: !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
         - Statement:
             Effect: Allow
             Action:
               - dynamodb:PutItem
-            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
       Environment:
         Variables:
           S3_BUCKET_NAME: !Ref ClaimVisionBucket
@@ -388,7 +416,7 @@ Resources:
             Effect: Allow
             Action:
               - dynamodb:Query
-            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex"
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
@@ -415,7 +443,7 @@ Resources:
             Effect: Allow
             Action:
               - dynamodb:GetItem
-            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
@@ -443,7 +471,7 @@ Resources:
             Action:
               - dynamodb:UpdateItem
               - dynamodb:GetItem
-            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
@@ -470,13 +498,13 @@ Resources:
             Effect: Allow
             Action:
               - s3:PutObject
-            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+            Resource: !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
         - Statement:
             Effect: Allow
             Action:
               - dynamodb:UpdateItem
               - dynamodb:GetItem
-            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
@@ -505,13 +533,13 @@ Resources:
             Action:
               - s3:GetObject
               - s3:DeleteObject
-            Resource: !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+            Resource: !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
         - Statement:
             Effect: Allow
             Action:
               - dynamodb:GetItem
               - dynamodb:DeleteItem
-            Resource: !Sub "arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}"
+            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
@@ -526,14 +554,18 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
-
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
     Description: API Gateway Invoke URL
     Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
   ClaimVisionBucketName:
-    Description: "The S3 Bucket for storing claim-related files"
+    Description: The S3 Bucket for storing claim-related files
     Value: !Ref ClaimVisionBucket
     Export:
-      Name: "ClaimVisionBucketName"
+      Name: ClaimVisionBucketName
+  PostConfirmationLambdaArn:
+    Description: "ARN of the Post Confirmation Lambda"
+    Value: !GetAtt PostConfirmationLambda.Arn
+    Export:
+      Name: !Sub "ClaimVision-PostConfirmationLambdaArn-${Env}"
