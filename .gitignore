@@ -95,3 +95,6 @@ terraform/application/terraform.tfstate
 terraform/terraform.tfvars
 terraform/application/ssm/variables.tfvars
 terraform/.terraform/terraform.tfstate
+terraform/.terraform/
+terraform/application/lambda/*.zip
+terraform/.terraform.lock.hcl
