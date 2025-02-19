@@ -77,6 +77,21 @@ Thumbs.db
 # Payloads
 scripts/payloads/
 
+/.mypy_cache
+/.pytest_cache
+
 # Templates
 template.yaml
-cognito-template.yaml
+
+/terraform/networking/.terraform/
+/terraform/networking/terraform.tfvars
+terraform/networking/.terraform.lock.hcl
+terraform/networking/terraform.tfvars
+terraform/backend.hcl
+terraform/application/terraform.tfvars
+terraform/application/.terraform.lock.hcl
+/terraform/application/.terraform/
+terraform/application/terraform.tfstate
+terraform/terraform.tfvars
+terraform/application/ssm/variables.tfvars
+terraform/.terraform/terraform.tfstate
