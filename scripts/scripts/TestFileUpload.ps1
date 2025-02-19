@@ -1,5 +1,5 @@
 # Load API details and credentials from payload file
-$payloadPath = "$PSScriptRoot\..\payloads\file_upload_test.json"
+$payloadPath = "$PSScriptRoot\..\payloads\file_uploads_test.json"
 $payload = Get-Content -Raw -Path $payloadPath | ConvertFrom-Json
 
 $baseUrl = $payload.BaseUrl
@@ -9,7 +9,7 @@ $filePath = $payload.FilePath
 $fileName = $payload.FileName
 
 Write-Host "Base API URL: $baseUrl"
-Write-Host "Uploading File: $fileName from $filePath"
+
 
 # Step 1: Authenticate and retrieve token
 $response = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
@@ -18,11 +18,12 @@ $response = Invoke-WebRequest -Uri "$baseUrl/auth/login" `
     -Body (ConvertTo-Json -Compress -Depth 2 @{username = $username; password = $password}) `
     -UseBasicParsing
 
-$token = ($response.Content | ConvertFrom-Json).id_token
+
+$token = ($response.Content | ConvertFrom-Json).data.id_token
 
 # Debug: Ensure token is retrieved
 if (-not $token) {
-    Write-Host "ERROR: Access token is null or empty!"
+    Write-Host "❌ ERROR: Access token is null or empty!"
     exit 1
 }
 
@@ -33,7 +34,7 @@ if (-Not (Test-Path $filePath)) {
     Write-Host "ERROR: File '$filePath' not found!"
     exit 1
 }
-
+Write-Host "Uploading File: $fileName from $filePath"
 $fileContent = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($filePath))
 
 # Step 3: Prepare JSON Payload
