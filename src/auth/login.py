@@ -1,7 +1,7 @@
 import json
 import boto3
 import os
-from ..utils import response as response
+from utils import response
 # Initialize Cognito client
 cognito_client = boto3.client('cognito-idp', region_name=os.getenv("AWS_REGION", "us-east-1"))
 
@@ -46,14 +46,9 @@ def lambda_handler(event, context):
         
 
     except cognito_client.exceptions.NotAuthorizedException:
-        return {
-            response.api_response(401, message="Invalid username or password")
-        }
+        return response.api_response(401, message="Invalid username or password")
+       
     except cognito_client.exceptions.UserNotFoundException:
-        return {
-            response.api_response(404, message="User does not exist.")
-        }
+        return response.api_response(404, message="User does not exist.")
     except Exception as e:
-        return {
-            response.api_response(500, message="An error occurred", error_details=str(e))
-        }
+        return response.api_response(500, message="An error occurred", error_details=str(e))

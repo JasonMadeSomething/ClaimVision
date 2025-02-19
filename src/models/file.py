@@ -45,10 +45,10 @@ class File(Base):
     """
 
     __tablename__: str = "files"
-    __table_args__ = (UniqueConstraint("user_id", "file_name", name="uq_user_file"),)
 
     id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id: str = Column(String, nullable=False)
+    uploaded_by: str = Column(String, ForeignKey("users.id"), nullable=False)  # ✅ Who uploaded it
+    household_id: int = Column(Integer, ForeignKey("households.id"), nullable=False)
     file_name: str = Column(String(255), nullable=False)
     s3_key: str = Column(String, nullable=False)
     uploaded_at: str = Column(String, default=lambda: datetime.now(UTC).isoformat())
@@ -78,7 +78,8 @@ class File(Base):
         """
         return {
             "id": self.id,
-            "user_id": self.user_id,
+            "uploaded_by": self.uploaded_by,
+            "household_id": self.household_id,
             "file_name": self.file_name,
             "s3_key": self.s3_key,
             "uploaded_at": self.uploaded_at,

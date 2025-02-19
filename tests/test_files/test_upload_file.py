@@ -2,16 +2,14 @@
 """✅ Test uploading a valid file successfully"""
 import json
 from unittest.mock import patch, MagicMock
-from models.file import File
+from sqlalchemy.exc import SQLAlchemyError
 from test_data.files_data import (
     test_upload_payload,
     test_large_file_payload,
-    test_invalid_file_payload,
     test_missing_fields_payload,
-    duplicate_payload,
 )
 from files.upload_file import lambda_handler
-from sqlalchemy.exc import SQLAlchemyError
+
 
 @patch("files.upload_file.get_s3")
 @patch("files.upload_file.get_db_session")  # ✅ Mock the DB session instead of DynamoDB

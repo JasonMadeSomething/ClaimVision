@@ -1,5 +1,5 @@
+"""✅ Test deleting a file"""
 import json
-import pytest
 from unittest.mock import patch
 from test_data.files_data import test_files
 from files.delete_file import lambda_handler

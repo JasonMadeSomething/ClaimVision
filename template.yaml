@@ -42,7 +42,6 @@ Globals:
           - !ImportValue CognitoUserPoolId-prod
 
 Resources:
-
   ####Tables####
   # Claims
   ClaimsTable:
@@ -88,13 +87,6 @@ Resources:
           Projection:
             ProjectionType: ALL
 
-  ###S3###
-  # Files Bucket
-  ClaimVisionBucket:
-    Type: AWS::S3::Bucket
-    Properties:
-      BucketName: !Sub claimvision-files-${AWS::AccountId}-${Env}
-
   # User Pool ID
   UserPoolId:
     Type: AWS::SSM::Parameter
@@ -132,7 +124,7 @@ Resources:
   PostConfirmationLambda:
     Type: AWS::Serverless::Function
     Properties:
-      FunctionName: !Sub "ClaimVisionPostConfirmation-${Env}"
+      FunctionName: !Sub ClaimVisionPostConfirmation-${Env}
       Runtime: python3.12
       Handler: auth.post_confirmation.lambda_handler
       CodeUri: src/
@@ -144,11 +136,10 @@ Resources:
           Effect: Allow
           Action:
             - cognito-idp:AdminUpdateUserAttributes
-          Resource: !Sub "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}"
+          Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
     Environment:
       Variables:
         USER_POOL_ID: !Ref CognitoUserPoolId
-
 
   ##Auth##
   # Login Function
@@ -369,40 +360,6 @@ Resources:
             Auth:
               Authorizer: CognitoAuthorizer
 
-  ##Files##
-  # Upload File Function
-  UploadFileFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: files.upload_file.lambda_handler
-      Runtime: python3.12
-      CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - Statement:
-            Effect: Allow
-            Action:
-              - s3:PutObject
-            Resource: !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:PutItem
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
-      Environment:
-        Variables:
-          S3_BUCKET_NAME: !Ref ClaimVisionBucket
-          FILES_TABLE: !Ref FilesTable
-      Events:
-        UploadFileAPI:
-          Type: Api
-          Properties:
-            Path: /files/upload
-            Method: POST
-            RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: CognitoAuthorizer
-
   # Get Files Function (Paginated)
   GetFilesFunction:
     Type: AWS::Serverless::Function
@@ -508,7 +465,6 @@ Resources:
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
-          S3_BUCKET_NAME: !Ref ClaimVisionBucket
       Events:
         ReplaceFileAPI:
           Type: Api
@@ -543,7 +499,6 @@ Resources:
       Environment:
         Variables:
           FILES_TABLE: !Ref FilesTable
-          S3_BUCKET_NAME: !Ref ClaimVisionBucket
       Events:
         DeleteFileAPI:
           Type: Api
@@ -559,13 +514,8 @@ Outputs:
   ApiGatewayInvokeURL:
     Description: API Gateway Invoke URL
     Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
-  ClaimVisionBucketName:
-    Description: The S3 Bucket for storing claim-related files
-    Value: !Ref ClaimVisionBucket
-    Export:
-      Name: ClaimVisionBucketName
   PostConfirmationLambdaArn:
-    Description: "ARN of the Post Confirmation Lambda"
+    Description: ARN of the Post Confirmation Lambda
     Value: !GetAtt PostConfirmationLambda.Arn
     Export:
-      Name: !Sub "ClaimVision-PostConfirmationLambdaArn-${Env}"
+      Name: !Sub ClaimVision-PostConfirmationLambdaArn-${Env}
