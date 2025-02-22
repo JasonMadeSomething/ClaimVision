@@ -1,27 +1,13 @@
-"""Household model for PostgreSQL database."""
-import uuid
-from sqlalchemy import Column, String, Integer
+from sqlalchemy import Column, String
 from sqlalchemy.orm import relationship
-from models import Base
+from models.base import Base
+import uuid
 
 class Household(Base):
-    """
-    Represents a household that owns files and claims.
-
-    Attributes
-    ----------
-    id : int
-        Unique identifier for the household.
-    name : str
-        Name of the household (optional).
-    """
-    
     __tablename__ = "households"
 
-    id: int = Column(Integer, primary_key=True, autoincrement=True)
-    name: str = Column(String(255), nullable=True)  # Optional household name
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))  # ✅ Ensure ID is String
+    name = Column(String, nullable=False)
 
-    # ✅ Establish relationships
     users = relationship("User", back_populates="household")
-    files = relationship("File", back_populates="household")
     claims = relationship("Claim", back_populates="household")

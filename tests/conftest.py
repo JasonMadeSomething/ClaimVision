@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+import uuid
 import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
@@ -12,45 +13,45 @@ from dotenv import load_dotenv
 load_dotenv()
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
-DATABASE_URL = "postgresql://testuser:testpassword@localhost:5432/testdb"
 
 
 # -----------------
 # ENVIRONMENT MOCKS
 # -----------------
-# -----------------
 @pytest.fixture(autouse=True)
 def mock_env():
     """Set required environment variables for testing."""
-    os.environ["DATABASE_URL"] = "postgresql://user:password@localhost:5432/testdb"
+    os.environ["DATABASE_URL"] = "postgresql://testuser:testpassword@localhost:5432/testdb"
     os.environ["S3_BUCKET_NAME"] = "test-bucket"
-    os.environ["COGNITO_USER_POOL_ID"] = "test-user-pool-id"
-    os.environ["COGNITO_USER_POOL_CLIENT_ID"] = "test-user-pool-client-id"
+    os.environ["COGNITO_USER_POOL_ID"] = "us-east-1_testpool"
+    os.environ["COGNITO_USER_POOL_CLIENT_ID"] = "1234567890abcdef1234567890"
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["COGNITO_USER_POOL_CLIENT_SECRET"] = "test-user-pool-client-secret"
     
 # -----------------
 # DATABASE FIXTURE
 # -----------------
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def test_db():
-    """Provides a fresh test database for each test session."""
-    engine = create_engine(DATABASE_URL)
-    Session = sessionmaker(bind=engine)
-    
-    Base.metadata.drop_all(engine)
-    # ✅ Setup: Create tables before tests run
-    Base.metadata.create_all(engine)
-    
-    session = Session()
+    """Provides a fresh test database for each test function."""
+    engine = create_engine(os.getenv("DATABASE_URL"))
+    TestingSessionLocal = sessionmaker(bind=engine)
 
-    yield session  # ✅ Provide session for tests
+    # ✅ Ensure tables are dropped and recreated before each test
+    with engine.begin() as conn:
+        Base.metadata.drop_all(conn)
+        Base.metadata.create_all(conn)
 
-    # ✅ Teardown: Drop all tables after tests complete
+    session = TestingSessionLocal()
+
+    yield session  # ✅ Provide session for the test
+
+    # ✅ Teardown: Drop all tables after each test
+    session.rollback()
     session.close()
-    Base.metadata.drop_all(engine)
+    with engine.begin() as conn:
+        Base.metadata.drop_all(conn)
     engine.dispose()
-
 # -----------------
 # API GATEWAY MOCKS
 # -----------------
@@ -96,3 +97,48 @@ def auth_event():
             "authorizer": {"claims": {"sub": "test-user-id"}}
         }
     }
+
+@pytest.fixture(scope="function", autouse=True)
+def mock_cognito():
+    """✅ Fully mock Cognito interactions for all tests."""
+    with patch("boto3.client") as mock_boto_client:
+        mock_cognito_client = MagicMock()
+        mock_boto_client.return_value = mock_cognito_client
+
+        # ✅ Ensure a **unique** Cognito UserSub is generated per test
+        def generate_unique_user_sub(*args, **kwargs):
+            return {"UserSub": str(uuid.uuid4())}  # ✅ Unique ID for each test
+
+        mock_cognito_client.sign_up.side_effect = generate_unique_user_sub  # ✅ Apply dynamic user generation
+
+        # ✅ Mock Cognito exceptions
+        class CognitoExceptions:
+            class UsernameExistsException(Exception):
+                pass
+
+            class InvalidPasswordException(Exception):
+                pass
+
+            class UserNotFoundException(Exception):
+                pass
+
+            class NotAuthorizedException(Exception):
+                pass
+
+        mock_cognito_client.exceptions = CognitoExceptions  # ✅ Assign exceptions
+
+        # ✅ Mock Attribute Updates (e.g., Household ID)
+        mock_cognito_client.admin_update_user_attributes.return_value = {}
+
+        # ✅ Mock Cognito Login
+        mock_cognito_client.initiate_auth.return_value = {
+            "AuthenticationResult": {
+                "AccessToken": "mock-access-token",
+                "IdToken": "mock-id-token",
+                "RefreshToken": "mock-refresh-token"
+            }
+        }
+
+        yield mock_cognito_client  # ✅ Provide mock to all tests
+
+        mock_cognito_client.reset_mock()
