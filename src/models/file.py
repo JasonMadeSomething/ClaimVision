@@ -16,8 +16,10 @@ class File(Base):
     ----------
     id : str
         Unique identifier for the file (UUID).
-    user_id : str
+    uploaded_by : str
         ID of the user who owns the file.
+    household_id : str
+        ID of the household associated with the file.
     file_name : str
         Name of the file.
     s3_key : str
@@ -47,8 +49,8 @@ class File(Base):
     __tablename__: str = "files"
 
     id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    uploaded_by: str = Column(String, ForeignKey("users.id"), nullable=False)  # ✅ Who uploaded it
-    household_id: int = Column(Integer, ForeignKey("households.id"), nullable=False)
+    uploaded_by: str = Column(String, ForeignKey("users.id"), nullable=False) # ✅ Who uploaded it
+    household_id: str = Column(String, ForeignKey("households.id"), nullable=False)
     file_name: str = Column(String(255), nullable=False)
     s3_key: str = Column(String, nullable=False)
     uploaded_at: str = Column(String, default=lambda: datetime.now(UTC).isoformat())
