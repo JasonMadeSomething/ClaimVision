@@ -14,7 +14,7 @@ class Claim(Base):
     ----------
     id : int
         Unique identifier for the claim.
-    household_id : int
+    household_id : str
         ID of the household that owns the claim.
     title : str
         Short title for the claim.
@@ -29,8 +29,8 @@ class Claim(Base):
     __tablename__ = "claims"
 
     id: int = Column(Integer, primary_key=True, autoincrement=True)
-    household_id: int = Column(
-        Integer, ForeignKey("households.id"), nullable=False
+    household_id: str = Column(
+        String, ForeignKey("households.id"), nullable=False
     )  # ✅ Household ownership
     title: str = Column(String(255), nullable=False)
     description: Optional[str] = Column(String, nullable=True)

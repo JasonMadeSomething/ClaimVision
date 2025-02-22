@@ -25,13 +25,21 @@ from botocore.exceptions import ClientError
 from claims.model import Claim  # ✅ Import the Claim model
 from utils import response
 
-# ✅ Initialize AWS resources
-dynamodb = boto3.resource("dynamodb")
-claims_table = dynamodb.Table(os.environ["CLAIMS_TABLE"])
-
 # ✅ Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
+
+
+def get_claims_table():
+    """
+    Returns the claims table.
+
+    Returns:
+        boto3.resource("dynamodb").Table: The claims table.
+    """
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.environ["CLAIMS_TABLE"])
+
 
 def lambda_handler(event, _context):
     """
@@ -69,6 +77,7 @@ def lambda_handler(event, _context):
             status="pending",
             created_at=datetime.utcnow().isoformat(),
         )
+        claims_table = get_claims_table()
 
         # ✅ Save to DynamoDB
         claims_table.put_item(Item=claim.to_dynamodb_dict())

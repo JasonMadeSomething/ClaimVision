@@ -1,10 +1,18 @@
 import json
 import os
 import boto3
-from ..utils import response as response
+from utils import response as response
 
-dynamodb = boto3.resource("dynamodb")
-claims_table = dynamodb.Table(os.environ["CLAIMS_TABLE"])  # Update for your environment
+
+def get_claims_table():
+    """
+    Returns the claims table.
+
+    Returns:
+        boto3.resource("dynamodb").Table: The claims table.
+    """
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.environ["CLAIMS_TABLE"])  # Update for your environment
 
 def lambda_handler(event, context):
     """Handle retrieving claims for a user with optional filtering by date range."""
@@ -30,6 +38,7 @@ def lambda_handler(event, context):
 def get_user_claims(user_id, start_date=None, end_date=None):
     """Fetch claims for the authenticated user, with optional date filtering."""
     try:
+        claims_table = get_claims_table()
         # Query claims using UserIdIndex
         response = claims_table.query(
             IndexName="UserIdIndex",  # Make sure this GSI exists

@@ -5,11 +5,19 @@ import uuid
 from datetime import datetime, date
 from botocore.exceptions import ClientError
 from .model import Claim  # ✅ Import the Claim model
-from ..utils import response as response
+from utils import response as response
 
 # DynamoDB setup
-dynamodb = boto3.resource("dynamodb")
-claims_table = dynamodb.Table(os.environ["CLAIMS_TABLE"])
+def get_claims_table():
+    """
+    Returns the claims table.
+
+    Returns:
+        boto3.resource("dynamodb").Table: The claims table.
+    """
+    dynamodb = boto3.resource("dynamodb")
+    return dynamodb.Table(os.environ["CLAIMS_TABLE"])
+
 
 def lambda_handler(event, context):
     """Handles creating, updating, and deleting claims"""
@@ -46,6 +54,7 @@ def create_claim(user_id, body):
             created_at=datetime.utcnow().isoformat(),
         )
 
+        claims_table = get_claims_table()
         claims_table.put_item(Item=claim.to_dynamodb_dict())
         return response.api_response(201, data={"id": claim.id})
 
@@ -60,6 +69,7 @@ def create_claim(user_id, body):
 
 def update_claim(user_id, claim_id, body):
     """Update an existing claim"""
+    claims_table = get_claims_table()
     response = claims_table.get_item(Key={"id": claim_id})
     claim_data = response.get("Item")
 
@@ -84,6 +94,7 @@ def update_claim(user_id, claim_id, body):
 
 def delete_claim(user_id, claim_id):
     """Delete a claim"""
+    claims_table = get_claims_table()
     claim_response = claims_table.get_item(Key={"id": claim_id})
     claim_data = claim_response.get("Item")
 
