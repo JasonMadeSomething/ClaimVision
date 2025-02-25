@@ -20,9 +20,7 @@ logger = logging.getLogger()
 
 def get_cognito_client():
     """Get Cognito client with current region."""
-    
     return boto3.client("cognito-idp", region_name="us-east-1")
-
 
 def is_valid_email(email):
     """✅ Improved regex check for valid email format."""
@@ -43,7 +41,7 @@ def detect_missing_fields(body):
     if not body.get("last_name"):
         missing_fields.append("last_name")
     return missing_fields
-   
+
 def lambda_handler(event, _context):
     """
     Handles user registration using AWS Cognito.
@@ -59,7 +57,7 @@ def lambda_handler(event, _context):
         email = body.get("email")
         first_name = body.get("first_name")  # ✅ Capture first name
         last_name = body.get("last_name")  # ✅ Capture last name
-        
+
         missing_fields = detect_missing_fields(body)
         if missing_fields:
             return response.api_response(400, missing_fields=missing_fields)
@@ -119,6 +117,13 @@ def lambda_handler(event, _context):
 
     except cognito_client.exceptions.InvalidPasswordException as e:
         return response.api_response(400, error_details=str(e))
+
+    except cognito_client.exceptions.InternalErrorException as e:
+        logger.error("Cognito Internal Error: %s", str(e))
+        return response.api_response(
+            status_code=500,
+            error_details="Cognito is currently unavailable. Please try again later."
+        )
 
     except Exception as e:
         if db is not None:

@@ -1,10 +1,9 @@
-import os
+"""Test register.py"""
 import json
 import uuid
-import pytest
 from unittest.mock import patch, MagicMock
 from auth.register import lambda_handler
-from models import User, Base, Household, File, Claim
+from models import User, Base, Household
 from database.database import engine
 
 # Initialize database tables
@@ -34,7 +33,7 @@ def test_register_user_success(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    _response = lambda_handler(event, None)
 
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
@@ -75,7 +74,7 @@ def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    _response = lambda_handler(event, None)
 
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
@@ -232,12 +231,45 @@ def test_register_invalid_email(test_db, mocker):
 
 
 # ❌ FAILURE: Cognito Internal Error
-def test_register_cognito_internal_error(test_db, mocker):
+def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
     """❌ Ensure proper handling if Cognito has an internal error."""
-    pass  # TODO: Implement
+
+    print("🚀 Starting test_register_cognito_internal_error")
+
+    # ✅ Mock Cognito to raise InternalErrorException
+    mock_cognito.sign_up.side_effect = mock_cognito.exceptions.InternalErrorException
+
+    # ✅ Ensure `register.py` uses `test_db`
+    mocker.patch("database.database.get_db_session", return_value=test_db)
+
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": "test@example.com",
+            "first_name": "John",
+            "last_name": "Doe"
+        })
+    }
+
+    print("📡 Calling lambda_handler...")
+
+    # ✅ Act: Call the registration Lambda
+    response = lambda_handler(event, None)
+    body = json.loads(response["body"])
+
+    print(f"✅ Lambda finished execution! Checking Response...")
+
+    # ✅ Assert: Ensure it returns 500 Internal Server Error
+    assert response["statusCode"] == 500, f"❌ Expected 500, got {response['statusCode']}"
+    assert body["error_details"] == "Cognito is currently unavailable. Please try again later.", \
+        f"❌ Unexpected error details: {body['error_details']}"
+
+    print("✅ Test Passed!")
+
 
 # ❌ FAILURE: Database connection failure
-def test_register_db_failure(test_db, mocker):
+def test_register_db_failure(mock_cognito, test_db, mocker):
     """❌ Ensure registration fails gracefully if the database is down."""
     pass  # TODO: Implement
 

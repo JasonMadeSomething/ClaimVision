@@ -125,11 +125,13 @@ def mock_cognito():
             class NotAuthorizedException(Exception):
                 pass
 
+            class InternalErrorException(Exception):
+                pass
+
         mock_cognito_client.exceptions = CognitoExceptions  # ✅ Assign exceptions
 
         # ✅ Mock Attribute Updates (e.g., Household ID)
         mock_cognito_client.admin_update_user_attributes.return_value = {}
-
         # ✅ Mock Cognito Login
         mock_cognito_client.initiate_auth.return_value = {
             "AuthenticationResult": {
