@@ -80,13 +80,12 @@ def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
 
-
     assert user is not None, f" User {generated_user_sub} was not found in test DB"
     assert user.email == f"user_{generated_user_sub}@example.com"
     assert user.first_name == first_name, f" Expected first name '{first_name}', got '{user.first_name}'"
     assert user.last_name == last_name, f" Expected last name '{last_name}', got '{user.last_name}'"
 
-    # ✅ Ensure a household was created
+    # Ensure a household was created
     household = test_db.query(Household).filter(Household.id == user.household_id).first()
     assert household is not None, f"Household for user {generated_user_sub} was not found in test DB"
 
@@ -123,8 +122,8 @@ def test_register_existing_user(mock_cognito, test_db, mocker):
 
     # ✅ Assert: Ensure it returns 409 Conflict
     assert response["statusCode"] == 409, f"Expected 409, got {response['statusCode']}"
-    assert "User already exists" in body["message"], f"Expected 'User already exists' in message, got '{body['message']}'"
-
+    assert "Conflict" in body["message"], f"Expected 'Conflict' in message, got '{body['message']}'"
+    assert "User already exists" in body["error_details"], f"Expected 'User already exists' in message, got '{body['error_details']}'"
     print("✅ Test Passed!")
 
 def test_register_weak_password(mock_cognito, test_db, mocker):
@@ -160,13 +159,77 @@ def test_register_weak_password(mock_cognito, test_db, mocker):
 
 # FAILURE: Missing required fields
 def test_register_missing_fields(test_db, mocker):
-    """❌ Ensure registration fails if required fields are missing."""
-    pass  # TODO: Implement
+    """ Ensure registration fails if required fields are missing."""
 
-# ❌ FAILURE: Invalid email format
+    #  Ensure `register.py` uses `test_db`
+    mocker.patch("database.database.get_db_session", return_value=test_db)
+
+    # Test cases with missing required fields
+    missing_fields_cases = [
+        {"password": "StrongPass!123", "email": "test@example.com", "first_name": "John", "last_name": "Doe"},  # Missing username
+        {"username": "testuser", "email": "test@example.com", "first_name": "John", "last_name": "Doe"},  # Missing password
+        {"username": "testuser", "password": "StrongPass!123", "first_name": "John", "last_name": "Doe"},  # Missing email
+        {"username": "testuser", "password": "StrongPass!123", "email": "test@example.com"},  # Missing first_name
+        {"username": "testuser", "password": "StrongPass!123", "email": "test@example.com", "last_name": "Doe"},  # Missing last_name
+    ]
+
+    for idx, invalid_payload in enumerate(missing_fields_cases):
+
+        event = {"body": json.dumps(invalid_payload)}
+
+        # ✅ Act: Call the registration Lambda
+        response = lambda_handler(event, None)
+        body = json.loads(response["body"])
+        # ✅ Assert: Ensure it returns 400 Bad Request
+        assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']} for missing fields test {idx + 1}"
+        assert "Bad Request" in body["message"], f"Unexpected error message: {body['message']} for missing fields test {idx + 1}"
+
 def test_register_invalid_email(test_db, mocker):
     """❌ Ensure registration fails if the email format is invalid."""
-    pass  # TODO: Implement
+
+    print("🚀 Starting test_register_invalid_email")
+
+    # ✅ Ensure `register.py` uses `test_db`
+    mocker.patch("database.database.get_db_session", return_value=test_db)
+
+    # ✅ Test cases with invalid email formats
+    invalid_emails = [
+        "plainaddress",
+        "@missingusername.com",
+        "missingatsymbol.com",
+        "user@.com",
+        "user@domain..com",
+        "user@domain,com",
+        "user@domain@domain.com",
+        "user@domain space.com"
+    ]
+
+    for idx, invalid_email in enumerate(invalid_emails):
+        print(f"📡 Calling lambda_handler with invalid email (Test {idx + 1}): {invalid_email}")
+
+        event = {
+            "body": json.dumps({
+                "username": "testuser",
+                "password": "StrongPass!123",
+                "email": invalid_email,  # ❌ Invalid email
+                "first_name": "John",
+                "last_name": "Doe"
+            })
+        }
+
+        # ✅ Act: Call the registration Lambda
+        response = lambda_handler(event, None)
+        body = json.loads(response["body"])
+
+        print(f"✅ Lambda finished execution! Checking Response (Test {idx + 1})...")
+
+        # ✅ Assert: Ensure it returns 400 Bad Request
+        assert response["statusCode"] == 400, f"❌ Expected 400, got {response['statusCode']} for invalid email test {idx + 1}"
+        assert "Bad Request" in body["message"], f"❌ Unexpected error message: {body['message']} for invalid email test {idx + 1}"
+        assert "email" in body["error_details"].lower(), f"❌ Expected 'email' in error details, got '{body['error_details']}' for invalid email test {idx + 1}"
+
+    print("✅ All invalid email format tests passed!")
+
 
 # ❌ FAILURE: Cognito Internal Error
 def test_register_cognito_internal_error(test_db, mocker):
