@@ -1,7 +1,8 @@
 """Test register.py"""
+import os
 import json
 import uuid
-from unittest.mock import patch, MagicMock
+import sqlalchemy.exc
 from auth.register import lambda_handler
 from models import User, Base, Household
 from database.database import engine
@@ -16,7 +17,7 @@ def test_register_user_success(mock_cognito, test_db, mocker):
     generated_user_sub = str(uuid.uuid4())  # Generate the expected UserSub
     mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
 
-    #Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
 
     first_name = "John"
@@ -41,11 +42,16 @@ def test_register_user_success(mock_cognito, test_db, mocker):
 
     assert user is not None, f"User {generated_user_sub} was not found in test DB"
     assert user.email == "test@example.com"
-    assert user.first_name == first_name, f"Expected first name '{first_name}', got '{user.first_name}'"
-    assert user.last_name == last_name, f"Expected last name '{last_name}', got '{user.last_name}'"
-    assert user.full_name == f"{first_name} {last_name}", f"Expected full name '{first_name} {last_name}', got '{user.full_name}'"
-
-
+    assert user.first_name == first_name,(
+        f"Expected first name '{first_name}', got '{user.first_name}'"
+    )
+    assert user.last_name == last_name,(
+        f"Expected last name '{last_name}', got '{user.last_name}'"
+    )
+    expected_full_name = f"{first_name} {last_name}"
+    assert user.full_name == expected_full_name,(
+        f"Expected full name '{expected_full_name}', got '{user.full_name}'"
+    )
 
 
 #  SUCCESS: User registration with default household
@@ -54,11 +60,11 @@ def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
 
     print("🚀 Starting test_register_user_creates_default_household")
 
-    # ✅ Mock Cognito to generate a unique UserSub
+    # Mock Cognito to generate a unique UserSub
     generated_user_sub = str(uuid.uuid4())  # Generate the expected UserSub
     mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
 
-    # ✅ Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
 
     first_name = "John"
@@ -79,26 +85,44 @@ def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
 
-    assert user is not None, f" User {generated_user_sub} was not found in test DB"
+    user_not_found_msg = (
+        f" User {generated_user_sub} was not found in test DB"
+    )
+    assert user is not None, user_not_found_msg
     assert user.email == f"user_{generated_user_sub}@example.com"
-    assert user.first_name == first_name, f" Expected first name '{first_name}', got '{user.first_name}'"
-    assert user.last_name == last_name, f" Expected last name '{last_name}', got '{user.last_name}'"
+
+    first_name_msg = (
+        f" Expected first name '{first_name}', got '{user.first_name}'"
+    )
+    assert user.first_name == first_name, first_name_msg
+
+    last_name_msg = (
+        f" Expected last name '{last_name}', got '{user.last_name}'"
+    )
+    assert user.last_name == last_name, last_name_msg
 
     # Ensure a household was created
     household = test_db.query(Household).filter(Household.id == user.household_id).first()
-    assert household is not None, f"Household for user {generated_user_sub} was not found in test DB"
 
-    expected_household_name = f"{first_name}'s Household"  # ✅ Now using actual first name
-    assert household.name == expected_household_name, f"Expected household name '{expected_household_name}', got '{household.name}'"
+    household_not_found_msg = (
+        f"Household for user {generated_user_sub} was not found in test DB"
+    )
+    assert household is not None, household_not_found_msg
+
+    expected_household_name = f"{first_name}'s Household"  # Now using actual first name
+    household_name_msg = (
+        f"Expected household name '{expected_household_name}', got '{household.name}'"
+    )
+    assert household.name == expected_household_name, household_name_msg
 
 
 def test_register_existing_user(mock_cognito, test_db, mocker):
     """Ensure registration fails if the user already exists in Cognito."""
 
-    # ✅ Mock Cognito to raise UsernameExistsException
+    # Mock Cognito to raise UsernameExistsException
     mock_cognito.sign_up.side_effect = mock_cognito.exceptions.UsernameExistsException
 
-    # ✅ Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
 
     event = {
@@ -113,16 +137,20 @@ def test_register_existing_user(mock_cognito, test_db, mocker):
 
     print("📡 Calling lambda_handler...")
 
-    # ✅ Act: Call the registration Lambda
+    # Act: Call the registration Lambda
     response = lambda_handler(event, None)
     body = json.loads(response["body"])
 
     print("✅ Lambda finished execution! Checking Response...")
 
-    # ✅ Assert: Ensure it returns 409 Conflict
+    # Assert: Ensure it returns 409 Conflict
     assert response["statusCode"] == 409, f"Expected 409, got {response['statusCode']}"
     assert "Conflict" in body["message"], f"Expected 'Conflict' in message, got '{body['message']}'"
-    assert "User already exists" in body["error_details"], f"Expected 'User already exists' in message, got '{body['error_details']}'"
+
+    error_details_msg = (
+        f"Expected 'User already exists' in message, got '{body['error_details']}'"
+    )
+    assert "User already exists" in body["error_details"], error_details_msg
     print("✅ Test Passed!")
 
 def test_register_weak_password(mock_cognito, test_db, mocker):
@@ -145,53 +173,88 @@ def test_register_weak_password(mock_cognito, test_db, mocker):
         })
     }
 
-    # ✅ Act: Call the registration Lambda
+    # Act: Call the registration Lambda
     response = lambda_handler(event, None)
     body = json.loads(response["body"])
 
 
-    # ✅ Assert: Ensure it returns 400 Bad Request
+    # Assert: Ensure it returns 400 Bad Request
     assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']}"
-    assert "Bad Request" in body["message"], f"Expected 'Bad Request' in message, got '{body['message']}'"
 
+    bad_request_msg = (
+        f"Expected 'Bad Request' in message, got '{body['message']}'"
+    )
+    assert "Bad Request" in body["message"], bad_request_msg
 
 
 # FAILURE: Missing required fields
 def test_register_missing_fields(test_db, mocker):
     """ Ensure registration fails if required fields are missing."""
 
-    #  Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
 
     # Test cases with missing required fields
     missing_fields_cases = [
-        {"password": "StrongPass!123", "email": "test@example.com", "first_name": "John", "last_name": "Doe"},  # Missing username
-        {"username": "testuser", "email": "test@example.com", "first_name": "John", "last_name": "Doe"},  # Missing password
-        {"username": "testuser", "password": "StrongPass!123", "first_name": "John", "last_name": "Doe"},  # Missing email
-        {"username": "testuser", "password": "StrongPass!123", "email": "test@example.com"},  # Missing first_name
-        {"username": "testuser", "password": "StrongPass!123", "email": "test@example.com", "last_name": "Doe"},  # Missing last_name
+        # Missing username
+        {
+            "password": "StrongPass!123",
+            "email": "test@example.com",
+            "first_name": "John",
+            "last_name": "Doe"},
+        # Missing password
+        {
+            "username": "testuser",
+            "email": "test@example.com",
+            "first_name": "John",
+            "last_name": "Doe"},
+        # Missing email
+        {
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "first_name": "John",
+            "last_name": "Doe"},
+        # Missing first_name
+        {
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": "test@example.com",
+            "last_name": "Doe"},
+        # Missing last_name
+        {
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": "test@example.com",
+            "first_name": "John"},
     ]
 
     for idx, invalid_payload in enumerate(missing_fields_cases):
 
         event = {"body": json.dumps(invalid_payload)}
 
-        # ✅ Act: Call the registration Lambda
+        # Act: Call the registration Lambda
         response = lambda_handler(event, None)
         body = json.loads(response["body"])
-        # ✅ Assert: Ensure it returns 400 Bad Request
-        assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']} for missing fields test {idx + 1}"
-        assert "Bad Request" in body["message"], f"Unexpected error message: {body['message']} for missing fields test {idx + 1}"
+        # Assert: Ensure it returns 400 Bad Request
+        status_code_msg = (
+            f"Expected 400, got {response['statusCode']} for missing fields test {idx + 1}"
+        )
+        assert response["statusCode"] == 400, status_code_msg
+
+        error_msg = (
+            f"Unexpected error message: {body['message']} for missing fields test {idx + 1}"
+        )
+        assert "Bad Request" in body["message"], error_msg
 
 def test_register_invalid_email(test_db, mocker):
     """❌ Ensure registration fails if the email format is invalid."""
 
     print("🚀 Starting test_register_invalid_email")
 
-    # ✅ Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
 
-    # ✅ Test cases with invalid email formats
+    # Test cases with invalid email formats
     invalid_emails = [
         "plainaddress",
         "@missingusername.com",
@@ -210,22 +273,35 @@ def test_register_invalid_email(test_db, mocker):
             "body": json.dumps({
                 "username": "testuser",
                 "password": "StrongPass!123",
-                "email": invalid_email,  # ❌ Invalid email
+                "email": invalid_email,  # Invalid email
                 "first_name": "John",
                 "last_name": "Doe"
             })
         }
 
-        # ✅ Act: Call the registration Lambda
+        # Act: Call the registration Lambda
         response = lambda_handler(event, None)
         body = json.loads(response["body"])
 
         print(f"✅ Lambda finished execution! Checking Response (Test {idx + 1})...")
 
-        # ✅ Assert: Ensure it returns 400 Bad Request
-        assert response["statusCode"] == 400, f"❌ Expected 400, got {response['statusCode']} for invalid email test {idx + 1}"
-        assert "Bad Request" in body["message"], f"❌ Unexpected error message: {body['message']} for invalid email test {idx + 1}"
-        assert "email" in body["error_details"].lower(), f"❌ Expected 'email' in error details, got '{body['error_details']}' for invalid email test {idx + 1}"
+        # Assert: Ensure it returns 400 Bad Request
+        status_code_msg = (
+            f"❌ Expected 400, got {response['statusCode']} for invalid email test {idx + 1}"
+        )
+        assert response["statusCode"] == 400, status_code_msg
+
+        error_msg = (
+            f"❌ Unexpected error message: {body['message']} for invalid email test {idx + 1}"
+        )
+        assert "Bad Request" in body["message"], error_msg
+
+        error_details_msg = (
+            f"❌ Expected 'email' in error details, got '{body['error_details']}'"
+        )
+        assert "email" in body["error_details"].lower(), (
+            f"{error_details_msg} for invalid email test {idx + 1}"
+        )
 
     print("✅ All invalid email format tests passed!")
 
@@ -236,11 +312,54 @@ def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
 
     print("🚀 Starting test_register_cognito_internal_error")
 
-    # ✅ Mock Cognito to raise InternalErrorException
+    # Mock Cognito to raise InternalErrorException
     mock_cognito.sign_up.side_effect = mock_cognito.exceptions.InternalErrorException
 
-    # ✅ Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
+
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": "test@example.com",
+            "first_name": "John",
+            "last_name": "Doe"
+        })
+    }
+
+    print("📡 Calling lambda_handler...")
+
+    # Act: Call the registration Lambda
+    response = lambda_handler(event, None)
+    body = json.loads(response["body"])
+
+    print("Lambda finished execution! Checking Response...")
+
+    # Assert: Ensure it returns 500 Internal Server Error
+    assert response["statusCode"] == 500, f"❌ Expected 500, got {response['statusCode']}"
+    error_msg = "Cognito is currently unavailable. Please try again later."
+    assert body["error_details"] == error_msg, (
+        f"❌ Unexpected error details: {body['error_details']}"
+    )
+
+    print("Test Passed!")
+
+
+# ❌ FAILURE: Database connection failure
+def test_register_db_failure(mock_cognito, test_db, mocker):
+    """❌ Ensure registration fails gracefully if the database is down."""
+
+    print("🚀 Starting test_register_db_failure")
+
+    # ✅ Patch the correct path to ensure `get_db_session()` fails
+    mocker.patch(
+        "auth.register.get_db_session",
+        side_effect=sqlalchemy.exc.OperationalError("DB Connection Error", None, None)
+    )
+
+    # ✅ Mock Cognito (should NOT be called)
+    mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": str(uuid.uuid4())}
 
     event = {
         "body": json.dumps({
@@ -258,37 +377,248 @@ def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
     response = lambda_handler(event, None)
     body = json.loads(response["body"])
 
-    print(f"✅ Lambda finished execution! Checking Response...")
+    print("✅ Lambda finished execution! Checking Response...")
+
+    # ✅ Ensure Cognito was never called (because DB failed first)
+    assert mock_cognito.sign_up.call_count == 0,(
+        "❌ Cognito should NOT be called if DB connection fails."
+    )
 
     # ✅ Assert: Ensure it returns 500 Internal Server Error
     assert response["statusCode"] == 500, f"❌ Expected 500, got {response['statusCode']}"
-    assert body["error_details"] == "Cognito is currently unavailable. Please try again later.", \
+    assert body["error_details"] == "Database connection failed. Please try again later.", \
         f"❌ Unexpected error details: {body['error_details']}"
 
     print("✅ Test Passed!")
 
-
-# ❌ FAILURE: Database connection failure
-def test_register_db_failure(mock_cognito, test_db, mocker):
-    """❌ Ensure registration fails gracefully if the database is down."""
-    pass  # TODO: Implement
-
-# ✅ SUCCESS: Ensure user is stored in PostgreSQL
-def test_register_user_stores_in_db(test_db, mocker):
+def test_register_user_stores_in_db(mock_cognito, test_db, mocker):
     """✅ Ensure the user is stored in the PostgreSQL database after successful registration."""
-    pass  # TODO: Implement
 
-# ✅ SUCCESS: Ensure Cognito user attributes are set correctly
-def test_register_sets_cognito_attributes(test_db, mocker):
+    print("🚀 Starting test_register_user_stores_in_db")
+
+    # ✅ Mock Cognito to return a valid UserSub
+    generated_user_sub = str(uuid.uuid4())
+    mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
+
+    # ✅ Ensure `register.py` uses `test_db`
+    mocker.patch("auth.register.get_db_session", return_value=test_db)
+
+    first_name = "John"
+    last_name = "Doe"
+    email = f"user_{generated_user_sub}@example.com"
+
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name
+        })
+    }
+
+    print("📡 Calling lambda_handler...")
+
+    # ✅ Act: Call the registration Lambda
+    _response = lambda_handler(event, None)
+
+    print("✅ Lambda finished execution! Checking DB...")
+
+    # ✅ Query the **same session** used in register.py
+    user = test_db.query(User).filter(User.id == generated_user_sub).first()
+
+    print(f"🔎 DB Query Result: {user}")  # DEBUG
+
+    # ✅ Ensure the user exists
+    assert user is not None, f"❌ User {generated_user_sub} was not found in test DB"
+
+    # ✅ Ensure all fields are stored correctly
+    assert user.email == email, f"❌ Expected email '{email}', got '{user.email}'"
+    assert user.first_name == first_name, f"❌ Expected first name '{first_name}', got '{user.first_name}'"
+    assert user.last_name == last_name, f"❌ Expected last name '{last_name}', got '{user.last_name}'"
+    assert user.household_id is not None, "❌ Expected user to have a household ID, but got None"
+
+    # ✅ Ensure the household exists
+    household = test_db.query(Household).filter(Household.id == user.household_id).first()
+    assert household is not None, f"❌ Household {user.household_id} was not found in test DB"
+    
+    expected_household_name = f"{first_name}'s Household"
+    assert household.name == expected_household_name, f"❌ Expected household name '{expected_household_name}', got '{household.name}'"
+
+    print("✅ User successfully stored in PostgreSQL!")
+
+
+def test_register_sets_cognito_attributes(mock_cognito, test_db, mocker):
     """✅ Ensure Cognito user attributes like email and name are set correctly."""
-    pass  # TODO: Implement
+
+    print("🚀 Starting test_register_sets_cognito_attributes")
+
+    # ✅ Mock Cognito to return a valid UserSub
+    generated_user_sub = str(uuid.uuid4())
+    mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
+
+    # ✅ Ensure `register.py` uses `test_db`
+    mocker.patch("auth.register.get_db_session", return_value=test_db)
+
+    first_name = "John"
+    last_name = "Doe"
+    email = f"user_{generated_user_sub}@example.com"
+
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name
+        })
+    }
+
+    print("📡 Calling lambda_handler...")
+
+    # ✅ Act: Call the registration Lambda
+    _response = lambda_handler(event, None)
+
+    print("✅ Lambda finished execution! Checking Cognito Calls...")
+
+    # ✅ Assert: Ensure Cognito `sign_up` was called once
+    mock_cognito.sign_up.assert_called_once()
+
+    # ✅ Extract the actual call arguments
+    cognito_call_args = mock_cognito.sign_up.call_args[1]  # Get the keyword arguments used in the call
+
+    # ✅ Ensure the expected attributes were sent to Cognito
+    assert cognito_call_args["ClientId"] == os.getenv("COGNITO_USER_POOL_CLIENT_ID"), "❌ Incorrect Cognito ClientId"
+    assert cognito_call_args["Username"] == "testuser", "❌ Incorrect Cognito Username"
+    assert cognito_call_args["Password"] == "StrongPass!123", "❌ Incorrect Cognito Password"
+
+    # ✅ Ensure the correct user attributes were set
+    expected_attributes = [
+        {"Name": "email", "Value": email},
+        {"Name": "given_name", "Value": first_name},
+        {"Name": "family_name", "Value": last_name},
+    ]
+    
+    assert cognito_call_args["UserAttributes"] == expected_attributes, \
+        f"❌ Expected Cognito UserAttributes {expected_attributes}, got {cognito_call_args['UserAttributes']}"
+
+    print("✅ Cognito user attributes were set correctly!")
+
 
 # ✅ SUCCESS: Ensure household ID syncs correctly
-def test_register_syncs_household_id(test_db, mocker):
-    """✅ Ensure the user's household ID is correctly stored in PostgreSQL."""
-    pass  # TODO: Implement
+def test_register_syncs_household_id(mock_cognito, test_db, mocker):
+    """✅ Ensure the user's household ID is correctly stored in PostgreSQL and synced with Cognito."""
+
+    print("🚀 Starting test_register_syncs_household_id")
+
+    # Mock Cognito to return a valid UserSub
+    generated_user_sub = str(uuid.uuid4())
+    mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
+
+    # Mock Cognito user attribute update
+    mock_cognito.admin_update_user_attributes.return_value = {}
+
+    # Ensure `register.py` uses `test_db`
+    mocker.patch("auth.register.get_db_session", return_value=test_db)
+
+    first_name = "John"
+    last_name = "Doe"
+    email = f"user_{generated_user_sub}@example.com"
+
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name
+        })
+    }
+
+    print("📡 Calling lambda_handler...")
+
+    # Act: Call the registration Lambda
+    response = lambda_handler(event, None)
+
+    print("✅ Lambda finished execution! Checking DB...")
+
+    # Query the **same session** used in register.py
+    user = test_db.query(User).filter(User.id == generated_user_sub).first()
+
+    print(f"🔎 DB Query Result: {user}")  # DEBUG
+
+    # Ensure the user exists and has a household ID
+    user_not_found_msg = (
+        f"❌ User {generated_user_sub} was not found in test DB"
+    )
+    assert user is not None, user_not_found_msg
+    assert user.household_id is not None, "Expected user to have a household ID, but got None"
+
+    # Ensure the household exists
+    household = test_db.query(Household).filter(Household.id == user.household_id).first()
+    household_not_found_msg = (
+        f"❌ Household {user.household_id} was not found in test DB"
+    )
+    assert household is not None, household_not_found_msg
+    
+    expected_household_name = f"{first_name}'s Household"
+    household_name_msg = (
+        f"❌ Expected household name '{expected_household_name}', got '{household.name}'"
+    )
+    assert household.name == expected_household_name, household_name_msg
+
+    print(f"✅ Household successfully created and linked: {household.id} ({household.name})")  # DEBUG
+
+    # Assert: Ensure Cognito `admin_update_user_attributes` was called with the correct household ID
+    mock_cognito.admin_update_user_attributes.assert_called_once_with(
+        UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+        Username=generated_user_sub,
+        UserAttributes=[{"Name": "custom:household_id", "Value": user.household_id}]
+    )
+
+    print("✅ Household ID successfully synced with Cognito!")
+
 
 # ❌ FAILURE: Cognito rejects email already in use
-def test_register_email_already_used(test_db, mocker):
+def test_register_email_already_used(mock_cognito, test_db, mocker):
     """❌ Ensure registration fails if the email is already linked to another Cognito user."""
-    pass  # TODO: Implement
+
+    print("🚀 Starting test_register_email_already_used")
+
+    # Mock Cognito to raise UsernameExistsException when trying to sign up
+    mock_cognito.sign_up.side_effect = mock_cognito.exceptions.UsernameExistsException
+
+    # Ensure `register.py` uses `test_db`
+    mocker.patch("auth.register.get_db_session", return_value=test_db)
+
+    first_name = "John"
+    last_name = "Doe"
+    email = "test@example.com"
+
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": email,
+            "first_name": first_name,
+            "last_name": last_name
+        })
+    }
+
+    print("📡 Calling lambda_handler...")
+
+    # Act: Call the registration Lambda
+    response = lambda_handler(event, None)
+    body = json.loads(response["body"])
+
+    print("✅ Lambda finished execution! Checking Response...")
+
+    # Assert: Ensure it returns 409 Conflict
+    assert response["statusCode"] == 409, f"❌ Expected 409, got {response['statusCode']}"
+    
+    error_details_msg = (
+        f"❌ Unexpected error details: {body['error_details']}"
+    )
+    assert "User already exists" in body["error_details"], error_details_msg
+
+    print("✅ Test Passed!")

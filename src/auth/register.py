@@ -13,7 +13,7 @@ import boto3
 from utils import response
 from models import User, Household
 from database.database import get_db_session
-
+import sqlalchemy.exc
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
@@ -65,6 +65,18 @@ def lambda_handler(event, _context):
         if not is_valid_email(email):
             logger.error("Registration failed. Invalid email format: %s", email)
             return response.api_response(400, error_details="Invalid email format.")
+        
+        try:
+            print("📡 Attempting to get DB session...")
+            db = get_db_session()
+            print("✅ DB session acquired.")
+        except sqlalchemy.exc.OperationalError:
+            print("❌ Database connection failed.")
+            logger.error("❌ Database connection failed.")
+            return response.api_response(
+                status_code=500,
+                error_details="Database connection failed. Please try again later."
+            )  # ✅ Explicit return to stop execution
 
         # ✅ Step 2: Register User in Cognito
         cognito_client = get_cognito_client()
@@ -82,9 +94,8 @@ def lambda_handler(event, _context):
         user_id = cognito_response["UserSub"]
         logger.info("Cognito User Registered: %s", user_id)
 
-        # ✅ Step 3: Get Database Session
-        db = get_db_session()
-        logger.info("Acquired database session")
+        
+        
 
         # ✅ Step 4: Create a Default Household using `first_name`
         household = Household(name=f"{first_name}'s Household")  # ✅ Use first name directly
@@ -104,6 +115,16 @@ def lambda_handler(event, _context):
         db.add(user)
         db.commit()
         logger.info("User Inserted in DB: ID=%s, Household=%s", user.id, user.household_id)
+
+        try:
+            cognito_client.admin_update_user_attributes(
+                UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
+                Username=user_id,
+                UserAttributes=[{"Name": "custom:household_id", "Value": household.id}]
+            )
+            logger.info("✅ Cognito updated with household ID: %s", household.id)
+        except Exception as e:
+            logger.error("❌ Failed to update Cognito attributes: %s", str(e))
 
         logger.info("✅ User registration successful")
         return response.api_response(
