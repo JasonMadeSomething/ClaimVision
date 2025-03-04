@@ -14,7 +14,7 @@ cognito_client = boto3.client("cognito-idp", region_name="us-east-1")
 # Get Cognito User Pool Client ID from environment variable
 USER_POOL_ID = os.getenv("COGNITO_USER_POOL_ID")
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """
     Resends a confirmation code to a user.
     """
@@ -29,7 +29,7 @@ def lambda_handler(event, context):
             return response.api_response(400, message="Username is required.")
 
         # Resend confirmation code
-        cognito_response = cognito_client.resend_confirmation_code(
+        _cognito_response = cognito_client.resend_confirmation_code(
             ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
             Username=username
         )

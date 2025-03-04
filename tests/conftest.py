@@ -111,33 +111,22 @@ def mock_cognito():
 
         mock_cognito_client.sign_up.side_effect = generate_unique_user_sub  # ✅ Apply dynamic user generation
 
-        # ✅ Mock Cognito exceptions
-        class CognitoExceptions:
-            class UsernameExistsException(Exception):
-                pass
-
-            class InvalidPasswordException(Exception):
-                pass
-
-            class UserNotFoundException(Exception):
-                pass
-
-            class NotAuthorizedException(Exception):
-                pass
-
-            class InternalErrorException(Exception):
-                pass
-            class TooManyRequestsException(Exception):
-                pass
-            class UserNotConfirmedException(Exception):
-                pass
-            class PasswordResetRequiredException(Exception):
-                pass
-
-        mock_cognito_client.exceptions = CognitoExceptions  # ✅ Assign exceptions
+        # ✅ Assign exception classes directly, instead of using a nested class
+        mock_cognito_client.exceptions = MagicMock()
+        mock_cognito_client.exceptions.UsernameExistsException = type("UsernameExistsException", (Exception,), {})
+        mock_cognito_client.exceptions.InvalidPasswordException = type("InvalidPasswordException", (Exception,), {})
+        mock_cognito_client.exceptions.UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+        mock_cognito_client.exceptions.NotAuthorizedException = type("NotAuthorizedException", (Exception,), {})
+        mock_cognito_client.exceptions.InternalErrorException = type("InternalErrorException", (Exception,), {})
+        mock_cognito_client.exceptions.TooManyRequestsException = type("TooManyRequestsException", (Exception,), {})
+        mock_cognito_client.exceptions.UserNotConfirmedException = type("UserNotConfirmedException", (Exception,), {})
+        mock_cognito_client.exceptions.PasswordResetRequiredException = type("PasswordResetRequiredException", (Exception,), {})
+        mock_cognito_client.exceptions.CodeMismatchException = type("CodeMismatchException", (Exception,), {})  # ✅ Assign properly
+        mock_cognito_client.exceptions.LimitExceededException = type("LimitExceededException", (Exception,), {})  # ✅ Assign properly
 
         # ✅ Mock Attribute Updates (e.g., Household ID)
         mock_cognito_client.admin_update_user_attributes.return_value = {}
+
         # ✅ Mock Cognito Login
         mock_cognito_client.initiate_auth.return_value = {
             "AuthenticationResult": {

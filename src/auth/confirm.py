@@ -2,6 +2,7 @@ import os
 import json
 import logging
 import boto3
+import botocore.exceptions
 from utils import response
 
 # Configure logging
@@ -19,12 +20,12 @@ def lambda_handler(event, _context):
     Confirms a user's email using the verification code.
     """
     try:
-        logger.info("Received event: %s", json.dumps(event))
 
         # Parse request body
         body = json.loads(event.get("body", "{}"))
         username = body.get("username")
         confirmation_code = body.get("code")
+
         if not username or not confirmation_code:
             missingfields = []
             if not username:
@@ -41,30 +42,26 @@ def lambda_handler(event, _context):
         )
 
         logger.info("User confirmed successfully")
-
+        print(_cognito_response)
         return response.api_response(
             200,
             message="User confirmed successfully. You can now log in."
         )
 
-    except cognito_client.exceptions.CodeMismatchException:
-        return response.api_response(
-            400,
-            message="Invalid confirmation code."
-        )
+    except botocore.exceptions.ClientError as e:
+        error_code = e.response["Error"]["Code"]
+        
+        if error_code == "CodeMismatchException":
+            return response.api_response(400, error_details="Invalid confirmation code.")
+        
+        if error_code == "ExpiredCodeException":
+            return response.api_response(400, error_details="Confirmation code expired. Please request a new one.")
 
-    except cognito_client.exceptions.ExpiredCodeException:
-        return response.api_response(
-            400,
-            message="Confirmation code expired. Please request a new one."
-        )
+        if error_code == "UserNotFoundException":
+            return response.api_response(404, message="User not found.")
 
-    except cognito_client.exceptions.UserNotFoundException:
-        return response.api_response(
-            404,
-            message="User not found."
-        )
-
+        logger.error(f"Unexpected Cognito error: {error_code} - {e}")
+        return response.api_response(500, error_details="Internal server error")
     except Exception as e:
         logger.error("Error during confirmation: %s", str(e))
         return response.api_response(
