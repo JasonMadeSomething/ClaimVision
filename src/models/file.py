@@ -1,97 +1,45 @@
-"""File model for PostgreSQL database."""
-
-from datetime import datetime, UTC
-import uuid
-from typing import Dict, List, Optional, Union
-from sqlalchemy import Column, String, Integer, JSON, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, ForeignKey, UUID, JSON, Enum
 from sqlalchemy.orm import relationship
-from models.base import Base
+import uuid
+from enum import Enum as PyEnum
+from models.item import Item
+from models.item_files import item_files
+from models.base import Base  # ✅ Restored Base import
 
+class FileStatus(PyEnum):
+    UPLOADED = "uploaded"
+    PROCESSED = "processed"
+    FAILED = "failed"
 
 class File(Base):
-    """
-    Represents a file stored in the system.
+    __tablename__ = "files"
 
-    Attributes
-    ----------
-    id : str
-        Unique identifier for the file (UUID).
-    uploaded_by : str
-        ID of the user who owns the file.
-    household_id : str
-        ID of the household associated with the file.
-    file_name : str
-        Name of the file.
-    s3_key : str
-        The key to retrieve the file from S3.
-    uploaded_at : str
-        Timestamp in ISO 8601 format (UTC).
-    description : Optional[str], default=None
-        Optional description of the file.
-    claim_id : Optional[int], default=None
-        Associated insurance claim ID (if applicable).
-    labels : List[str], default=[]
-        List of labels from Rekognition or user-provided labels.
-    status : str, default="uploaded"
-        The current status of the file.
-    file_url : str
-        The URL to access the file.
-    mime_type : str
-        The file’s MIME type.
-    size : int
-        The file size in bytes.
-    resolution : Optional[str], default=None
-        The file’s resolution.
-    detected_objects : List[str], default=[]
-        List of detected objects in the file.
-    """
-
-    __tablename__: str = "files"
-
-    id: str = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    uploaded_by: str = Column(String, ForeignKey("users.id"), nullable=False) # ✅ Who uploaded it
-    household_id: str = Column(String, ForeignKey("households.id"), nullable=False)
-    file_name: str = Column(String(255), nullable=False)
+    id: uuid.UUID = Column(UUID, primary_key=True, default=uuid.uuid4)
+    uploaded_by: uuid.UUID = Column(UUID, ForeignKey("users.id"), nullable=False)
+    household_id: uuid.UUID = Column(UUID, ForeignKey("households.id"), nullable=False)
+    file_name: str = Column(String, nullable=False)
+    room_name: str = Column(String, nullable=True)  # ✅ Room is stored as a field, not a separate table
     s3_key: str = Column(String, nullable=False)
-    uploaded_at: str = Column(String, default=lambda: datetime.now(UTC).isoformat())
-    description: Optional[str] = Column(String, nullable=True)
-    claim_id: Optional[int] = Column(Integer, ForeignKey("claims.id"), nullable=True)
-    labels: List[str] = Column(JSON, nullable=False, default=[])
-    status: str = Column(String, nullable=False, default="uploaded")
-    file_url: str = Column(String, nullable=False)
+    labels: list[str] = Column(JSON, nullable=True)  # ✅ Restored as list of strings
+    status: FileStatus = Column(Enum(FileStatus), default=FileStatus.UPLOADED)
+    claim_id: uuid.UUID = Column(UUID, ForeignKey("claims.id"), nullable=True)
+    file_metadata: dict = Column(JSON, nullable=True)  # ✅ Restored metadata field
 
-    # Metadata
-    mime_type: str = Column(String, nullable=False)
-    size: int = Column(Integer, nullable=False)
-    resolution: Optional[str] = Column(String, nullable=True)
-    detected_objects: List[str] = Column(JSON, nullable=False, default=[])
-
-    # Relationship
+    household = relationship("Household")
+    user = relationship("User")
     claim = relationship("Claim", back_populates="files")
+    items = relationship("Item", secondary="item_files", back_populates="files")
 
-    def to_dict(self) -> Dict[str, Union[str, int, List[str], None]]:
-        """
-        Converts the SQLAlchemy model instance to a dictionary.
-
-        Returns
-        -------
-        Dict[str, Union[str, int, List[str], None]]
-            A dictionary representation of the file instance.
-        """
+    def to_dict(self):
         return {
-            "id": self.id,
-            "uploaded_by": self.uploaded_by,
-            "household_id": self.household_id,
+            "id": str(self.id),
+            "uploaded_by": str(self.uploaded_by),
+            "household_id": str(self.household_id),
             "file_name": self.file_name,
+            "room_name": self.room_name,
             "s3_key": self.s3_key,
-            "uploaded_at": self.uploaded_at,
-            "description": self.description,
-            "claim_id": self.claim_id,
             "labels": self.labels,
-            "status": self.status,
-            "file_url": self.file_url,
-            "mime_type": self.mime_type,
-            "size": self.size,
-            "resolution": self.resolution,
-            "detected_objects": self.detected_objects,
+            "status": self.status.value,
+            "claim_id": str(self.claim_id) if self.claim_id else None,
+            "file_metadata": self.file_metadata
         }

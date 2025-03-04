@@ -127,6 +127,12 @@ def mock_cognito():
 
             class InternalErrorException(Exception):
                 pass
+            class TooManyRequestsException(Exception):
+                pass
+            class UserNotConfirmedException(Exception):
+                pass
+            class PasswordResetRequiredException(Exception):
+                pass
 
         mock_cognito_client.exceptions = CognitoExceptions  # ✅ Assign exceptions
 

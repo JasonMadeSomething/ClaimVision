@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import boto3
+from sqlalchemy import false
 from utils import response
 from models import User, Household
 from database.database import get_db_session
@@ -26,6 +27,21 @@ def is_valid_email(email):
     """✅ Improved regex check for valid email format."""
     email_regex = r"^[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z]{2,}(?:\.[a-zA-Z]{2,})?$"
     return bool(re.match(email_regex, email))
+
+def is_strong_password(password):
+    """✅ Validate password strength before calling Cognito."""
+    if len(password) < 8:
+        return False
+    if not re.search(r"[A-Z]", password):  # At least one uppercase letter
+        return False
+    if not re.search(r"[a-z]", password):  # At least one lowercase letter
+        return False
+    if not re.search(r"\d", password):  # At least one number
+        return False
+    if not re.search(r"[!@#$%^&*(),.?\":{}|<>]", password):  # At least one special character
+        return False
+    return True
+
 
 def detect_missing_fields(body):
     """✅ Detect missing fields in the request body."""
@@ -46,6 +62,7 @@ def lambda_handler(event, _context):
     """
     Handles user registration using AWS Cognito.
     """
+    cognito_client = get_cognito_client()
     db = None
     try:
         logger.info("Received event: %s", json.dumps(event))
@@ -62,16 +79,19 @@ def lambda_handler(event, _context):
         if missing_fields:
             return response.api_response(400, missing_fields=missing_fields)
 
+        if not is_strong_password(password):
+            return response.api_response(400, error_details="Weak password")
+
         if not is_valid_email(email):
             logger.error("Registration failed. Invalid email format: %s", email)
             return response.api_response(400, error_details="Invalid email format.")
         
         try:
-            print("📡 Attempting to get DB session...")
+            
             db = get_db_session()
-            print("✅ DB session acquired.")
+            
         except sqlalchemy.exc.OperationalError:
-            print("❌ Database connection failed.")
+            
             logger.error("❌ Database connection failed.")
             return response.api_response(
                 status_code=500,
@@ -79,7 +99,7 @@ def lambda_handler(event, _context):
             )  # ✅ Explicit return to stop execution
 
         # ✅ Step 2: Register User in Cognito
-        cognito_client = get_cognito_client()
+        
         logger.info("Attempting Cognito Sign-Up")
         cognito_response = cognito_client.sign_up(
             ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
@@ -93,9 +113,7 @@ def lambda_handler(event, _context):
         )
         user_id = cognito_response["UserSub"]
         logger.info("Cognito User Registered: %s", user_id)
-
-        
-        
+   
 
         # ✅ Step 4: Create a Default Household using `first_name`
         household = Household(name=f"{first_name}'s Household")  # ✅ Use first name directly
@@ -107,7 +125,6 @@ def lambda_handler(event, _context):
         user = User(
             id=user_id,
             email=email,
-            full_name=f"{first_name} {last_name}",  # ✅ Store full name
             first_name=first_name,  # ✅ Store first name separately
             last_name=last_name,  # ✅ Store last name separately
             household_id=household.id

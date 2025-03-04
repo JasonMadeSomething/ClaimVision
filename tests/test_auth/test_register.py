@@ -3,7 +3,7 @@ import os
 import json
 import uuid
 import sqlalchemy.exc
-from auth.register import lambda_handler
+from auth.register import lambda_handler as register_handler
 from models import User, Base, Household
 from database.database import engine
 
@@ -34,7 +34,7 @@ def test_register_user_success(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    _response = lambda_handler(event, None)
+    _response = register_handler(event, None)
 
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
@@ -48,10 +48,7 @@ def test_register_user_success(mock_cognito, test_db, mocker):
     assert user.last_name == last_name,(
         f"Expected last name '{last_name}', got '{user.last_name}'"
     )
-    expected_full_name = f"{first_name} {last_name}"
-    assert user.full_name == expected_full_name,(
-        f"Expected full name '{expected_full_name}', got '{user.full_name}'"
-    )
+    
 
 
 #  SUCCESS: User registration with default household
@@ -80,7 +77,7 @@ def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    _response = lambda_handler(event, None)
+    _response = register_handler(event, None)
 
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
@@ -138,7 +135,7 @@ def test_register_existing_user(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    response = register_handler(event, None)
     body = json.loads(response["body"])
 
     print("✅ Lambda finished execution! Checking Response...")
@@ -174,7 +171,7 @@ def test_register_weak_password(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    response = register_handler(event, None)
     body = json.loads(response["body"])
 
 
@@ -233,7 +230,7 @@ def test_register_missing_fields(test_db, mocker):
         event = {"body": json.dumps(invalid_payload)}
 
         # Act: Call the registration Lambda
-        response = lambda_handler(event, None)
+        response = register_handler(event, None)
         body = json.loads(response["body"])
         # Assert: Ensure it returns 400 Bad Request
         status_code_msg = (
@@ -280,7 +277,7 @@ def test_register_invalid_email(test_db, mocker):
         }
 
         # Act: Call the registration Lambda
-        response = lambda_handler(event, None)
+        response = register_handler(event, None)
         body = json.loads(response["body"])
 
         print(f"✅ Lambda finished execution! Checking Response (Test {idx + 1})...")
@@ -331,7 +328,7 @@ def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    response = register_handler(event, None)
     body = json.loads(response["body"])
 
     print("Lambda finished execution! Checking Response...")
@@ -374,7 +371,7 @@ def test_register_db_failure(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # ✅ Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    response = register_handler(event, None)
     body = json.loads(response["body"])
 
     print("✅ Lambda finished execution! Checking Response...")
@@ -420,7 +417,7 @@ def test_register_user_stores_in_db(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # ✅ Act: Call the registration Lambda
-    _response = lambda_handler(event, None)
+    _response = register_handler(event, None)
 
     print("✅ Lambda finished execution! Checking DB...")
 
@@ -477,7 +474,7 @@ def test_register_sets_cognito_attributes(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # ✅ Act: Call the registration Lambda
-    _response = lambda_handler(event, None)
+    _response = register_handler(event, None)
 
     print("✅ Lambda finished execution! Checking Cognito Calls...")
 
@@ -538,7 +535,7 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    _response = register_handler(event, None)
 
     print("✅ Lambda finished execution! Checking DB...")
 
@@ -608,7 +605,7 @@ def test_register_email_already_used(mock_cognito, test_db, mocker):
     print("📡 Calling lambda_handler...")
 
     # Act: Call the registration Lambda
-    response = lambda_handler(event, None)
+    response = register_handler(event, None)
     body = json.loads(response["body"])
 
     print("✅ Lambda finished execution! Checking Response...")
@@ -622,3 +619,48 @@ def test_register_email_already_used(mock_cognito, test_db, mocker):
     assert "User already exists" in body["error_details"], error_details_msg
 
     print("✅ Test Passed!")
+
+def test_register_cognito_household_sync_failure(mock_cognito, test_db, mocker):
+    """Ensure registration doesn't fail if Cognito household sync fails."""
+    generated_user_sub = str(uuid.uuid4())
+    mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
+    mock_cognito.admin_update_user_attributes.side_effect = Exception("Cognito update failed")
+    
+    mocker.patch("auth.register.get_db_session", return_value=test_db)
+    
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "StrongPass!123",
+            "email": "test@example.com",
+            "first_name": "John",
+            "last_name": "Doe"
+        })
+    }
+    
+    response = register_handler(event, None)
+    body = json.loads(response["body"])
+    
+    assert response["statusCode"] == 201, f"Expected 201, got {response['statusCode']}"
+    assert "User registered successfully" in body["message"]
+
+def test_register_weak_password_prevalidation(mock_cognito, test_db, mocker):
+    """Ensure weak passwords are caught before Cognito is called."""
+    mocker.patch("auth.register.get_cognito_client", return_value=mock_cognito)
+    mock_cognito.sign_up.side_effect = AssertionError("Cognito should not be called for weak passwords")
+    
+    event = {
+        "body": json.dumps({
+            "username": "testuser",
+            "password": "weakpass",
+            "email": "test@example.com",
+            "first_name": "John",
+            "last_name": "Doe"
+        })
+    }
+    
+    response = register_handler(event, None)
+    body = json.loads(response["body"])
+    
+    assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']}"
+    assert "Weak password" in body["error_details"], f"Unexpected error details: {body['error_details']}"

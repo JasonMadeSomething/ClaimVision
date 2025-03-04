@@ -1,53 +1,26 @@
-"""Claim model for PostgreSQL database."""
-from datetime import datetime, UTC
-from typing import Optional
-from sqlalchemy import Column, String, Integer, ForeignKey
+from sqlalchemy import Column, String, ForeignKey, UUID, DateTime
 from sqlalchemy.orm import relationship
-from models import Base
-
+import uuid
+from datetime import datetime
+from models.base import Base  
 
 class Claim(Base):
-    """
-    Represents an insurance claim linked to a household.
-
-    Attributes
-    ----------
-    id : int
-        Unique identifier for the claim.
-    household_id : str
-        ID of the household that owns the claim.
-    title : str
-        Short title for the claim.
-    description : Optional[str]
-        Detailed description of the claim.
-    created_at : str
-        Timestamp in ISO 8601 format.
-    status : str
-        The current status of the claim.
-    """
-
     __tablename__ = "claims"
 
-    id: int = Column(Integer, primary_key=True, autoincrement=True)
-    household_id: str = Column(
-        String, ForeignKey("households.id"), nullable=False
-    )  # ✅ Household ownership
-    title: str = Column(String(255), nullable=False)
-    description: Optional[str] = Column(String, nullable=True)
-    created_at: str = Column(String, default=lambda: datetime.now(UTC).isoformat())
-    status: str = Column(String, default="open")
+    id: uuid.UUID = Column(UUID, primary_key=True, default=uuid.uuid4)
+    household_id: uuid.UUID = Column(UUID, ForeignKey("households.id"), nullable=False)
+    title: str = Column(String, nullable=False)
+    description: str = Column(String, nullable=True)
+    date_of_loss: datetime = Column(DateTime, nullable=False, default=datetime.utcnow)  # ✅ Restored date of loss
 
-    # ✅ Relationships
     household = relationship("Household", back_populates="claims")
     files = relationship("File", back_populates="claim")
 
-    def to_dict(self) -> dict:
-        """Converts the SQLAlchemy model to a dictionary."""
+    def to_dict(self):
         return {
-            "id": self.id,
-            "household_id": self.household_id,
+            "id": str(self.id),
+            "household_id": str(self.household_id),
             "title": self.title,
             "description": self.description,
-            "created_at": self.created_at,
-            "status": self.status,
+            "date_of_loss": self.date_of_loss.isoformat()
         }
