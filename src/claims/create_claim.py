@@ -1,116 +1,88 @@
-"""
-Create Claim Handler
-
-Handles the creation of a new claim for an authenticated user.
-Ensures input validation, structured error handling, and standardized responses.
-
-Example Usage:
-    ```
-    POST /claims
-    {
-        "title": "Lost Phone",
-        "description": "Left in a taxi",
-        "loss_date": "2024-02-01"
-    }
-    ```
-"""
-
-import os
 import json
 import uuid
 import logging
+import re
 from datetime import datetime
-import boto3
-from botocore.exceptions import ClientError
-from claims.model import Claim  # ✅ Import the Claim model
+from sqlalchemy.exc import SQLAlchemyError
+from database.database import get_db_session
+from models.claim import Claim
 from utils import response
 
 # ✅ Configure logging
 logger = logging.getLogger()
 logger.setLevel(logging.INFO)
 
-
-def get_claims_table():
+def lambda_handler(event, _context, db_session=None):
     """
-    Returns the claims table.
-
-    Returns:
-        boto3.resource("dynamodb").Table: The claims table.
-    """
-    dynamodb = boto3.resource("dynamodb")
-    return dynamodb.Table(os.environ["CLAIMS_TABLE"])
-
-
-def lambda_handler(event, _context):
-    """
-    Handles the creation of a new claim.
-
-    Validates the request body, ensures required fields are present, and stores the new claim in DynamoDB.
-
-    Args:
-        event (dict): The API Gateway event payload.
-        _context (dict): The AWS Lambda execution context (unused).
-
-    Returns:
-        dict: Standardized API response with claim ID if successful.
+    Handles the creation of a new claim in PostgreSQL.
+    
+    Validates input, ensures household association, and stores claim in the database.
     """
     try:
-        user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
+        user_id = event["requestContext"]["authorizer"]["claims"].get("sub")
+        if not user_id:
+            return response.api_response(400, message="Invalid request: Missing authentication data")
+        
         body = parse_request_body(event)
 
         # ✅ Validate required fields
-        missing_fields = [field for field in ["title", "loss_date"] if field not in body]
+        missing_fields = [field for field in ["title", "date_of_loss", "household_id"] if field not in body]
         if missing_fields:
             return response.api_response(400, missing_fields=missing_fields)
 
-        # ✅ Ensure `loss_date` is formatted correctly
-        if not is_valid_date(body["loss_date"]):
-            return response.api_response(400, message="Invalid date format. Expected YYYY-MM-DD")
+        title_validation_result = validate_title(body["title"])
+        if title_validation_result:
+            return response.api_response(400, message=title_validation_result)
+
+        # ✅ Ensure `date_of_loss` is formatted correctly
+        if not is_valid_date(body["date_of_loss"]):
+            return response.api_response(400, error_details="Invalid date format. Expected YYYY-MM-DD")
+
+        if is_future_date(body["date_of_loss"]):
+            return response.api_response(400, error_details="Future dates are not allowed")
+
+        # ✅ Use test DB if provided, otherwise use production DB
+        db = db_session if db_session else get_db_session()
+        
+        # ✅ Future-proof: Ensure user is part of the household (TODO: Implement verification query)
+        # Example: user_households = db.query(HouseholdUser).filter_by(user_id=user_id).all()
+        # if body["household_id"] not in [h.id for h in user_households]:
+        #     return response.api_response(403, message="Unauthorized to create claim for this household")
 
         # ✅ Create claim object
+        household_id = uuid.UUID(body["household_id"])
         claim = Claim(
-            id=str(uuid.uuid4()),
-            user_id=user_id,
+            id=uuid.uuid4(),
+            household_id=household_id,
             title=body["title"],
             description=body.get("description"),
-            loss_date=body["loss_date"],
-            status="pending",
-            created_at=datetime.utcnow().isoformat(),
+            date_of_loss=datetime.strptime(body["date_of_loss"], "%Y-%m-%d"),
         )
-        claims_table = get_claims_table()
+        
+        # ✅ Save to PostgreSQL
+        db.add(claim)
+        db.commit()
+        db.refresh(claim)
 
-        # ✅ Save to DynamoDB
-        claims_table.put_item(Item=claim.to_dynamodb_dict())
-
-        logger.info(f"Claim {claim.id} created successfully for user {user_id}")
-
-        return response.api_response(201, data={"id": claim.id})
-
-    except KeyError:
-        return response.api_response(400, message="Invalid request: Missing authentication data")
+        logger.info(
+            "Claim %s created successfully for household %s", claim.id, body["household_id"]
+        )
+        db.close()
+        return response.api_response(201, data={"id": str(claim.id)})
 
     except json.JSONDecodeError:
-        return response.api_response(400, message="Invalid JSON format in request body")
+        return response.api_response(400, error_details="Invalid JSON format in request body")
 
-    except ClientError as e:
-        logger.error(f"DynamoDB ClientError: {e}")
-        return response.api_response(500, message="Internal Server Error", error_details=e.response["Error"]["Message"])
-
+    except SQLAlchemyError as e:
+        logger.error(f"Database error: {e}")
+        return response.api_response(500, error_details=str(e))
+    
     except Exception as e:
         logger.exception("Unexpected error during claim creation")
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
-
+        return response.api_response(500, error_details=str(e))
 
 def parse_request_body(event):
-    """
-    Parses the request body and ensures it's a valid dictionary.
-
-    Args:
-        event (dict): API Gateway event.
-
-    Returns:
-        dict: Parsed request body.
-    """
+    """Parses the request body and ensures it's a valid dictionary."""
     body = json.loads(event.get("body") or "{}")
     if not isinstance(body, dict):
         raise json.JSONDecodeError("Request body must be a valid JSON object", "", 0)
@@ -118,17 +90,27 @@ def parse_request_body(event):
 
 
 def is_valid_date(date_str):
-    """
-    Validates if a string follows the YYYY-MM-DD date format.
-
-    Args:
-        date_str (str): The date string to validate.
-
-    Returns:
-        bool: True if valid, False otherwise.
-    """
+    """Validates if a string follows the YYYY-MM-DD date format."""
     try:
         datetime.strptime(date_str, "%Y-%m-%d")
         return True
     except ValueError:
         return False
+
+def is_future_date(date_str):
+    """Validates if date is in the future."""
+    try:
+        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+        return date_obj > datetime.now()
+    except ValueError:
+        return False
+
+def validate_title(title):
+    """Validates if a title is not empty, not a control character, and less than 255 characters."""
+    if not title.strip():
+        return "Title cannot be empty"
+    if len(title) > 255:
+        return "Title cannot be more than 255 characters"
+    if re.search(r"[;'\"]", title):
+        return "Invalid characters in title"
+    return ""
