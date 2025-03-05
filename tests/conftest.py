@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from unittest.mock import patch, MagicMock
 from testcontainers.postgres import PostgresContainer  # Optional if using Testcontainers
-from models import File, Base 
+from models import Base
 from dotenv import load_dotenv
 
 load_dotenv()
