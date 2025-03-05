@@ -11,7 +11,7 @@ from database.database import get_db_session
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
+def lambda_handler(event: dict, _context: dict, db_session=None) -> dict:
     """
     Handles retrieving all claims for the authenticated user's household.
 
@@ -23,28 +23,28 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
     Returns:
         dict: API response containing the list of claims or an error message.
     """
-    db = db_session if db_session else get_db_session()
     try:
-        logger.info("Received request for retrieving claims")
+        db = db_session if db_session else get_db_session()
+    except Exception as e:  # Catch DB connection failure early
+        logger.error("Database connection failed: %s", str(e))
+        return response.api_response(500, error_details="Database connection failed.")
 
-        # Extract user information from JWT claims
+    try:
         user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
         if not user_id:
             return response.api_response(400, message="Invalid authentication. JWT missing or malformed.")
 
         try:
-            user_uuid = uuid.UUID(user_id)
+            user_uuid = uuid.UUID(user_id)  # ✅ Ensure user ID is a UUID
         except ValueError:
-            return response.api_response(400, message="Invalid authentication. User ID is not a valid UUID.")
-        
-        # Fetch user to determine household
+            return response.api_response(400, message="Invalid user ID format. Expected UUID.")
+
         user = db.query(User).filter_by(id=user_uuid).first()
         if not user:
             return response.api_response(404, message="User not found.")
 
-        # Retrieve claims for the user's household
         claims = db.query(Claim).filter_by(household_id=user.household_id).all()
-        
+
         claims_data = [
             {
                 "id": str(claim.id),
@@ -56,15 +56,16 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         ]
 
         return response.api_response(200, data=claims_data)
-    
+
     except SQLAlchemyError as e:
         logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
-    
+        return response.api_response(500, error_details="Database error occurred.")
+
     except Exception as e:
         logger.exception("Unexpected error retrieving claims")
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
-    
+        return response.api_response(500, error_details=str(e))
+
     finally:
         if db_session is None:
             db.close()
+
