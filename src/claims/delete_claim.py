@@ -1,15 +1,70 @@
+import json
+import logging
+import uuid
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from utils import response
+from models import Claim, User
+from database.database import get_db_session
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
-
-def lambda_handler(event, _context):
+def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
     """
-    Handles deleting a claim from the claims table.
+    Handles deleting a claim for the authenticated user's household.
 
     Args:
-        event (dict): The event payload containing the claim ID.
-        _context (LambdaContext): The context object provided by AWS Lambda.
+        event (dict): API Gateway event containing authentication details and claim ID.
+        _context (dict): Lambda execution context (unused).
+        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
 
     Returns:
-        dict: A dictionary containing the status code and message of the deletion operation.
+        dict: API response confirming deletion or an error message.
     """
-    return ""
+    try:
+        db = db_session if db_session else get_db_session()
+        logger.info("Received request for deleting a claim")
+
+        # Extract and validate claim ID before querying the database
+        claim_id = event.get("pathParameters", {}).get("claim_id")
+        if not claim_id:
+            return response.api_response(400, error_details="Missing claim ID in request.")
+
+        try:
+            claim_uuid = uuid.UUID(claim_id)
+        except ValueError:
+            return response.api_response(400, error_details="Invalid claim ID format. Expected UUID.")
+
+        # Extract and validate user ID
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        if not user_id:
+            return response.api_response(400, error_details="Invalid authentication. JWT missing or malformed.")
+
+        try:
+            user_uuid = uuid.UUID(user_id)  # Ensure user ID is a UUID
+        except ValueError:
+            return response.api_response(400, error_details="Invalid user ID format. Expected UUID.")
+
+        user = db.query(User).filter_by(id=user_uuid).first()
+        if not user:
+            return response.api_response(404, error_details="User not found.")
+
+        claim = db.query(Claim).filter_by(id=claim_uuid).first()
+        if not claim or claim.household_id != user.household_id:
+            return response.api_response(404, error_details="Claim not found.")
+
+        # Delete the claim
+        db.delete(claim)
+        db.commit()
+        db.close()
+        return response.api_response(200, message="Claim deleted successfully.")
+
+    except SQLAlchemyError as e:
+        logger.error("Database error occurred: %s", str(e))
+        return response.api_response(500, error_details="Database error occurred.")
+
+    except Exception as e:
+        logger.exception("Unexpected error deleting claim")
+        return response.api_response(500, error_details=str(e))
