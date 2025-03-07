@@ -25,7 +25,7 @@ def upload_to_s3(file_name: str, file_data: bytes) -> str:
     if not bucket_name:
         raise ValueError("S3_BUCKET_NAME environment variable is not set")
     s3_key = f"uploads/{file_name}"
-    
+
     try:
         s3.put_object(Bucket=bucket_name, Key=s3_key, Body=file_data)
         return f"s3://{bucket_name}/{s3_key}"
@@ -43,21 +43,33 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
 
         user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
         if not user_id:
-            return response.api_response(401, message="Unauthorized request. JWT missing or malformed.")
+            return response.api_response(
+                401,
+                message="Unauthorized request. JWT missing or malformed."
+            )
 
         try:
             user_uuid = uuid.UUID(user_id)
         except ValueError:
-            return response.api_response(400, message="Invalid user ID format. Expected UUID.")
+            return response.api_response(
+                400,
+                message="Invalid user ID format. Expected UUID."
+            )
 
         user = db.query(User).filter_by(id=user_uuid).first()
         if not user:
-            return response.api_response(404, message="User not found.")
+            return response.api_response(   
+                404,
+                message="User not found."
+            )
 
         body = json.loads(event.get("body", "{}"))
         files = body.get("files", [])
         if not files:
-            return response.api_response(400, message="No files provided in request.")
+            return response.api_response(
+                400,
+                message="No files provided in request."
+            )
 
         allowed_extensions = {"jpg", "jpeg", "png", "gif", "pdf"}
         uploaded_files = []
@@ -70,16 +82,22 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
             file_data = file.get("file_data")
 
             if not file_data.strip():  # Check if the base64 string is empty
-                failed_files.append({"file_name": file_name, "reason": "File data is empty."})
+                failed_files.append(
+                    {"file_name": file_name, "reason": "File data is empty."}
+                )
                 continue
 
             if not file_name or not file_data:
-                failed_files.append({"file_name": file_name, "reason": "Missing file name or data."})
+                failed_files.append(
+                    {"file_name": file_name, "reason": "Missing file name or data."}
+                )
                 continue
 
             file_extension = file_name.split(".")[-1].lower()
             if file_extension not in allowed_extensions or not file_extension:
-                failed_files.append({"file_name": file_name, "reason": "Unsupported file format."})
+                failed_files.append(
+                    {"file_name": file_name, "reason": "Unsupported file format."}
+                )
                 continue
 
             try:
@@ -119,7 +137,7 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
                 s3_url = upload_to_s3(s3_key, decoded_data)
                 uploaded_files.append({"file_name": file_name, "file_id": str(file_id), "s3_url": s3_url})
             except (BotoCoreError, NoCredentialsError, ValueError) as e:
-                logger.error(f"S3 upload failed: {str(e)}")
+                logger.error("S3 upload failed: %s", str(e))
                 db.rollback()  # Rollback DB entry if S3 upload fails
                 failed_files.append({"file_name": file_name, "reason": "Failed to upload to S3."})
 
@@ -139,12 +157,12 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
 
     except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
         # Handle specific programming or data structure errors
-        logger.exception(f"Data handling error during file upload: {str(e)}")
+        logger.exception("Data handling error during file upload: %s", str(e))
         return response.api_response(500, message="Internal Server Error", 
                                      error_details=f"Error processing request: {str(e)}")
                                      
     except (BotoCoreError, NoCredentialsError) as e:
         # Handle AWS-specific errors that might have escaped the inner try/except
-        logger.exception(f"AWS service error during file upload: {str(e)}")
+        logger.exception("AWS service error during file upload: %s", str(e))
         return response.api_response(500, message="Internal Server Error", 
                                      error_details=f"AWS service error: {str(e)}")

@@ -195,7 +195,7 @@ def test_update_claim_db_failure(api_gateway_event):
         body = json.loads(response["body"])
 
     assert response["statusCode"] == 500
-    assert "Internal Server Error" in body["message"]
+    assert "Internal Server Error" in body["error_details"]
 
 def test_update_claim_no_future_date(test_db, api_gateway_event):
     """ Test that claim date of loss cannot be set to a future date"""

@@ -30,41 +30,44 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         # Extract and validate claim ID before querying the database
         claim_id = event.get("pathParameters", {}).get("claim_id")
         if not claim_id:
-            return response.api_response(400, error_details="Missing claim ID in request.")
+            return response.api_response(400, error_details="Missing claim ID in request")
 
         try:
             claim_uuid = uuid.UUID(claim_id)
         except ValueError:
-            return response.api_response(400, error_details="Invalid claim ID format. Expected UUID.")
+            return response.api_response(400, error_details="Invalid claim ID format. Expected UUID")
 
         # Extract and validate user ID
         user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
         if not user_id:
-            return response.api_response(400, error_details="Invalid authentication. JWT missing or malformed.")
+            return response.api_response(400, error_details="Invalid authentication. JWT missing or malformed")
 
         try:
             user_uuid = uuid.UUID(user_id)  # Ensure user ID is a UUID
         except ValueError:
-            return response.api_response(400, error_details="Invalid user ID format. Expected UUID.")
+            return response.api_response(400, error_details="Invalid user ID format. Expected UUID")
 
         user = db.query(User).filter_by(id=user_uuid).first()
         if not user:
-            return response.api_response(404, error_details="User not found.")
+            return response.api_response(404, error_details="User not found")
 
         claim = db.query(Claim).filter_by(id=claim_uuid).first()
         if not claim or claim.household_id != user.household_id:
-            return response.api_response(404, error_details="Claim not found.")
+            return response.api_response(404, error_details="Claim not found")
 
         # Delete the claim
         db.delete(claim)
         db.commit()
-        db.close()
-        return response.api_response(200, message="Claim deleted successfully.")
+        
+        return response.api_response(200, success_message="Claim deleted successfully")
 
     except SQLAlchemyError as e:
         logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, error_details="Database error occurred.")
+        return response.api_response(500, error_details=f"Database error: {str(e)}")
 
     except Exception as e:
         logger.exception("Unexpected error deleting claim")
-        return response.api_response(500, error_details=str(e))
+        return response.api_response(500, error_details=f"Internal server error: {str(e)}")
+    finally:
+        if db_session is None and 'db' in locals():
+            db.close()

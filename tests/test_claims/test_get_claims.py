@@ -9,29 +9,29 @@ from models.claim import Claim
 from models.user import User
 
 def test_get_claims_success(test_db, api_gateway_event):
-    """✅ Test retrieving claims successfully using household ID from JWT"""
-    household_id = uuid.uuid4()  # ✅ Generate valid UUID
+    """Test retrieving claims successfully using household ID from JWT"""
+    household_id = uuid.uuid4()  # Generate valid UUID
 
-    # ✅ Create a household first
+    # Create a household first
     test_household = Household(id=household_id, name="Test Household")
     test_db.add(test_household)
     test_db.commit()
 
-    user_id = uuid.uuid4()  # ✅ Generate valid UUID for user
+    user_id = uuid.uuid4()  # Generate valid UUID for user
 
-    # ✅ Create a user associated with the household
+    # Create a user associated with the household
     test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
     test_db.add(test_user)
     test_db.commit()
 
-    # ✅ Create test claims with the valid household_id
+    # Create test claims with the valid household_id
     claim1 = Claim(id=uuid.uuid4(), household_id=household_id, title="Claim 1", date_of_loss=datetime(2024, 1, 10))
     claim2 = Claim(id=uuid.uuid4(), household_id=household_id, title="Claim 2", date_of_loss=datetime(2024, 1, 11))
     test_db.add_all([claim1, claim2])
     test_db.commit()
 
-    event = api_gateway_event(http_method="GET", auth_user=str(user_id))  # ✅ Use a valid UUID for user_id
-    response = lambda_handler(event, {}, db_session=test_db)
+    event = api_gateway_event(http_method="GET", auth_user=str(user_id))  # Use a valid UUID for user_id
+    response = lambda_handler(event, {})
     body = json.loads(response["body"])
 
     assert response["statusCode"] == 200
@@ -41,12 +41,12 @@ def test_get_claims_success(test_db, api_gateway_event):
 
 
 def test_get_claims_empty(test_db, api_gateway_event):
-    """✅ Test retrieving claims when the user has none"""
+    """Test retrieving claims when the user has none"""
     household_id = uuid.uuid4()
 
-    # ✅ Create a valid household and user
+    # Create a valid household and user
     test_household = Household(id=household_id, name="Test Household")
-    user_id = uuid.uuid4()  # ✅ Generate a valid user UUID
+    user_id = uuid.uuid4()  # Generate a valid user UUID
     test_user = User(
         id=user_id,
         email="test@example.com",
@@ -56,78 +56,72 @@ def test_get_claims_empty(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user])
     test_db.commit()
 
-    event = api_gateway_event(http_method="GET", auth_user=str(user_id))  # ✅ Use a valid UUID for user_id
-    response = lambda_handler(event, {}, db_session=test_db)
+    event = api_gateway_event(http_method="GET", auth_user=str(user_id))  # Use a valid UUID for user_id
+    response = lambda_handler(event, {})
     body = json.loads(response["body"])
 
     assert response["statusCode"] == 200
-    assert body["data"]["results"] == []
+    assert len(body["data"]["results"]) == 0
 
-import uuid
-from models.user import User
-from models.household import Household
 
 def test_get_claims_unauthorized(test_db, api_gateway_event):
-    """✅ Test retrieving claims for a household the user doesn't belong to"""
-
-    # ✅ Create two separate households
-    authorized_household_id = uuid.uuid4()
-    unauthorized_household_id = uuid.uuid4()
-
-    test_household = Household(id=authorized_household_id, name="Authorized Household")
-    unauthorized_household = Household(id=unauthorized_household_id, name="Unauthorized Household")
+    """Test retrieving claims for a household the user doesn't belong to"""
+    # Create two separate households
+    household1_id = uuid.uuid4()
+    household2_id = uuid.uuid4()
     
-    test_db.add_all([test_household, unauthorized_household])
+    test_household1 = Household(id=household1_id, name="Household 1")
+    test_household2 = Household(id=household2_id, name="Household 2")
+    test_db.add_all([test_household1, test_household2])
     test_db.commit()
-
-    # ✅ Create an authorized user linked to the first household
-    authorized_user_id = uuid.uuid4()
-    authorized_user = User(
-        id=authorized_user_id,
-        email="authorized@example.com",
-        first_name="Authorized",
+    
+    # Create a user in household 1
+    user_id = uuid.uuid4()
+    test_user = User(
+        id=user_id,
+        email="test@example.com",
+        first_name="Test",
         last_name="User",
-        household_id=authorized_household_id
-    )
-
-    # ✅ Create an unauthorized user in a different household
-    unauthorized_user_id = uuid.uuid4()
-    unauthorized_user = User(
-        id=unauthorized_user_id,
-        email="unauthorized@example.com",
-        first_name="Unauthorized",
-        last_name="User",
-        household_id=unauthorized_household_id
-    )
-
-    test_db.add_all([authorized_user, unauthorized_user])
+        household_id=household1_id)
+    test_db.add(test_user)
     test_db.commit()
-
-    # ✅ The unauthorized user queries their own household, expecting an empty list
-    event = api_gateway_event(http_method="GET", auth_user=str(unauthorized_user_id))
-    response = lambda_handler(event, {}, db_session=test_db)
+    
+    # Create claims in household 2
+    claim = Claim(id=uuid.uuid4(), household_id=household2_id, title="Other Household Claim", date_of_loss=datetime(2024, 1, 10))
+    test_db.add(claim)
+    test_db.commit()
+    
+    # Try to access claims with user from household 1
+    event = api_gateway_event(http_method="GET", auth_user=str(user_id))
+    response = lambda_handler(event, {})
     body = json.loads(response["body"])
-
-    assert response["statusCode"] == 200  # ✅ Now correctly expects 200
-    assert body["data"]["results"] == []  # ✅ Expecting an empty list instead of an error
-
+    
+    # Should only see claims from their own household (which is empty)
+    assert response["statusCode"] == 200
+    assert len(body["data"]["results"]) == 0
+    
+    # Verify the claim in household 2 still exists
+    claim_check = test_db.query(Claim).filter_by(title="Other Household Claim").first()
+    assert claim_check is not None
 
 
 def test_get_claims_db_failure(api_gateway_event):
     """Test handling a database connection failure"""
-    with patch("claims.get_claims.get_db_session", side_effect=Exception("DB Failure")):
-        event = api_gateway_event(http_method="GET", auth_user="user-123")
+    event = api_gateway_event(http_method="GET", auth_user=str(uuid.uuid4()))
+    
+    with patch('claims.get_claims.get_db_session', side_effect=Exception("Database connection error")):
         response = lambda_handler(event, {})
         body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 500
+        assert "Database error" in body["error_details"]
 
-    assert response["statusCode"] == 500
-    assert "Internal Server Error" in body["message"]
 
 def test_get_claims_invalid_jwt(api_gateway_event):
-    """❌ Test retrieving claims with a malformed or missing JWT"""
-    event = api_gateway_event(http_method="GET", auth_user=None)  # No JWT
+    """Test retrieving claims with a malformed or missing JWT"""
+    event = api_gateway_event(http_method="GET", auth_user=None)  # Missing auth
     response = lambda_handler(event, {})
     body = json.loads(response["body"])
-
-    assert response["statusCode"] == 400
-    assert "Invalid authentication" in body["message"]
+    
+    assert response["statusCode"] == 401
+    assert "Unauthorized" in body["error_details"]

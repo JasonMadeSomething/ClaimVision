@@ -28,7 +28,7 @@ def lambda_handler(event: dict, _context: dict) -> dict:
         try:
             body = json.loads(event.get("body", "{}"))
         except json.JSONDecodeError:
-            return response.api_response(400, message="Invalid request format")
+            return response.api_response(400, error_details="Invalid request format")
         
         username = body.get("username")
         password = body.get("password")
@@ -52,27 +52,27 @@ def lambda_handler(event: dict, _context: dict) -> dict:
         )
 
         # Extract authentication token
-        return response.api_response(200, message="Login successful", data={
+        return response.api_response(200, data={
                 "access_token": cognito_response["AuthenticationResult"]["AccessToken"],
                 "id_token": cognito_response["AuthenticationResult"]["IdToken"],
                 "refresh_token": cognito_response["AuthenticationResult"]["RefreshToken"]
             })
         
     except cognito_client.exceptions.NotAuthorizedException:
-        return response.api_response(401, message="Invalid username or password")
+        return response.api_response(401, error_details="Invalid username or password")
        
     except cognito_client.exceptions.InternalErrorException:
-        return response.api_response(500, message="Cognito is currently unavailable. Please try again later.")
+        return response.api_response(500, error_details="Cognito is currently unavailable. Please try again later")
     except cognito_client.exceptions.UserNotFoundException:
-        return response.api_response(404, message="User does not exist.")
+        return response.api_response(404, error_details="User does not exist")
     except cognito_client.exceptions.UserNotConfirmedException:
-        return response.api_response(403, message="User is not confirmed. Please check your email.")
+        return response.api_response(403, error_details="User is not confirmed. Please check your email")
 
     except cognito_client.exceptions.TooManyRequestsException:
-        return response.api_response(429, message="Too many failed login attempts. Please try again later.")
+        return response.api_response(429, error_details="Too many failed login attempts. Please try again later")
 
     except cognito_client.exceptions.PasswordResetRequiredException:
-        return response.api_response(403, message="Password reset required before login.")
+        return response.api_response(403, error_details="Password reset required before login")
 
     except Exception as e:
-        return response.api_response(500, message="An error occurred", error_details=str(e))
+        return response.api_response(500, error_details=str(e))

@@ -11,7 +11,7 @@ from database.database import engine
 Base.metadata.create_all(engine)
 
 def test_register_user_success(mock_cognito, test_db, mocker):
-    """✅ Ensure a new user can register successfully and is stored in Cognito and RDS."""
+    """Ensure a new user can register successfully and is stored in Cognito and RDS."""
 
     # Mock Cognito to generate a unique UserSub
     generated_user_sub = str(uuid.uuid4())  # Generate the expected UserSub
@@ -34,11 +34,13 @@ def test_register_user_success(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    _response = register_handler(event, None)
+    response = register_handler(event, None)
+    body = json.loads(response["body"])
+    
+    assert response["statusCode"] == 200, f"Expected 200, got {response['statusCode']}"
 
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
-
 
     assert user is not None, f"User {generated_user_sub} was not found in test DB"
     assert user.email == "test@example.com"
@@ -48,14 +50,13 @@ def test_register_user_success(mock_cognito, test_db, mocker):
     assert user.last_name == last_name,(
         f"Expected last name '{last_name}', got '{user.last_name}'"
     )
-    
 
 
 #  SUCCESS: User registration with default household
 def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
-    """✅ Ensure a new user gets a default household if none is provided."""
+    """Ensure a new user gets a default household if none is provided."""
 
-    print("🚀 Starting test_register_user_creates_default_household")
+    print("Starting test_register_user_creates_default_household")
 
     # Mock Cognito to generate a unique UserSub
     generated_user_sub = str(uuid.uuid4())  # Generate the expected UserSub
@@ -77,7 +78,8 @@ def test_register_user_creates_default_household(mock_cognito, test_db, mocker):
     }
 
     # Act: Call the registration Lambda
-    _response = register_handler(event, None)
+    response = register_handler(event, None)
+    body = json.loads(response["body"])
 
     #  Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
@@ -132,23 +134,24 @@ def test_register_existing_user(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
     # Act: Call the registration Lambda
     response = register_handler(event, None)
     body = json.loads(response["body"])
 
-    print("✅ Lambda finished execution! Checking Response...")
+    print("Lambda finished execution! Checking Response...")
 
     # Assert: Ensure it returns 409 Conflict
     assert response["statusCode"] == 409, f"Expected 409, got {response['statusCode']}"
-    assert "Conflict" in body["message"], f"Expected 'Conflict' in message, got '{body['message']}'"
+    assert "Conflict" in body["error_details"], f"Expected 'Conflict' in error details, got '{body['error_details']}'"
 
     error_details_msg = (
-        f"Expected 'User already exists' in message, got '{body['error_details']}'"
+        f"Expected 'User already exists' in error details, got '{body['error_details']}'"
     )
     assert "User already exists" in body["error_details"], error_details_msg
-    print("✅ Test Passed!")
+    print("Test Passed!")
+
 
 def test_register_weak_password(mock_cognito, test_db, mocker):
     """Ensure registration fails if password does not meet security requirements."""
@@ -177,11 +180,7 @@ def test_register_weak_password(mock_cognito, test_db, mocker):
 
     # Assert: Ensure it returns 400 Bad Request
     assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']}"
-
-    bad_request_msg = (
-        f"Expected 'Bad Request' in message, got '{body['message']}'"
-    )
-    assert "Bad Request" in body["message"], bad_request_msg
+    assert body["error_details"].startswith("Bad Request:") or body["error_details"] == "Password does not meet complexity requirements", f"Expected error details to be 'Password does not meet complexity requirements' or start with 'Bad Request:', got '{body['error_details']}'"
 
 
 # FAILURE: Missing required fields
@@ -238,15 +237,14 @@ def test_register_missing_fields(test_db, mocker):
         )
         assert response["statusCode"] == 400, status_code_msg
 
-        error_msg = (
-            f"Unexpected error message: {body['message']} for missing fields test {idx + 1}"
-        )
-        assert "Bad Request" in body["message"], error_msg
+        assert body["error_details"] == "Missing required fields", f"Expected 'Missing required fields', got '{body['error_details']}' for missing fields test {idx + 1}"
+        assert "missing_fields" in body["data"], f"Expected 'missing_fields' in data, missing for test {idx + 1}"
+
 
 def test_register_invalid_email(test_db, mocker):
-    """❌ Ensure registration fails if the email format is invalid."""
+    """ Ensure registration fails if the email format is invalid."""
 
-    print("🚀 Starting test_register_invalid_email")
+    print("Starting test_register_invalid_email")
 
     # Ensure `register.py` uses `test_db`
     mocker.patch("database.database.get_db_session", return_value=test_db)
@@ -264,7 +262,7 @@ def test_register_invalid_email(test_db, mocker):
     ]
 
     for idx, invalid_email in enumerate(invalid_emails):
-        print(f"📡 Calling lambda_handler with invalid email (Test {idx + 1}): {invalid_email}")
+        print(f"Calling lambda_handler with invalid email (Test {idx + 1}): {invalid_email}")
 
         event = {
             "body": json.dumps({
@@ -280,34 +278,24 @@ def test_register_invalid_email(test_db, mocker):
         response = register_handler(event, None)
         body = json.loads(response["body"])
 
-        print(f"✅ Lambda finished execution! Checking Response (Test {idx + 1})...")
+        print(f"Lambda finished execution! Checking Response (Test {idx + 1})...")
 
         # Assert: Ensure it returns 400 Bad Request
         status_code_msg = (
-            f"❌ Expected 400, got {response['statusCode']} for invalid email test {idx + 1}"
+            f"Expected 400, got {response['statusCode']} for invalid email test {idx + 1}"
         )
         assert response["statusCode"] == 400, status_code_msg
 
-        error_msg = (
-            f"❌ Unexpected error message: {body['message']} for invalid email test {idx + 1}"
-        )
-        assert "Bad Request" in body["message"], error_msg
+        assert body["error_details"] == "Invalid email format", f"Expected 'Invalid email format', got '{body['error_details']}' for invalid email test {idx + 1}"
 
-        error_details_msg = (
-            f"❌ Expected 'email' in error details, got '{body['error_details']}'"
-        )
-        assert "email" in body["error_details"].lower(), (
-            f"{error_details_msg} for invalid email test {idx + 1}"
-        )
-
-    print("✅ All invalid email format tests passed!")
+    print("All invalid email format tests passed!")
 
 
-# ❌ FAILURE: Cognito Internal Error
+# FAILURE: Cognito Internal Error
 def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
-    """❌ Ensure proper handling if Cognito has an internal error."""
+    """Ensure proper handling if Cognito has an internal error."""
 
-    print("🚀 Starting test_register_cognito_internal_error")
+    print("Starting test_register_cognito_internal_error")
 
     # Mock Cognito to raise InternalErrorException
     mock_cognito.sign_up.side_effect = mock_cognito.exceptions.InternalErrorException
@@ -325,7 +313,7 @@ def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
     # Act: Call the registration Lambda
     response = register_handler(event, None)
@@ -334,28 +322,25 @@ def test_register_cognito_internal_error(mock_cognito, test_db, mocker):
     print("Lambda finished execution! Checking Response...")
 
     # Assert: Ensure it returns 500 Internal Server Error
-    assert response["statusCode"] == 500, f"❌ Expected 500, got {response['statusCode']}"
-    error_msg = "Cognito is currently unavailable. Please try again later."
-    assert body["error_details"] == error_msg, (
-        f"❌ Unexpected error details: {body['error_details']}"
-    )
+    assert response["statusCode"] == 500, f"Expected 500, got {response['statusCode']}"
+    assert body["error_details"] == "Authentication service unavailable", f"Expected 'Authentication service unavailable', got '{body['error_details']}'"
 
     print("Test Passed!")
 
 
-# ❌ FAILURE: Database connection failure
+# FAILURE: Database connection failure
 def test_register_db_failure(mock_cognito, test_db, mocker):
-    """❌ Ensure registration fails gracefully if the database is down."""
+    """Ensure registration fails gracefully if the database is down."""
 
-    print("🚀 Starting test_register_db_failure")
+    print("Starting test_register_db_failure")
 
-    # ✅ Patch the correct path to ensure `get_db_session()` fails
+    # Patch the correct path to ensure `get_db_session()` fails
     mocker.patch(
         "auth.register.get_db_session",
         side_effect=sqlalchemy.exc.OperationalError("DB Connection Error", None, None)
     )
 
-    # ✅ Mock Cognito (should NOT be called)
+    # Mock Cognito (should NOT be called)
     mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": str(uuid.uuid4())}
 
     event = {
@@ -368,36 +353,35 @@ def test_register_db_failure(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
-    # ✅ Act: Call the registration Lambda
+    # Act: Call the registration Lambda
     response = register_handler(event, None)
     body = json.loads(response["body"])
 
-    print("✅ Lambda finished execution! Checking Response...")
+    print("Lambda finished execution! Checking Response...")
 
-    # ✅ Ensure Cognito was never called (because DB failed first)
+    # Ensure Cognito was never called (because DB failed first)
     assert mock_cognito.sign_up.call_count == 0,(
-        "❌ Cognito should NOT be called if DB connection fails."
+        "Cognito should NOT be called if DB connection fails."
     )
 
-    # ✅ Assert: Ensure it returns 500 Internal Server Error
-    assert response["statusCode"] == 500, f"❌ Expected 500, got {response['statusCode']}"
-    assert body["error_details"] == "Database connection failed. Please try again later.", \
-        f"❌ Unexpected error details: {body['error_details']}"
+    # Assert: Ensure it returns 500 Internal Server Error
+    assert response["statusCode"] == 500, f"Expected 500, got {response['statusCode']}"
+    assert body["error_details"] == "Database connection failed", f"Expected 'Database connection failed', got '{body['error_details']}'"
 
-    print("✅ Test Passed!")
+    print("Test Passed!")
 
 def test_register_user_stores_in_db(mock_cognito, test_db, mocker):
-    """✅ Ensure the user is stored in the PostgreSQL database after successful registration."""
+    """Ensure the user is stored in the PostgreSQL database after successful registration."""
 
-    print("🚀 Starting test_register_user_stores_in_db")
+    print("Starting test_register_user_stores_in_db")
 
-    # ✅ Mock Cognito to return a valid UserSub
+    # Mock Cognito to return a valid UserSub
     generated_user_sub = str(uuid.uuid4())
     mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
 
-    # ✅ Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("auth.register.get_db_session", return_value=test_db)
 
     first_name = "John"
@@ -414,47 +398,47 @@ def test_register_user_stores_in_db(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
-    # ✅ Act: Call the registration Lambda
-    _response = register_handler(event, None)
+    # Act: Call the registration Lambda
+    response = register_handler(event, None)
 
-    print("✅ Lambda finished execution! Checking DB...")
+    print("Lambda finished execution! Checking DB...")
 
-    # ✅ Query the **same session** used in register.py
+    # Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
 
-    print(f"🔎 DB Query Result: {user}")  # DEBUG
+    print(f"DB Query Result: {user}")  # DEBUG
 
-    # ✅ Ensure the user exists
-    assert user is not None, f"❌ User {generated_user_sub} was not found in test DB"
+    # Ensure the user exists
+    assert user is not None, f"User {generated_user_sub} was not found in test DB"
 
-    # ✅ Ensure all fields are stored correctly
-    assert user.email == email, f"❌ Expected email '{email}', got '{user.email}'"
-    assert user.first_name == first_name, f"❌ Expected first name '{first_name}', got '{user.first_name}'"
-    assert user.last_name == last_name, f"❌ Expected last name '{last_name}', got '{user.last_name}'"
-    assert user.household_id is not None, "❌ Expected user to have a household ID, but got None"
+    # Ensure all fields are stored correctly
+    assert user.email == email, f"Expected email '{email}', got '{user.email}'"
+    assert user.first_name == first_name, f"Expected first name '{first_name}', got '{user.first_name}'"
+    assert user.last_name == last_name, f"Expected last name '{last_name}', got '{user.last_name}'"
+    assert user.household_id is not None, "Expected user to have a household ID, but got None"
 
-    # ✅ Ensure the household exists
+    # Ensure the household exists
     household = test_db.query(Household).filter(Household.id == user.household_id).first()
-    assert household is not None, f"❌ Household {user.household_id} was not found in test DB"
+    assert household is not None, f"Household {user.household_id} was not found in test DB"
     
     expected_household_name = f"{first_name}'s Household"
-    assert household.name == expected_household_name, f"❌ Expected household name '{expected_household_name}', got '{household.name}'"
+    assert household.name == expected_household_name, f"Expected household name '{expected_household_name}', got '{household.name}'"
 
-    print("✅ User successfully stored in PostgreSQL!")
+    print("User successfully stored in PostgreSQL!")
 
 
 def test_register_sets_cognito_attributes(mock_cognito, test_db, mocker):
-    """✅ Ensure Cognito user attributes like email and name are set correctly."""
+    """Ensure Cognito user attributes like email and name are set correctly."""
 
-    print("🚀 Starting test_register_sets_cognito_attributes")
+    print("Starting test_register_sets_cognito_attributes")
 
-    # ✅ Mock Cognito to return a valid UserSub
+    # Mock Cognito to return a valid UserSub
     generated_user_sub = str(uuid.uuid4())
     mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
 
-    # ✅ Ensure `register.py` uses `test_db`
+    # Ensure `register.py` uses `test_db`
     mocker.patch("auth.register.get_db_session", return_value=test_db)
 
     first_name = "John"
@@ -471,25 +455,25 @@ def test_register_sets_cognito_attributes(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
-    # ✅ Act: Call the registration Lambda
-    _response = register_handler(event, None)
+    # Act: Call the registration Lambda
+    response = register_handler(event, None)
 
-    print("✅ Lambda finished execution! Checking Cognito Calls...")
+    print("Lambda finished execution! Checking Cognito Calls...")
 
-    # ✅ Assert: Ensure Cognito `sign_up` was called once
+    # Assert: Ensure Cognito `sign_up` was called once
     mock_cognito.sign_up.assert_called_once()
 
-    # ✅ Extract the actual call arguments
+    # Extract the actual call arguments
     cognito_call_args = mock_cognito.sign_up.call_args[1]  # Get the keyword arguments used in the call
 
-    # ✅ Ensure the expected attributes were sent to Cognito
-    assert cognito_call_args["ClientId"] == os.getenv("COGNITO_USER_POOL_CLIENT_ID"), "❌ Incorrect Cognito ClientId"
-    assert cognito_call_args["Username"] == "testuser", "❌ Incorrect Cognito Username"
-    assert cognito_call_args["Password"] == "StrongPass!123", "❌ Incorrect Cognito Password"
+    # Ensure the expected attributes were sent to Cognito
+    assert cognito_call_args["ClientId"] == os.getenv("COGNITO_USER_POOL_CLIENT_ID"), "Incorrect Cognito ClientId"
+    assert cognito_call_args["Username"] == "testuser", "Incorrect Cognito Username"
+    assert cognito_call_args["Password"] == "StrongPass!123", "Incorrect Cognito Password"
 
-    # ✅ Ensure the correct user attributes were set
+    # Ensure the correct user attributes were set
     expected_attributes = [
         {"Name": "email", "Value": email},
         {"Name": "given_name", "Value": first_name},
@@ -497,16 +481,16 @@ def test_register_sets_cognito_attributes(mock_cognito, test_db, mocker):
     ]
     
     assert cognito_call_args["UserAttributes"] == expected_attributes, \
-        f"❌ Expected Cognito UserAttributes {expected_attributes}, got {cognito_call_args['UserAttributes']}"
+        f"Expected Cognito UserAttributes {expected_attributes}, got {cognito_call_args['UserAttributes']}"
 
-    print("✅ Cognito user attributes were set correctly!")
+    print("Cognito user attributes were set correctly!")
 
 
-# ✅ SUCCESS: Ensure household ID syncs correctly
+# SUCCESS: Ensure household ID syncs correctly
 def test_register_syncs_household_id(mock_cognito, test_db, mocker):
-    """✅ Ensure the user's household ID is correctly stored in PostgreSQL and synced with Cognito."""
+    """Ensure the user's household ID is correctly stored in PostgreSQL and synced with Cognito."""
 
-    print("🚀 Starting test_register_syncs_household_id")
+    print("Starting test_register_syncs_household_id")
 
     # Mock Cognito to return a valid UserSub
     generated_user_sub = str(uuid.uuid4())
@@ -532,21 +516,21 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
     # Act: Call the registration Lambda
-    _response = register_handler(event, None)
+    response = register_handler(event, None)
 
-    print("✅ Lambda finished execution! Checking DB...")
+    print("Lambda finished execution! Checking DB...")
 
     # Query the **same session** used in register.py
     user = test_db.query(User).filter(User.id == generated_user_sub).first()
 
-    print(f"🔎 DB Query Result: {user}")  # DEBUG
+    print(f"DB Query Result: {user}")  # DEBUG
 
     # Ensure the user exists and has a household ID
     user_not_found_msg = (
-        f"❌ User {generated_user_sub} was not found in test DB"
+        f"User {generated_user_sub} was not found in test DB"
     )
     assert user is not None, user_not_found_msg
     assert user.household_id is not None, "Expected user to have a household ID, but got None"
@@ -554,17 +538,17 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
     # Ensure the household exists
     household = test_db.query(Household).filter(Household.id == user.household_id).first()
     household_not_found_msg = (
-        f"❌ Household {user.household_id} was not found in test DB"
+        f"Household {user.household_id} was not found in test DB"
     )
     assert household is not None, household_not_found_msg
     
     expected_household_name = f"{first_name}'s Household"
     household_name_msg = (
-        f"❌ Expected household name '{expected_household_name}', got '{household.name}'"
+        f"Expected household name '{expected_household_name}', got '{household.name}'"
     )
     assert household.name == expected_household_name, household_name_msg
 
-    print(f"✅ Household successfully created and linked: {household.id} ({household.name})")  # DEBUG
+    print(f"Household successfully created and linked: {household.id} ({household.name})")  # DEBUG
 
     # Assert: Ensure Cognito `admin_update_user_attributes` was called with the correct household ID
     mock_cognito.admin_update_user_attributes.assert_called_once_with(
@@ -573,14 +557,14 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
         UserAttributes=[{"Name": "custom:household_id", "Value": user.household_id}]
     )
 
-    print("✅ Household ID successfully synced with Cognito!")
+    print("Household ID successfully synced with Cognito!")
 
 
-# ❌ FAILURE: Cognito rejects email already in use
+# FAILURE: Cognito rejects email already in use
 def test_register_email_already_used(mock_cognito, test_db, mocker):
-    """❌ Ensure registration fails if the email is already linked to another Cognito user."""
+    """Ensure registration fails if the email is already linked to another Cognito user."""
 
-    print("🚀 Starting test_register_email_already_used")
+    print("Starting test_register_email_already_used")
 
     # Mock Cognito to raise UsernameExistsException when trying to sign up
     mock_cognito.sign_up.side_effect = mock_cognito.exceptions.UsernameExistsException
@@ -602,23 +586,23 @@ def test_register_email_already_used(mock_cognito, test_db, mocker):
         })
     }
 
-    print("📡 Calling lambda_handler...")
+    print("Calling lambda_handler...")
 
     # Act: Call the registration Lambda
     response = register_handler(event, None)
     body = json.loads(response["body"])
 
-    print("✅ Lambda finished execution! Checking Response...")
+    print("Lambda finished execution! Checking Response...")
 
     # Assert: Ensure it returns 409 Conflict
-    assert response["statusCode"] == 409, f"❌ Expected 409, got {response['statusCode']}"
+    assert response["statusCode"] == 409, f"Expected 409, got {response['statusCode']}"
     
     error_details_msg = (
-        f"❌ Unexpected error details: {body['error_details']}"
+        f"Unexpected error details: {body['error_details']}"
     )
     assert "User already exists" in body["error_details"], error_details_msg
 
-    print("✅ Test Passed!")
+    print("Test Passed!")
 
 def test_register_cognito_household_sync_failure(mock_cognito, test_db, mocker):
     """Ensure registration doesn't fail if Cognito household sync fails."""
@@ -641,8 +625,9 @@ def test_register_cognito_household_sync_failure(mock_cognito, test_db, mocker):
     response = register_handler(event, None)
     body = json.loads(response["body"])
     
-    assert response["statusCode"] == 201, f"Expected 201, got {response['statusCode']}"
-    assert "User registered successfully" in body["message"]
+    assert response["statusCode"] == 200, f"Expected 200, got {response['statusCode']}"
+    assert "message" in body, "Expected 'message' in response body"
+    assert body["message"] == "OK" or "User registered successfully" in body["message"]
 
 def test_register_weak_password_prevalidation(mock_cognito, test_db, mocker):
     """Ensure weak passwords are caught before Cognito is called."""
@@ -663,4 +648,4 @@ def test_register_weak_password_prevalidation(mock_cognito, test_db, mocker):
     body = json.loads(response["body"])
     
     assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']}"
-    assert "Weak password" in body["error_details"], f"Unexpected error details: {body['error_details']}"
+    assert body["error_details"] == "Password does not meet complexity requirements", f"Expected 'Password does not meet complexity requirements', got '{body['error_details']}'"

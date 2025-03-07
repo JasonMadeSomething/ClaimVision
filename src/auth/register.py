@@ -92,19 +92,19 @@ def lambda_handler(event: dict, _context: dict) -> dict:
         
         missing_fields = detect_missing_fields(body)
         if missing_fields:
-            return response.api_response(400, missing_fields=missing_fields)
+            return response.api_response(400, error_details="Missing required fields", missing_fields=missing_fields)
         
         if not is_strong_password(body["password"]):
-            return response.api_response(400, error_details="Weak password")
+            return response.api_response(400, error_details="Password does not meet complexity requirements")
         
         if not is_valid_email(body["email"]):
-            return response.api_response(400, error_details="Invalid email format.")
+            return response.api_response(400, error_details="Invalid email format")
         
         try:
             db = get_db_session()
         except OperationalError:
-            logger.error("❌ Database connection failed.")
-            return response.api_response(500, error_details="Database connection failed. Please try again later.")
+            logger.error("Database connection failed.")
+            return response.api_response(500, error_details="Database connection failed")
         
         logger.info("Attempting Cognito Sign-Up")
         cognito_response = cognito_client.sign_up(
@@ -140,16 +140,16 @@ def lambda_handler(event: dict, _context: dict) -> dict:
                 UserAttributes=[{"Name": "custom:household_id", "Value": household.id}]
             )
         except Exception as e:
-            logger.error("❌ Failed to update Cognito attributes: %s", str(e))
+            logger.error("Failed to update Cognito attributes: %s", str(e))
         
-        return response.api_response(201, message="User registered successfully. Please confirm your email.")
+        return response.api_response(200, success_message="User registered successfully")
     
     except cognito_client.exceptions.UsernameExistsException:
-        return response.api_response(409, error_details="User already exists.")
+        return response.api_response(409, error_details="Conflict: User already exists")
     except cognito_client.exceptions.InvalidPasswordException as e:
-        return response.api_response(400, error_details=str(e))
+        return response.api_response(400, error_details=f"Bad Request: {str(e)}")
     except cognito_client.exceptions.InternalErrorException as e:
-        return response.api_response(500, error_details="Cognito is currently unavailable. Please try again later.")
+        return response.api_response(500, error_details="Authentication service unavailable")
     except Exception as e:
         if db is not None:
             db.rollback()

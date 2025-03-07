@@ -15,11 +15,11 @@ Usage Example:
     ```
     from utils.response import api_response
 
-    response = api_response(200, "Success", {"id": "123"})
+    response = api_response(200, success_message="User login successful", data={"id": "123"})
     print(response)
     # {
     #     "statusCode": 200,
-    #     "body": '{"status": "OK", "code": 200, "message": "Success", "data": {"id": "123"}}'
+    #     "body": '{"status": "OK", "code": 200, "message": "User login successful", "data": {"id": "123"}}'
     # }
     ```
 
@@ -29,7 +29,7 @@ The `api_response` function should be used for all API responses to enforce a st
 from typing import Any, Dict, List, Optional, Union
 from .models import APIResponse
 
-# ✅ Predefined status code mappings
+# Predefined status code mappings
 STATUS_MESSAGES: Dict[int, str] = {
     200: "OK",
     201: "Created",
@@ -50,27 +50,29 @@ def api_response(
     data: Optional[Union[Dict[str, Any], List[Any]]] = None,
     missing_fields: Optional[List[str]] = None,
     error_details: Optional[str] = None,
+    success_message: Optional[str] = None,
 ) -> Dict[str, Union[int, str, Dict[str, Any], List[Any]]]:
     """
     Generates a standardized API response for HTTP endpoints.
 
     Args:
         status_code (int): HTTP status code.
-        message (Optional[str]): Custom response message.
+        message (Optional[str]): Custom response message (deprecated, use success_message or error_details).
         data (Optional[Union[Dict, List]]): Payload data (if applicable).
         missing_fields (Optional[List[str]]): Fields missing from request (if applicable).
         error_details (Optional[str]): Debugging details for errors.
+        success_message (Optional[str]): Informative message for successful responses.
 
     Returns:
         Dict[str, Any]: Standardized API response.
 
     Example:
         ```
-        api_response(200, "Success", {"id": "123"})
+        api_response(200, success_message="User login successful", data={"id": "123"})
         # Returns:
         {
             "statusCode": 200,
-            "body": '{"status": "OK", "code": 200, "message": "Success", "data": {"id": "123"}}'
+            "body": '{"status": "OK", "code": 200, "message": "User login successful", "data": {"id": "123"}}'
         }
         ```
     """
@@ -78,20 +80,26 @@ def api_response(
     if status_code not in STATUS_MESSAGES:
         raise ValueError(f"Invalid status code: {status_code}")
 
-    response_message = message or STATUS_MESSAGES[status_code]
+    # Determine the appropriate message
+    if 200 <= status_code < 300 and success_message:
+        # For successful responses, use success_message if provided
+        response_message = success_message
+    else:
+        # Otherwise use message if provided, or fall back to the standard status message
+        response_message = message or STATUS_MESSAGES[status_code]
 
-    # ✅ Ensure missing_fields are explicitly tracked
+    # Ensure missing_fields are explicitly tracked
     extra_info = {}
     if missing_fields and status_code == 400:
         extra_info["missing_fields"] = missing_fields
 
-    # ✅ Standardize data format (ensure it's always a dict)
+    # Standardize data format (ensure it's always a dict)
     if isinstance(data, list):
         data = {"results": data}
     elif data is None:
         data = {}
 
-    # ✅ Always include error_details, even if None
+    # Always include error_details, even if None
     response = APIResponse(
         status=STATUS_MESSAGES[status_code],
         code=status_code,
