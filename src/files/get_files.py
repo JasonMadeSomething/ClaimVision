@@ -1,121 +1,78 @@
-"""
-File Retrieval Handler
-
-This module handles retrieving a paginated list of files for the authenticated user.
-It queries the DynamoDB `FilesTable` using an index on `user_id`, supports pagination,
-and returns the user's files in a standardized API response.
-
-Features:
-- Authenticates the user and fetches only their files.
-- Supports pagination via `limit` and `last_key` query parameters.
-- Converts DynamoDB `Decimal` values into integers for JSON serialization.
-- Handles potential AWS or user input errors gracefully.
-
-Example Usage:
-    ```
-    GET /files?limit=10&last_key=<encoded_key>
-    ```
-"""
-
 import json
-import boto3
-import os
-from decimal import Decimal
-from botocore.exceptions import BotoCoreError, ClientError
-from boto3.dynamodb.conditions import Key
-from utils import response, dynamodb_utils
+import logging
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from database.database import get_db_session
+from models import File, User
+from utils import response
 
-def decimal_to_int(obj):
+logger = logging.getLogger()
+
+def lambda_handler(event, _context, db_session: Session = None):
     """
-    Converts Decimal values to integers for JSON serialization.
+    Retrieves a paginated list of files for the authenticated user's household.
 
-    Args:
-        obj (Any): The object to check and convert.
+    Parameters:
+        event (dict): API Gateway event payload containing authentication and query parameters.
+        _context (dict): AWS Lambda context (unused).
+        db_session (Session, optional): SQLAlchemy session, for testing purposes.
 
     Returns:
-        int | Any: The converted integer if `obj` is a Decimal, otherwise the original object.
+        dict: Standardized API response.
     """
-    if isinstance(obj, Decimal):
-        return int(obj)
-    return obj
+    db = db_session if db_session else get_db_session()
 
-def get_files_table():
-    """
-    Retrieves the DynamoDB table for storing file metadata.
-
-    Returns:
-        boto3.Table: DynamoDB table instance.
-    """
-    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
-
-def lambda_handler(event, _context):
-    """
-    Handles retrieving a paginated list of files for the authenticated user.
-
-    This function:
-    1. Extracts the authenticated user ID from the request.
-    2. Parses pagination parameters (`limit`, `last_key`).
-    3. Queries DynamoDB for files belonging to the user.
-    4. Returns paginated results, ensuring only the user's files are included.
-
-    Query Parameters:
-        - `limit` (int, optional): Maximum number of files per page (default: 10).
-        - `last_key` (str, optional): Pagination key for retrieving the next page.
-
-    Args:
-        event (dict): The API Gateway event payload.
-        _context (dict): The AWS Lambda execution context (unused).
-
-    Returns:
-        dict: Standardized API response containing the list of files and pagination key.
-    """
     try:
-        files_table = get_files_table()
-        user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
-        query_params = event.get("queryStringParameters", {}) or {}
+        # Get authenticated user ID from JWT claims
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        if not user_id:
+            return response.api_response(401, error_details="Authentication required")
 
-        # ✅ Step 1: Parse query parameters
-        limit = int(query_params.get("limit", 10))
-        last_evaluated_key = query_params.get("last_key")
+        # Validate query parameters
+        query_params = event.get("queryStringParameters") or {}
+        try:
+            limit = int(query_params.get("limit", 10))
+            offset = int(query_params.get("offset", 0))
+            if limit <= 0 or offset < 0:
+                return response.api_response(400, error_details="Invalid pagination parameters", 
+                                            data={"details": "Limit must be positive and offset cannot be negative"})
+        except ValueError:
+            return response.api_response(400, error_details="Invalid pagination parameters", 
+                                        data={"details": "Limit and offset must be valid integers"})
 
-        query_kwargs = {
-            "IndexName": "UserIdIndex",
-            "KeyConditionExpression": Key("user_id").eq(user_id),
-            "Limit": limit,
-        }
+        # Fetch user to get household_id
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return response.api_response(404, error_details="User not found")
 
-        # ✅ Step 2: Handle pagination
-        if last_evaluated_key:
-            try:
-                query_kwargs["ExclusiveStartKey"] = json.loads(last_evaluated_key)
-            except json.JSONDecodeError:
-                return response.api_response(400, message="Invalid pagination key format")
+        # Query files based on user's household_id with pagination
+        files_query = db.query(File).filter_by(household_id=user.household_id).order_by(File.file_name).limit(limit).offset(offset)
+        files = files_query.all()
 
-        # ✅ Step 3: Query DynamoDB
-        files_response = files_table.query(**query_kwargs)
-
-        # ✅ Step 4: Ensure only files belonging to the user are returned
-        filtered_files = [file for file in files_response.get("Items", []) if file["user_id"] == user_id]
+        # Prepare response data
+        files_data = [file.to_dict() for file in files]
 
         return response.api_response(
             200,
-            message="Files retrieved successfully",
+            success_message="Files retrieved successfully",
             data={
-                "files": filtered_files,
-                "last_key": files_response.get("LastEvaluatedKey") if "LastEvaluatedKey" in files_response else None
+                "files": files_data,
+                "pagination": {
+                    "limit": limit,
+                    "offset": offset,
+                    "count": len(files_data)
+                }
             }
         )
 
-    except (BotoCoreError, ClientError) as e:
-        return response.api_response(
-            500,
-            message="AWS error",
-            error_details=str(e)
-        )
+    except SQLAlchemyError as e:
+        logger.error(f"Database error occurred: {str(e)}")
+        return response.api_response(500, error_details="Database connection failed")
 
-    except Exception as e:  # pylint: disable=broad-except
-        return response.api_response(
-            400,
-            message="Bad request",
-            error_details=str(e)
-        )
+    except Exception as e:
+        logger.exception("Unexpected error retrieving files")
+        return response.api_response(500, error_details="Internal server error")
+
+    finally:
+        if db_session is None:
+            db.close()

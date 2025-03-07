@@ -11,6 +11,7 @@ class Household(Base):
 
     users = relationship("User", back_populates="household")
     claims = relationship("Claim", back_populates="household")
+    files = relationship("File", back_populates="household")
 
     def to_dict(self):
         return {
