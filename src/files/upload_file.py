@@ -137,6 +137,14 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         logger.error("Database error occurred: %s", str(e))
         return response.api_response(500, message="Internal Server Error", error_details="Database error occurred.")
 
-    except Exception as e:
-        logger.exception("Unexpected error during file upload")
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
+    except (ValueError, TypeError, KeyError, IndexError, AttributeError) as e:
+        # Handle specific programming or data structure errors
+        logger.exception(f"Data handling error during file upload: {str(e)}")
+        return response.api_response(500, message="Internal Server Error", 
+                                     error_details=f"Error processing request: {str(e)}")
+                                     
+    except (BotoCoreError, NoCredentialsError) as e:
+        # Handle AWS-specific errors that might have escaped the inner try/except
+        logger.exception(f"AWS service error during file upload: {str(e)}")
+        return response.api_response(500, message="Internal Server Error", 
+                                     error_details=f"AWS service error: {str(e)}")
