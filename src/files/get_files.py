@@ -34,11 +34,15 @@ def lambda_handler(event, _context, db_session: Session = None):
             limit = int(query_params.get("limit", 10))
             offset = int(query_params.get("offset", 0))
             if limit <= 0 or offset < 0:
-                return response.api_response(400, error_details="Invalid pagination parameters", 
-                                            data={"details": "Limit must be positive and offset cannot be negative"})
+                return response.api_response(400, error_details="Invalid pagination parameters",
+                                            data={
+                                                "details": "Limit must be positive and offset cannot be negative"
+                                            })
         except ValueError:
-            return response.api_response(400, error_details="Invalid pagination parameters", 
-                                        data={"details": "Limit and offset must be valid integers"})
+            return response.api_response(400, error_details="Invalid pagination parameters",
+                                        data={
+                                            "details": "Limit and offset must be valid integers"
+                                        })
 
         # Fetch user to get household_id
         user = db.query(User).filter_by(id=user_id).first()
@@ -46,7 +50,9 @@ def lambda_handler(event, _context, db_session: Session = None):
             return response.api_response(404, error_details="User not found")
 
         # Query files based on user's household_id with pagination
-        files_query = db.query(File).filter_by(household_id=user.household_id).order_by(File.file_name).limit(limit).offset(offset)
+        files_query = db.query(File).filter_by(
+            household_id=user.household_id
+        ).order_by(File.file_name).limit(limit).offset(offset)
         files = files_query.all()
 
         # Prepare response data
@@ -66,7 +72,7 @@ def lambda_handler(event, _context, db_session: Session = None):
         )
 
     except SQLAlchemyError as e:
-        logger.error(f"Database error occurred: {str(e)}")
+        logger.error("Database error occurred: %s", str(e))
         return response.api_response(500, error_details="Database connection failed")
 
     except Exception as e:
