@@ -1,287 +1,453 @@
-# pylint: disable=unused-argument
-"""✅ Test uploading a valid file successfully"""
+"""
+Test the upload_file lambda function
+"""
 import json
-from unittest.mock import patch, MagicMock
+import uuid
+import base64
+from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
-from test_data.files_data import (
-    test_upload_payload,
-    test_large_file_payload,
-    test_missing_fields_payload,
-)
+from models import Household, User
 from files.upload_file import lambda_handler
 
-
-@patch("files.upload_file.get_s3")
-@patch("files.upload_file.get_db_session")  # ✅ Mock the DB session instead of DynamoDB
-def test_upload_file_success(mock_db_session, mock_s3, api_gateway_event):
+def test_upload_file_success(test_db, api_gateway_event):
     """✅ Test uploading a valid file successfully (PostgreSQL version)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
     
-    ## Arrange
-    event = api_gateway_event(http_method="POST", body=test_upload_payload)
+    # ✅ Create a household and user
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    with patch("files.upload_file.upload_to_s3") as mock_s3_upload:
+        mock_s3_upload.return_value = "s3://bucket-name/test.jpg"
+
+        # ✅ Arrange
+        upload_payload = {
+            "files": [
+                {"file_name": "test.jpg", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="}
+            ]
+        }
+        event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
+
+        # ✅ Act
+        response = lambda_handler(event, {}, db_session=test_db)
+        body = json.loads(response["body"])
+
+        # ✅ Assert
+        assert response["statusCode"] == 200
+        assert len(body["data"]["files_uploaded"]) == 1
+        assert body["data"]["files_uploaded"][0]["file_name"] == "test.jpg"
+        mock_s3_upload.assert_called_once()  # ✅ Ensure S3 upload is triggered
+
+def test_upload_s3_called(test_db, api_gateway_event):
+    """✅ Test that S3 is called for file uploads"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
     
-    mock_session = MagicMock()
-    mock_db_session.return_value = mock_session  # ✅ Mock the database session
-    mock_session.commit.return_value = None  # ✅ Simulate successful commit
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-    mock_s3.return_value.put_object.return_value = {}  # ✅ Simulate S3 success
+    with patch("files.upload_file.upload_to_s3") as mock_s3_upload:
+        mock_s3_upload.return_value = "s3://bucket-name/test.jpg"
 
-    ## Act
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
+        upload_payload = {
+            "files": [{"file_name": "test.jpg", "file_data": base64.b64encode(b"dummydata").decode("utf-8")}]
+        }
+        event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
 
-    ## Assert
-    assert response["statusCode"] == 200
-    assert len(body["data"]["files_uploaded"]) > 0  # ✅ Ensure files exist
-    assert any(f["file_name"] == "test.jpg" for f in body["data"]["files_uploaded"])
+        response = lambda_handler(event, {}, db_session=test_db)
+        body = json.loads(response["body"])
 
-    ## ✅ Ensure the database commit was called
-    mock_session.commit.assert_called_once()
+        assert response["statusCode"] == 200
+        assert len(body["data"]["files_uploaded"]) == 1
+        assert mock_s3_upload.called, "S3 upload function was not called!"
 
-# ✅ SUCCESS: Upload Multiple Files
-@patch("files.upload_file.get_s3")
-@patch("files.upload_file.get_db_session")  # ✅ Mock DB session instead of DynamoDB
-def test_upload_multiple_files(mock_db_session, mock_s3, api_gateway_event):
-    """✅ Test uploading multiple valid files (PostgreSQL version)"""
-
-    ## Arrange
-    event = api_gateway_event(http_method="POST", body=test_upload_payload)
-
-    mock_session = MagicMock()
-    mock_db_session.return_value = mock_session  # ✅ Mock the database session
-    mock_session.commit.return_value = None  # ✅ Simulate successful commit
-
-    mock_s3.return_value.put_object.return_value = {}  # ✅ Simulate S3 success
-
-    ## Act
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-
-    ## Assert
-    assert response["statusCode"] == 200
-    assert len(body["data"]["files_uploaded"]) == 2  # ✅ Ensure both files were uploaded
-    assert all(
-        "file_name" in file for file in body["data"]["files_uploaded"]
-    )  # ✅ Ensure valid data
-    mock_session.commit.assert_called_once()  # ✅ Ensure commit happens once
-
-
-# ✅ SUCCESS: Upload Large File (5MB limit check)
-@patch("files.upload_file.get_s3")
-@patch("files.upload_file.get_db_session")  # ✅ Mock DB session
-def test_upload_large_file(mock_db_session, mock_s3, api_gateway_event):
-    """✅ Test uploading a large file (should pass if <=5MB)"""
-
-    ## Arrange
-    event = api_gateway_event(http_method="POST", body=test_large_file_payload)
-
-    mock_session = MagicMock()
-    mock_db_session.return_value = mock_session  # ✅ Mock the database session
-    mock_session.commit.return_value = None  # ✅ Simulate successful commit
-
-    mock_s3.return_value.put_object.return_value = {}  # ✅ Simulate S3 success
-
-    ## Act
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-
-    ## Assert
-    assert response["statusCode"] == 200
-    assert body["data"]["files_uploaded"][0]["file_name"] == "large_image.jpg"  # ✅ Ensure correct file
-    mock_session.commit.assert_called_once()  # ✅ Ensure commit happen
-
-
-# ❌ FAILURE: Missing `file_name`
-@patch("files.upload_file.get_s3")
-@patch("files.upload_file.get_db_session")  # ✅ Mock DB session
-def test_upload_missing_filename(mock_db_session, mock_s3, api_gateway_event):
+def test_upload_missing_filename(test_db, api_gateway_event):
     """❌ Test missing `file_name` field (should return 400 Bad Request)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    
+    # ✅ Create household and user
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-    ## Arrange
-    event = api_gateway_event(http_method="POST", body=test_missing_fields_payload)
+    # ✅ Arrange
+    missing_fields_payload = {"files": [{"file_data": base64.b64encode(b"dummydata").decode("utf-8")}]}
+    event = api_gateway_event(http_method="POST", body=json.dumps(missing_fields_payload), auth_user=str(user_id))
 
-    mock_session = MagicMock()
-    mock_db_session.return_value = mock_session  # ✅ Mock the database session
-
-    ## Act
-    response = lambda_handler(event, {})
+    # ✅ Act
+    
+    response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
 
-    ## Assert
+    # ✅ Assert
     assert response["statusCode"] == 400
-    print(body)
-    assert "Bad Request" in json.loads(response["body"])["message"] # ✅ Ensure error message is correct
-    mock_session.commit.assert_not_called()  # ✅ Ensure no database writes occurred
+    assert "Bad Request" in body["status"]
 
-# ❌ FAILURE: Invalid File Type
-@patch("files.upload_file.get_s3")
-def test_upload_invalid_file_type(mock_s3, api_gateway_event, test_db):
+def test_upload_invalid_file_type(test_db, api_gateway_event):
     """❌ Test uploading an invalid file type (e.g., `.exe`)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
     
+    # ✅ Create household and user
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
     # ✅ Arrange
     invalid_file_payload = {
-        "files": [
-            {"file_name": "malicious.exe", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="}
-        ]
+        "files": [{"file_name": "malicious.exe", "file_data": base64.b64encode(b"dummydata").decode("utf-8")}]
     }
-    
-    event = api_gateway_event(http_method="POST", body=json.dumps(invalid_file_payload))
+    event = api_gateway_event(http_method="POST", body=json.dumps(invalid_file_payload), auth_user=str(user_id))
 
     # ✅ Act
-    response = lambda_handler(event, {})
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
 
     # ✅ Assert
-    body = json.loads(response["body"])
-    
     assert response["statusCode"] == 400
-    assert "Bad Request" in body["message"]  # ✅ Ensure error message is correct
-    assert len(body["data"]["files_failed"]) == 1
     assert body["data"]["files_failed"][0]["file_name"] == "malicious.exe"
-    assert body["data"]["files_failed"][0]["reason"] == "Unsupported file format"
+    assert body["data"]["files_failed"][0]["reason"] == "Unsupported file format."
 
-
-# ❌ FAILURE: Empty Payload
-@patch("files.upload_file.get_s3")
-def test_upload_empty_payload(mock_s3, api_gateway_event, test_db):
-    """❌ Test empty payload should return 400"""
+def test_upload_multiple_files(test_db, api_gateway_event):
+    """✅ Test uploading multiple files successfully"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
     
-    # ✅ Arrange
-    event = api_gateway_event(http_method="POST", body="{}")
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-    # ✅ Act
-    response = lambda_handler(event, {})
+    upload_payload = {
+        "files": [
+            {"file_name": "test1.jpg", "file_data": base64.b64encode(b"dummydata").decode("utf-8")},
+            {"file_name": "test2.jpg", "file_data": base64.b64encode(b"dummydata2").decode("utf-8")}
+        ]
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
 
-    # ✅ Assert
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    print(body)
+    assert response["statusCode"] == 200
+    assert len(body["data"]["files_uploaded"]) == 2
+
+def test_upload_large_file(test_db, api_gateway_event):
+    """✅ Test uploading a large file within allowed size limits"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    large_file_data = "A" * (5 * 1024 * 1024)  # 5MB file
+    upload_payload = {
+        "files": [{"file_name": "large.jpg", "file_data": large_file_data}]
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
+
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 200
+    assert len(body["data"]["files_uploaded"]) == 1
+    assert body["data"]["files_uploaded"][0]["file_name"] == "large.jpg"
+
+def test_upload_empty_payload(test_db, api_gateway_event):
+    """❌ Test uploading with an empty payload (should return 400 Bad Request)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    event = api_gateway_event(http_method="POST", body=json.dumps({}), auth_user=str(user_id))
+
+    response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert "Bad Request" in body["message"]  # ✅ Ensure correct error message
+    assert "Bad Request" in body["status"]
 
-
-@patch("files.upload_file.get_s3")
-def test_upload_unauthorized(mock_s3, api_gateway_event, test_db):
-    """❌ Test uploading without authentication (should return 401)"""
-
-    # ✅ Arrange
-    event = api_gateway_event(http_method="POST", body=json.dumps(test_upload_payload))
+def test_upload_duplicate_files(test_db, api_gateway_event):
+    """❌ Test uploading duplicate files in a batch"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
     
-    # Remove authentication headers to simulate an unauthorized request
-    event["headers"].pop("Authorization", None)
-    event["requestContext"].pop("authorizer", None)
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-    # ✅ Act
-    response = lambda_handler(event, {})
+    upload_payload = {
+        "files": [
+            {"file_name": "duplicate.jpg", "file_data": base64.b64encode(b"dummydata").decode("utf-8")},
+            {"file_name": "duplicate.jpg", "file_data": base64.b64encode(b"dummydata").decode("utf-8")}
+        ]
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
 
-    # ✅ Assert
+    response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
-    
+    print(body)
+    assert response["statusCode"] == 207  # Multi-Status
+    assert len(body["data"]["files_failed"]) == 1
+
+def test_upload_unauthorized(api_gateway_event):
+    """❌ Test uploading without authentication (should return 401 Unauthorized)"""
+    upload_payload = {
+        "files": [{"file_name": "test.jpg", "file_data": "data1"}]
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=None)
+
+    response = lambda_handler(event, {})
+    body = json.loads(response["body"])
+
     assert response["statusCode"] == 401
-    assert "Unauthorized" in body["message"]  # ✅ Ensure correct error message
+    assert "Unauthorized" in body["message"]
 
+def test_upload_mixed_valid_invalid_files(test_db, api_gateway_event):
+    """❌✅ Test uploading a mix of valid and invalid files (should return 207 Multi-Status)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-
-@patch("files.upload_file.get_s3")
-def test_upload_duplicate_file_in_batch(mock_s3, api_gateway_event, test_db):
-    """❌ Test uploading duplicate files within the same request (should return 207 with failed duplicates)"""
-
-    # ✅ Arrange
-    duplicate_payload = {
+    upload_payload = {
         "files": [
-            {"file_name": "duplicate.jpg", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="},
-            {"file_name": "duplicate.jpg", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="},  # Duplicate
-            {"file_name": "unique.png", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="}  # ✅ Valid unique file
+            {"file_name": "valid.jpg", "file_data": base64.b64encode(b"dummydata").decode("utf-8")},
+            {"file_name": "invalid.exe", "file_data": base64.b64encode(b"dummydata2").decode("utf-8")}
         ]
     }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
 
-    event = api_gateway_event(http_method="POST", body=json.dumps(duplicate_payload))
-
-    # ✅ Act
-    response = lambda_handler(event, {})
-
-    # ✅ Assert
+    response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
 
-    assert response["statusCode"] == 207  # ✅ Partial success
-    assert len(body["data"]["files_uploaded"]) == 2  # ✅ First instance + unique file
-    assert len(body["data"]["files_failed"]) == 1  # ✅ One duplicate rejected
-    assert body["data"]["files_failed"][0]["file_name"] == "duplicate.jpg"
-    assert body["data"]["files_failed"][0]["reason"] == "Duplicate file in request"
+    assert response["statusCode"] == 207  # Multi-Status
+    assert len(body["data"]["files_uploaded"]) == 1
+    assert len(body["data"]["files_failed"]) == 1
 
+def test_upload_s3_failure(test_db, api_gateway_event):
+    """❌ Test handling an S3 failure during file upload (should return 500 Internal Server Error)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
 
-@patch("files.upload_file.get_db_session")
-@patch("files.upload_file.get_s3")
-def test_upload_database_error(mock_s3, mock_db_session, api_gateway_event):
-    """❌ Test stopping all uploads on database failure (should return 500)"""
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-    # ✅ Arrange
-    test_payload = {
+    # Create a spy on the test_db.rollback method to track if it's called
+    with patch.object(test_db, 'rollback', wraps=test_db.rollback) as mock_rollback:
+        with patch("files.upload_file.upload_to_s3", side_effect=ValueError("S3 Failure")) as mock_s3_upload:
+            upload_payload = {
+                "files": [{"file_name": "s3fail.jpg", "file_data": base64.b64encode(b"dummydata").decode("utf-8")}]
+            }
+            event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
+
+            response = lambda_handler(event, {}, db_session=test_db)
+            
+            # Debug output
+            print("Full response:", response)
+            body = json.loads(response["body"])
+            print("Response body:", body)
+            
+            # Assertions
+            mock_s3_upload.assert_called_once()
+            assert response["statusCode"] == 500
+            assert "message" in body
+            assert body["message"] == "Internal Server Error"
+            
+            # Check if files_failed is in the data
+            assert "data" in body
+            assert isinstance(body["data"], dict)
+            
+            # This is the key assertion - make sure files_failed exists and contains our failed file
+            assert "files_failed" in body["data"], f"Expected 'files_failed' in data, got keys: {list(body['data'].keys())}"
+            assert len(body["data"]["files_failed"]) > 0
+            assert any(f["reason"] == "Failed to upload to S3." for f in body["data"]["files_failed"])
+            
+            # Verify rollback was called
+            mock_rollback.assert_called_once()
+
+def test_upload_database_failure(test_db, api_gateway_event):
+    """❌ Test handling a database failure during file metadata storage"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    with patch("files.upload_file.get_db_session", side_effect=SQLAlchemyError("DB Failure")) as mock_db:
+        valid_base64_data = base64.b64encode(b"dummydata").decode("utf-8")
+        upload_payload = {"files": [{"file_name": "dbfail.jpg", "file_data": valid_base64_data}]}
+        event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))    
+
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+
+        mock_db.assert_called_once()
+
+        assert response["statusCode"] == 500
+        assert "Internal Server Error" in body["message"]
+
+def test_upload_file_no_extension(test_db, api_gateway_event):
+    """❌ Test uploading a file with no extension (should return 400 Bad Request)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    upload_payload = {
+        "files": [{"file_name": "no_extension", "file_data": base64.b64encode(b"dummydata").decode("utf-8")}] 
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
+
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 400
+    assert "Unsupported file format" in body["message"]
+
+def test_upload_empty_file(test_db, api_gateway_event):
+    """❌ Test uploading an empty file (should return 400 Bad Request)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    upload_payload = {
+        "files": [{"file_name": "empty.jpg", "file_data": base64.b64encode(b"").decode("utf-8")}] 
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
+
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 400
+    assert any(f["reason"] == "File data is empty." for f in body["data"]["files_failed"])
+
+def test_upload_duplicate_content_different_names(test_db, api_gateway_event):
+    """✅ Test uploading duplicate file contents but with different names (should return 207 Multi-Status)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    file_content = base64.b64encode(b"same_content").decode("utf-8")
+    upload_payload = {
         "files": [
-            {"file_name": "file_123.jpg", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="},
-            {"file_name": "file_456.png", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="}
+            {"file_name": "file1.jpg", "file_data": file_content},
+            {"file_name": "file2.jpg", "file_data": file_content}
         ]
     }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
 
-    event = api_gateway_event(http_method="POST", body=json.dumps(test_payload))
-    mock_s3.return_value.put_object.return_value = None  # ✅ S3 works
-
-    # ❌ Simulate database failure
-    mock_session = mock_db_session.return_value
-    mock_session.commit.side_effect = SQLAlchemyError("PostgreSQL Failure")
-
-    # ✅ Act
-    response = lambda_handler(event, {})
+    response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
 
-    # ✅ Assert
-    print(f"Response Body: {body}")  # 🔍 Debugging output
-    assert response["statusCode"] == 500
-    assert "PostgreSQL Failure" in body["error_details"]
+    assert response["statusCode"] == 207
+    assert len(body["data"]["files_uploaded"]) == 1
+    assert len(body["data"]["files_failed"]) == 1
 
+def test_upload_non_base64_data(test_db, api_gateway_event):
+    """❌ Test uploading a file with non-base64 encoded data (should return 400 Bad Request)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
 
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
 
-@patch("files.upload_file.get_s3")
-def test_upload_s3_error(mock_s3, api_gateway_event):
-    """⚠️ Test case where some files succeed and some fail (should return 500).
-       S3 failures should prevent metadata from being saved.
-    """
-
-    # ✅ Arrange
-    event = api_gateway_event(http_method="POST", body=test_upload_payload)
-    mock_s3.return_value.put_object.side_effect = Exception("S3 Failure")  # Simulate S3 failure
-
-    # ✅ Act
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-
-    # ✅ Assert: The response should indicate failure
-    assert response["statusCode"] == 500
-    assert "S3 Failure" in body["error_details"]
-
-@patch("files.upload_file.get_s3")
-@patch("database.database.get_db_session")  # ✅ Mocking the DB session
-def test_upload_mixed_file_types(mock_db, mock_s3, api_gateway_event, test_db):
-    """❌✅ Test uploading mixed valid and invalid file types"""
-
-    # ✅ Arrange
-    mixed_payload = {
-        "files": [
-            {"file_name": "valid.jpg", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="},
-            {"file_name": "invalid.exe", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="},
-            {"file_name": "valid2.png", "file_data": "iVBORw0KGgoAAAANSUhEUgAAABAAAA=="}
-        ]
+    upload_payload = {
+        "files": [{"file_name": "nonbase64.jpg", "file_data": "not_base64"}]
     }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
 
-    event = api_gateway_event(http_method="POST", body=json.dumps(mixed_payload))
-
-    # ✅ Mock DB session
-    mock_db.return_value = test_db
-
-    # ✅ Act
-    response = lambda_handler(event, {})
+    response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
 
-    # ✅ Assert
-    assert response["statusCode"] == 207  # ✅ Partial success
-    assert len(body["data"]["files_uploaded"]) == 2  # ✅ Two valid files uploaded
-    assert len(body["data"]["files_failed"]) == 1  # ✅ One invalid file rejected
-    assert body["data"]["files_failed"][0]["file_name"] == "invalid.exe"
-    assert body["data"]["files_failed"][0]["reason"] == "Unsupported file format"
+    assert response["statusCode"] == 400
+    assert any(f["reason"] == "Invalid base64 encoding." for f in body["data"]["files_failed"])
+
+def test_upload_large_file_exceeds_limit(test_db, api_gateway_event):
+    """❌ Test uploading a file that exceeds the allowed size limit (should return 400 Bad Request)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    large_file_data = base64.b64encode(b"A" * (11 * 1024 * 1024)).decode("utf-8")  # 11MB file (exceeds 10MB limit)
+    upload_payload = {
+        "files": [{"file_name": "large.jpg", "file_data": large_file_data}]
+    }
+    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
+
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 400
+    assert any(f["reason"] == "File exceeds size limit." for f in body["data"]["files_failed"])
+
+
+def test_upload_existing_file_same_name_and_content(test_db, api_gateway_event):
+    """✅ Test uploading an already existing file with the same name and content (should return 200 OK)"""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    file_content = base64.b64encode(b"same_content").decode("utf-8")
+
+    # First upload
+    upload_payload_1 = {
+        "files": [{"file_name": "duplicate.jpg", "file_data": file_content}]
+    }
+    event_1 = api_gateway_event(http_method="POST", body=json.dumps(upload_payload_1), auth_user=str(user_id))
+    lambda_handler(event_1, {}, db_session=test_db)
+
+    # Second upload with the same content and name
+    upload_payload_2 = {
+        "files": [{"file_name": "duplicate.jpg", "file_data": file_content}]
+    }
+    event_2 = api_gateway_event(http_method="POST", body=json.dumps(upload_payload_2), auth_user=str(user_id))
+
+    response = lambda_handler(event_2, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 200
+    assert len(body["data"]["files_uploaded"]) == 1

@@ -1,167 +1,142 @@
-"""✅ Upload File - Now Uses PostgreSQL"""
-import json
 import os
+import json
+import logging
+import uuid
 import base64
 import boto3
-from botocore.exceptions import BotoCoreError, ClientError
+from botocore.exceptions import BotoCoreError, NoCredentialsError
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from database.database import get_db_session
-from models.file import File
 from utils import response
+from models import User
+from models.file import FileStatus, File
+from database.database import get_db_session
 
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
 
-def get_s3():
-    """Get the S3 client"""
-    return boto3.client("s3")
+MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB file size limit
 
-
-def lambda_handler(event: dict, _context: dict) -> dict:
-    """
-    Handles file uploads, stores metadata in PostgreSQL, and uploads to S3.
-
-    Parameters
-    ----------
-    event : dict
-        The API Gateway event payload.
-    _context : dict
-        The AWS Lambda execution context (unused).
-
-    Returns
-    -------
-    dict
-        A standardized API response.
-    """
-    session = get_db_session()
-
-    # ✅ Step 1: Ensure Authenticated Request
-    user_id = get_authenticated_user(event)
-    if not user_id:
-        return response.api_response(401, message="Unauthorized: Missing authentication")
-
-    # ✅ Step 2: Parse JSON Body
+def upload_to_s3(file_name: str, file_data: bytes) -> str:
+    """Uploads file to S3 and returns the S3 URL."""
+    s3 = boto3.client("s3")
+    bucket_name = os.getenv("S3_BUCKET_NAME")
+    if not bucket_name:
+        raise ValueError("S3_BUCKET_NAME environment variable is not set")
+    s3_key = f"uploads/{file_name}"
+    
     try:
-        body = json.loads(event.get("body") or "{}")
-        if not isinstance(body, dict):
-            return response.api_response(400, message="Invalid request body format")
-    except json.JSONDecodeError:
-        return response.api_response(400, message="Invalid JSON format in request body")
+        s3.put_object(Bucket=bucket_name, Key=s3_key, Body=file_data)
+        return f"s3://{bucket_name}/{s3_key}"
+    except (BotoCoreError, NoCredentialsError) as e:
+        logger.error("S3 upload failed: %s", str(e))
+        raise
 
-    files = body.get("files")
-    if not files:
-        return response.api_response(400, missing_fields=["files"])
-
-    if isinstance(files, dict):
-        files = [files]  # Convert single object to list
-
-    file_names = set()
-    uploaded_files = []
-    failed_files = []
-    s3 = get_s3()
-
+def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
+    """
+    Handles uploading files and storing metadata in PostgreSQL.
+    """
     try:
+        db = db_session if db_session else get_db_session()
+        logger.info("Received request for uploading files")
+
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        if not user_id:
+            return response.api_response(401, message="Unauthorized request. JWT missing or malformed.")
+
+        try:
+            user_uuid = uuid.UUID(user_id)
+        except ValueError:
+            return response.api_response(400, message="Invalid user ID format. Expected UUID.")
+
+        user = db.query(User).filter_by(id=user_uuid).first()
+        if not user:
+            return response.api_response(404, message="User not found.")
+
+        body = json.loads(event.get("body", "{}"))
+        files = body.get("files", [])
+        if not files:
+            return response.api_response(400, message="No files provided in request.")
+
+        allowed_extensions = {"jpg", "jpeg", "png", "gif", "pdf"}
+        uploaded_files = []
+        failed_files = []
+        seen_files = set()
+        seen_contents = set()
+
         for file in files:
-            # ✅ Validate Required Fields
-            missing_fields = []
-            if "file_name" not in file:
-                missing_fields.append("file_name")
-            if "file_data" not in file:
-                missing_fields.append("file_data")
+            file_name = file.get("file_name")
+            file_data = file.get("file_data")
 
-            if missing_fields:
-                failed_files.append(
-                    {
-                        "file_name": file.get("file_name", "UNKNOWN"),
-                        "reason": f"Missing required fields: {', '.join(missing_fields)}",
-                    }
-                )
+            if not file_data.strip():  # Check if the base64 string is empty
+                failed_files.append({"file_name": file_name, "reason": "File data is empty."})
                 continue
 
-            # ✅ Prevent Duplicate File Names in Same Batch
-            if file["file_name"] in file_names:
-                failed_files.append({"file_name": file["file_name"], "reason": "Duplicate file in request"})
-                continue  # ✅ Prevent the duplicate from being uploaded
-            file_names.add(file["file_name"])
-
-            # ✅ Validate File Format
-            if not file["file_name"].lower().endswith((".jpg", ".jpeg", ".png", ".gif")):
-                failed_files.append({"file_name": file["file_name"], "reason": "Unsupported file format"})
+            if not file_name or not file_data:
+                failed_files.append({"file_name": file_name, "reason": "Missing file name or data."})
                 continue
 
-            # ✅ Decode Base64 Data
+            file_extension = file_name.split(".")[-1].lower()
+            if file_extension not in allowed_extensions or not file_extension:
+                failed_files.append({"file_name": file_name, "reason": "Unsupported file format."})
+                continue
+
             try:
-                file_bytes = base64.b64decode(file["file_data"])
-            except Exception:
-                failed_files.append({"file_name": file["file_name"], "reason": "Invalid base64 encoding"})
+                decoded_data = base64.b64decode(file_data, validate=True)
+            except (ValueError, base64.binascii.Error):
+                failed_files.append({"file_name": file_name, "reason": "Invalid base64 encoding."})
                 continue
 
-            # ✅ Upload to S3
-            s3_key = f"uploads/{user_id}/{file['file_name']}"
-            try:
-                s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_bytes)
-            except (BotoCoreError, ClientError) as e:
-                session.rollback()  # ✅ Ensure rollback on S3 failure
-                return response.api_response(500, message="S3 Upload Failed", error_details=str(e))
-            except Exception as e:
-                session.rollback()  # ✅ Ensure rollback on unexpected S3 errors
-                return response.api_response(500, message="Unexpected S3 error", error_details=str(e))
+            if len(decoded_data) > MAX_FILE_SIZE:
+                failed_files.append({"file_name": file_name, "reason": "File exceeds size limit."})
+                continue
 
+            file_hash = hash(decoded_data)
+            if file_hash in seen_contents:
+                failed_files.append({"file_name": file_name, "reason": "Duplicate file."})
+                continue
+            seen_contents.add(file_hash)
+            if (file_name, file_extension) in seen_files:
+                failed_files.append({"file_name": file_name, "reason": "Duplicate file."})
+                continue
+            seen_files.add((file_name, file_extension))
+            file_id = uuid.uuid4()
+            s3_key = f"files/{file_id}.{file_extension}"
 
-            # ✅ Save Metadata in PostgreSQL
             new_file = File(
-                user_id=user_id,
-                file_name=file["file_name"],
+                id=file_id,
+                uploaded_by=user.id,
+                household_id=user.household_id,
+                file_name=file_name,
                 s3_key=s3_key,
-                file_url=f"https://s3.amazonaws.com/{os.getenv('S3_BUCKET_NAME')}/{s3_key}",
-                mime_type="image/jpeg",
-                size=len(file_bytes),
-                status="uploaded",
-                labels=[],
-                detected_objects=[],
+                status=FileStatus.UPLOADED
             )
-            session.add(new_file)
-            uploaded_files.append(new_file)
+            db.add(new_file)
+            db.commit()
+            # Upload file to S3 after DB commit
+            try:
+                s3_url = upload_to_s3(s3_key, decoded_data)
+                uploaded_files.append({"file_name": file_name, "file_id": str(file_id), "s3_url": s3_url})
+            except (BotoCoreError, NoCredentialsError, ValueError) as e:
+                logger.error(f"S3 upload failed: {str(e)}")
+                db.rollback()  # Rollback DB entry if S3 upload fails
+                failed_files.append({"file_name": file_name, "reason": "Failed to upload to S3."})
 
-        # ✅ Commit transaction after processing all files
-        if uploaded_files:
-            session.commit()
-            for file in uploaded_files:
-                session.refresh(file)
-        else:
-            session.rollback()
+        db.close()
+        if not uploaded_files and failed_files:
+            # Return 500 if S3 failures caused all uploads to fail
+            if any(f["reason"] == "Failed to upload to S3." for f in failed_files):
+                return response.api_response(500, message="Internal Server Error", data={"files_failed": failed_files})
+            primary_reason = failed_files[0]["reason"] if failed_files else "All file uploads failed."
+            return response.api_response(400, message=primary_reason, data={"files_failed": failed_files})
+        
+        return response.api_response(207 if failed_files else 200, message="Files uploaded successfully" if not failed_files else "Some files failed to upload", data={"files_uploaded": uploaded_files, "files_failed": failed_files})
 
     except SQLAlchemyError as e:
-        session.rollback()
-        return response.api_response(500, message="Database error", error_details=str(e))
+        logger.error("Database error occurred: %s", str(e))
+        return response.api_response(500, message="Internal Server Error", error_details="Database error occurred.")
 
-    finally:
-        session.close()
-
-    # ✅ Generate API Response Based on Results
-    if not uploaded_files and failed_files:
-        return response.api_response(400, data={"files_failed": failed_files}, missing_fields=missing_fields)
-
-    if uploaded_files and failed_files:
-        return response.api_response(
-            207,
-            data={"files_uploaded": [file.to_dict() for file in uploaded_files], "files_failed": failed_files},
-        )
-
-    return response.api_response(200, data={"files_uploaded": [file.to_dict() for file in uploaded_files]})
-
-
-def get_authenticated_user(event: dict) -> str:
-    """
-    Extracts and returns user ID if authentication is valid.
-
-    Parameters
-    ----------
-    event : dict
-        The API Gateway event payload.
-
-    Returns
-    -------
-    str
-        The user ID from authentication claims, or None if unauthenticated.
-    """
-    auth = event.get("requestContext", {}).get("authorizer", {})
-    return auth.get("claims", {}).get("sub")
+    except Exception as e:
+        logger.exception("Unexpected error during file upload")
+        return response.api_response(500, message="Internal Server Error", error_details=str(e))

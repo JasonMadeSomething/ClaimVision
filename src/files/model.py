@@ -3,6 +3,13 @@ from datetime import datetime
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 
+from enum import Enum
+
+class FileStatus(Enum):
+    UPLOADED = "uploaded"
+    PROCESSING = "processing"
+    PROCESSED = "processed"
+
 class FileSchema(BaseModel):
     """
     Pydantic model for File data.
