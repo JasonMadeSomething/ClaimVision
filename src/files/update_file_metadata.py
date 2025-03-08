@@ -2,6 +2,7 @@ import json
 import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from datetime import datetime, timezone
 from models import File, User
 from database.database import get_db_session
 from utils import response
@@ -58,7 +59,7 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         # Apply updates
         for field, value in body.items():
             setattr(file, field, value)
-        
+        file.updated_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(file)
         db.close()

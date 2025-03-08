@@ -3,6 +3,8 @@ import json
 import logging
 import uuid
 import base64
+from datetime import datetime, timezone
+from hashlib import sha256
 import boto3
 from botocore.exceptions import BotoCoreError, NoCredentialsError
 from sqlalchemy.orm import Session
@@ -55,14 +57,14 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
                 400,
                 message="Invalid user ID format. Expected UUID."
             )
-
+        
         user = db.query(User).filter_by(id=user_uuid).first()
         if not user:
             return response.api_response(   
                 404,
                 message="User not found."
             )
-
+        household_id = user.household_id
         body = json.loads(event.get("body", "{}"))
         files = body.get("files", [])
         if not files:
@@ -70,7 +72,13 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
                 400,
                 message="No files provided in request."
             )
-
+         
+        claim_id = body.get("claim_id")
+        if not claim_id:
+            return response.api_response(
+                400,
+                message="Claim ID is required."
+            )
         allowed_extensions = {"jpg", "jpeg", "png", "gif", "pdf"}
         uploaded_files = []
         failed_files = []
@@ -80,7 +88,7 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         for file in files:
             file_name = file.get("file_name")
             file_data = file.get("file_data")
-
+            
             if not file_data.strip():  # Check if the base64 string is empty
                 failed_files.append(
                     {"file_name": file_name, "reason": "File data is empty."}
@@ -110,25 +118,32 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
                 failed_files.append({"file_name": file_name, "reason": "File exceeds size limit."})
                 continue
 
-            file_hash = hash(decoded_data)
+            file_hash = sha256(decoded_data).hexdigest()
             if file_hash in seen_contents:
                 failed_files.append({"file_name": file_name, "reason": "Duplicate file."})
                 continue
             seen_contents.add(file_hash)
-            if (file_name, file_extension) in seen_files:
+
+            existing_file = db.query(File).filter_by(file_hash=file_hash).first()
+            if existing_file:
                 failed_files.append({"file_name": file_name, "reason": "Duplicate file."})
                 continue
+
             seen_files.add((file_name, file_extension))
             file_id = uuid.uuid4()
             s3_key = f"files/{file_id}.{file_extension}"
 
             new_file = File(
                 id=file_id,
-                uploaded_by=user.id,
-                household_id=user.household_id,
+                uploaded_by=user_id,
+                household_id=household_id,
                 file_name=file_name,
                 s3_key=s3_key,
-                status=FileStatus.UPLOADED
+                claim_id=claim_id,
+                status=FileStatus.UPLOADED,
+                file_hash=file_hash,
+                created_at=datetime.now(timezone.utc),
+                updated_at=datetime.now(timezone.utc),
             )
             db.add(new_file)
             db.commit()
@@ -146,6 +161,8 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
             # Return 500 if S3 failures caused all uploads to fail
             if any(f["reason"] == "Failed to upload to S3." for f in failed_files):
                 return response.api_response(500, message="Internal Server Error", data={"files_failed": failed_files})
+            elif any(f["reason"] == "Duplicate file." for f in failed_files):
+                return response.api_response(409, message="Duplicate file detected", data={"files_failed": failed_files})
             primary_reason = failed_files[0]["reason"] if failed_files else "All file uploads failed."
             return response.api_response(400, message=primary_reason, data={"files_failed": failed_files})
         

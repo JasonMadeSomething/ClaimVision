@@ -2,6 +2,8 @@ import json
 import logging
 import base64
 import uuid
+from datetime import datetime, timezone
+from hashlib import sha256
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy.orm import Session
@@ -18,8 +20,7 @@ def upload_to_s3(s3_key, file_data):
     s3 = boto3.client("s3")
     bucket_name = "your-s3-bucket-name"
     try:
-        decoded_data = base64.b64decode(file_data)
-        s3.put_object(Bucket=bucket_name, Key=s3_key, Body=decoded_data)
+        s3.put_object(Bucket=bucket_name, Key=s3_key, Body=file_data)
     except (BotoCoreError, ClientError) as e:
         logger.error(f"S3 upload failed: {str(e)}")
         raise
@@ -109,16 +110,23 @@ def lambda_handler(event, _context, db_session: Session = None):
         if not file_record:
             return response.api_response(404, error_details="File Not Found")
 
-        # Upload new file to S3
+        decoded_data = base64.b64decode(body["file_data"])
         try:
-            upload_to_s3(file_record.s3_key, body["file_data"])
+            upload_to_s3(file_record.s3_key, decoded_data)
         except (BotoCoreError, ClientError) as e:
             logger.error("S3 upload failed for file %s: %s", file_id, str(e))
             return response.api_response(500, error_details="Failed to upload file to storage")
 
+        new_file_hash = sha256(decoded_data).hexdigest()
+        # Upload new file to S3
+        if file_record.file_hash == new_file_hash:
+            return response.api_response(409, message="File already exists with the same content.")
+
         # Update file metadata
         file_record.file_name = file_name
+        file_record.file_hash = new_file_hash
         file_record.status = FileStatus.UPLOADED
+        file_record.updated_at = datetime.now(timezone.utc)
         db.commit()
 
         return response.api_response(200, message="File replaced successfully", data=file_record.to_dict())

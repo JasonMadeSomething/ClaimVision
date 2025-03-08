@@ -29,7 +29,8 @@ def seed_file(test_db):
         file_name="original.jpg",
         s3_key="original-key",
         file_metadata={"mime_type": "image/jpeg", "size": 12345},
-        room_name="Living Room"
+        room_name="Living Room",
+        file_hash="test_hash"
     )
 
     test_db.add_all([test_household, test_user, test_file])

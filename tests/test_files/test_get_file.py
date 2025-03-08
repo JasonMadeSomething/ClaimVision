@@ -11,9 +11,11 @@ from files.get_file import lambda_handler
 from models import Household, User
 
 @pytest.mark.usefixtures("seed_file")
-def test_get_file_success(api_gateway_event, test_db, seed_file):
+def test_get_file_success(api_gateway_event, test_db, seed_file, mock_s3):
     """ Test retrieving a single file successfully"""
     file_id, user_id = seed_file[:2]
+
+    mock_s3.generate_presigned_url.return_value = "https://signed-url.com/file"
 
     event = api_gateway_event(
         http_method="GET",
@@ -27,6 +29,7 @@ def test_get_file_success(api_gateway_event, test_db, seed_file):
     assert response["statusCode"] == 200
     assert body["data"]["id"] == str(file_id)
     assert body["data"]["file_name"] == "original.jpg"
+
 
 
 def test_get_file_not_found(api_gateway_event, test_db):

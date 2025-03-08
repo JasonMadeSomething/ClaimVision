@@ -1,12 +1,44 @@
 import json
+import os
 import logging
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+import boto3
+from botocore.exceptions import BotoCoreError, ClientError
 from database.database import get_db_session
 from models import File, User
 from utils import response
 
 logger = logging.getLogger()
+
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
+
+def get_s3_client():
+    """Returns an S3 client instance (supports mocking in tests)."""
+    return boto3.client("s3")
+
+def generate_presigned_url(s3_client, s3_key: str, expiration: int = 600) -> str:
+    """
+    Generate a pre-signed URL for accessing a file in S3.
+    
+    Args:
+        s3_client: The mocked or real S3 client.
+        s3_key (str): The S3 object key.
+        expiration (int): Time in seconds before the URL expires.
+
+    Returns:
+        str: A pre-signed S3 URL.
+    """
+    try:
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": s3_key},
+            ExpiresIn=expiration
+        )
+        return url
+    except (BotoCoreError, ClientError) as e:
+        logger.error("Error generating pre-signed URL: %s", str(e))
+        return None
 
 def lambda_handler(event, _context, db_session: Session = None):
     """
@@ -53,10 +85,14 @@ def lambda_handler(event, _context, db_session: Session = None):
         files_query = db.query(File).filter_by(
             household_id=user.household_id
         ).order_by(File.file_name).limit(limit).offset(offset)
-        files = files_query.all()
 
-        # Prepare response data
-        files_data = [file.to_dict() for file in files]
+        files = files_query.all()
+        files_data = []
+        for file in files:
+            signed_url = generate_presigned_url(get_s3_client(), file.s3_key)
+            file_data = file.to_dict()
+            file_data["signed_url"] = signed_url if signed_url else None
+            files_data.append(file_data)
 
         return response.api_response(
             200,

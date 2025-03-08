@@ -26,9 +26,11 @@ def test_get_files_success(api_gateway_event, test_db, seed_files):
     assert len(body["data"]["files"]) == 5
 
 
-def test_get_files_pagination(api_gateway_event, test_db, seed_files):
+def test_get_files_pagination(api_gateway_event, test_db, seed_files, mock_s3):
     """Test retrieving files with pagination."""
     user_id, _, _ = seed_files
+
+    mock_s3.generate_presigned_url.return_value = "https://signed-url.com/file"
 
     event = api_gateway_event(
         http_method="GET",

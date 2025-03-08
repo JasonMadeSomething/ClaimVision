@@ -1,12 +1,45 @@
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
+from botocore.errorfactory import ClientError
+from botocore.exceptions import BotoCoreError
+import boto3
 import uuid
 import logging
+import os
 from models import File, User
 from database.database import get_db_session
 from utils import response
 
 logger = logging.getLogger()
+
+def get_s3_client() -> boto3.client:
+    return boto3.client('s3')
+
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+
+def generate_presigned_url(s3_key: str, expiration: int = 600) -> str:
+    """
+    Generate a pre-signed URL for accessing a file in S3.
+    
+    Args:
+        s3_key (str): The S3 object key.
+        expiration (int): Time in seconds before the URL expires.
+
+    Returns:
+        str: A pre-signed S3 URL.
+    """
+    try:
+        s3_client = get_s3_client()
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": s3_key},
+            ExpiresIn=expiration
+        )
+        return url
+    except (BotoCoreError, ClientError) as e:
+        logger.error(f"Error generating pre-signed URL: {str(e)}")
+        return None
+
 
 def lambda_handler(event, _context, db_session: Session = None):
     db = db_session if db_session else get_db_session()
@@ -35,10 +68,17 @@ def lambda_handler(event, _context, db_session: Session = None):
 
         if not file_data:
             return response.api_response(404, error_details="File not found")
+        
+        signed_url = generate_presigned_url(file_data.s3_key)
+        if not signed_url:
+            return response.api_response(500, message="Failed to generate file link.")
 
         return response.api_response(
             200,
-            data=file_data.to_dict()
+            data={
+                **file_data.to_dict(),
+                "url": signed_url
+            }
         )
 
     except SQLAlchemyError as e:

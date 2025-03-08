@@ -1,5 +1,5 @@
 """Pydantic schema for File API requests/responses."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List
 from pydantic import BaseModel, Field, field_validator
 
@@ -56,7 +56,8 @@ class FileSchema(BaseModel):
     labels: List[str] = []  # Rekognition labels / user-provided labels
     status: str = "uploaded"  # uploaded, processing, processed
     file_url: str
-
+    deleted: bool = False
+    deleted_at: Optional[str] = None
     # Metadata
     mime_type: str
     size: int
@@ -83,4 +84,4 @@ class FileSchema(BaseModel):
             return v.isoformat()
         if isinstance(v, str):
             return v
-        return datetime.utcnow().isoformat()
+        return datetime.now(timezone.utc).isoformat()

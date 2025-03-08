@@ -3,7 +3,6 @@ import os
 import sys
 import uuid
 from unittest.mock import MagicMock, patch
-
 import pytest
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
@@ -12,7 +11,7 @@ from testcontainers.postgres import (
     PostgresContainer,  # Optional if using Testcontainers
 )
 
-from models import Base, File, Household, User
+from models import Base, File, Household, User, Claim, Label
 from models.file import FileStatus
 
 load_dotenv()
@@ -36,7 +35,7 @@ def mock_env():
 # -----------------
 # DATABASE FIXTURE
 # -----------------
-@pytest.fixture(scope="function")
+@pytest.fixture(scope="function", autouse=True)
 def test_db():
     """Provides a fresh test database for each test function."""
     engine = create_engine(os.getenv("DATABASE_URL"))
@@ -89,6 +88,7 @@ def mock_s3():
     with patch("boto3.client") as mock_client:
         mock_s3 = MagicMock()
         mock_client.return_value = mock_s3
+        mock_client.generate_presigned_url.return_value = "https://signed-url.com/file"
         yield mock_s3
 
 # -----------------
@@ -151,6 +151,7 @@ def seed_file(test_db):
     household_id = uuid.uuid4()
     user_id = uuid.uuid4()
     file_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
 
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(
@@ -160,17 +161,20 @@ def seed_file(test_db):
         last_name="User",
         household_id=household_id
     )
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
     test_file = File(
         id=file_id,
         uploaded_by=user_id,
         household_id=household_id,
         file_name="original.jpg",
         s3_key="original-key",
-        status="UPLOADED",
+        status=FileStatus.UPLOADED,
         file_metadata={"mime_type": "image/jpeg", "size": 12345},
+        file_hash="test_hash",
+        claim_id=claim_id
     )
 
-    test_db.add_all([test_household, test_user, test_file])
+    test_db.add_all([test_household, test_user, test_claim, test_file])
     test_db.commit()
 
     return file_id, user_id, household_id
@@ -180,6 +184,7 @@ def seed_files(test_db):
     """Insert multiple test files into the database."""
     household_id = uuid.uuid4()
     user_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
 
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(
@@ -189,7 +194,7 @@ def seed_files(test_db):
         last_name="User",
         household_id=household_id,
     )
-
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
     test_files = [
         File(
             id=uuid.uuid4(),
@@ -200,11 +205,13 @@ def seed_files(test_db):
             status=FileStatus.UPLOADED,
             labels=[],
             file_metadata={"mime_type": "image/jpeg", "size": 1234 + i},
+            file_hash=f"test_hash_{i}",
+            claim_id=claim_id
         )
         for i in range(5)
     ]
 
-    test_db.add_all([test_household, test_user, *test_files])
+    test_db.add_all([test_household, test_user, test_claim, *test_files])
     test_db.commit()
 
     return user_id, household_id, test_files
