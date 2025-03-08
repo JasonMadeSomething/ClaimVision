@@ -519,7 +519,7 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
     print("Calling lambda_handler...")
 
     # Act: Call the registration Lambda
-    response = register_handler(event, None)
+    _response = register_handler(event, None)
 
     print("Lambda finished execution! Checking DB...")
 
@@ -596,7 +596,7 @@ def test_register_email_already_used(mock_cognito, test_db, mocker):
 
     # Assert: Ensure it returns 409 Conflict
     assert response["statusCode"] == 409, f"Expected 409, got {response['statusCode']}"
-    
+
     error_details_msg = (
         f"Unexpected error details: {body['error_details']}"
     )
@@ -609,9 +609,9 @@ def test_register_cognito_household_sync_failure(mock_cognito, test_db, mocker):
     generated_user_sub = str(uuid.uuid4())
     mock_cognito.sign_up.side_effect = lambda *args, **kwargs: {"UserSub": generated_user_sub}
     mock_cognito.admin_update_user_attributes.side_effect = Exception("Cognito update failed")
-    
+
     mocker.patch("auth.register.get_db_session", return_value=test_db)
-    
+
     event = {
         "body": json.dumps({
             "username": "testuser",
@@ -621,10 +621,10 @@ def test_register_cognito_household_sync_failure(mock_cognito, test_db, mocker):
             "last_name": "Doe"
         })
     }
-    
+
     response = register_handler(event, None)
     body = json.loads(response["body"])
-    
+
     assert response["statusCode"] == 200, f"Expected 200, got {response['statusCode']}"
     assert "message" in body, "Expected 'message' in response body"
     assert body["message"] == "OK" or "User registered successfully" in body["message"]
@@ -633,7 +633,7 @@ def test_register_weak_password_prevalidation(mock_cognito, test_db, mocker):
     """Ensure weak passwords are caught before Cognito is called."""
     mocker.patch("auth.register.get_cognito_client", return_value=mock_cognito)
     mock_cognito.sign_up.side_effect = AssertionError("Cognito should not be called for weak passwords")
-    
+
     event = {
         "body": json.dumps({
             "username": "testuser",
@@ -643,9 +643,9 @@ def test_register_weak_password_prevalidation(mock_cognito, test_db, mocker):
             "last_name": "Doe"
         })
     }
-    
+
     response = register_handler(event, None)
     body = json.loads(response["body"])
-    
+
     assert response["statusCode"] == 400, f"Expected 400, got {response['statusCode']}"
     assert body["error_details"] == "Password does not meet complexity requirements", f"Expected 'Password does not meet complexity requirements', got '{body['error_details']}'"

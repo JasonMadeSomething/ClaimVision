@@ -1,8 +1,5 @@
 import json
-import boto3
-import pytest
 from auth.login import lambda_handler as login_handler
-from utils import response
 
 def test_login_success(mock_cognito):
     """Ensure login succeeds with correct credentials."""

@@ -1,4 +1,3 @@
-from __future__ import annotations
 from sqlalchemy import Column, String, ForeignKey, UUID, Enum, JSON
 from sqlalchemy.orm import relationship
 import uuid

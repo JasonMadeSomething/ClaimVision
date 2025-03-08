@@ -57,9 +57,9 @@ def lambda_handler(event, _context):
         if error_code == "UserNotFoundException":
             return response.api_response(404, error_details="User not found")
 
-        logger.error(f"Unexpected Cognito error: {error_code} - {e}")
+        logger.error("Unexpected Cognito error: %s - %s", error_code, str(e))
         return response.api_response(500, error_details="Internal server error")
     
     except Exception as e:
-        logger.error(f"Unexpected error during confirmation: {str(e)}")
+        logger.error("Unexpected error during confirmation: %s", str(e))
         return response.api_response(500, error_details="Internal server error")
