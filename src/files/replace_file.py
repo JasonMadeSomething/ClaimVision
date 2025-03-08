@@ -1,193 +1,138 @@
-"""
-File Replacement Handler
-
-This module handles replacing an existing file in the system. It verifies authentication,
-validates request payloads, checks ownership, and updates the file in S3 and DynamoDB.
-
-Features:
-- Ensures only authorized users can replace their files.
-- Validates the request body structure and required fields.
-- Uploads the new file to S3 and updates metadata in DynamoDB.
-- Standardizes error handling with structured API responses.
-
-Example Usage:
-    ```
-    PUT /files/{file_id}
-    Body: {
-        "file_name": "new_image.jpg",
-        "file_data": "base64_encoded_string",
-        "s3_key": "uploads/user-123/old_file.jpg"
-    }
-    ```
-"""
-
-import os
 import json
 import logging
+import base64
+import uuid
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
-from utils import response, dynamodb_utils
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from database.database import get_db_session
+from models import User
+from models.file import File, FileStatus
+from utils import response
 
 logger = logging.getLogger()
-logger.setLevel(logging.ERROR)
+logger.setLevel(logging.INFO)
 
-def lambda_handler(event, _context):
+def upload_to_s3(s3_key, file_data):
+    s3 = boto3.client("s3")
+    bucket_name = "your-s3-bucket-name"
+    try:
+        decoded_data = base64.b64decode(file_data)
+        s3.put_object(Bucket=bucket_name, Key=s3_key, Body=decoded_data)
+    except (BotoCoreError, ClientError) as e:
+        logger.error(f"S3 upload failed: {str(e)}")
+        raise
+
+def lambda_handler(event, _context, db_session: Session = None):
     """
-    Handles requests to replace an existing file.
+    Handles requests to replace an existing file with a new version.
 
-    This function performs the following steps:
-    1. Ensures the user is authenticated.
-    2. Parses and validates the request body.
-    3. Retrieves file metadata from DynamoDB.
-    4. Verifies that the user owns the file.
-    5. Uploads the new file to S3.
-    6. Updates metadata in DynamoDB.
+    This function authenticates the user, validates the file data and permissions,
+    uploads the new file to S3 using the same key as the original file,
+    and updates the file metadata in the database.
 
-    Args:
-        event (dict): The API Gateway event payload.
-        _context (dict): The AWS Lambda execution context (unused).
+    :param event: API Gateway event containing request data
+                  - pathParameters.id: UUID of the file to replace
+                  - body.file_name: New name for the file
+                  - body.file_data: Base64-encoded file content
+    :type event: dict
+    :param _context: AWS Lambda context (unused)
+    :type _context: dict
+    :param db_session: SQLAlchemy session for database operations,
+                       primarily used for testing
+    :type db_session: Session, optional
 
-    Returns:
-        dict: Standardized API response.
+    :return: Standardized API response with status code and body
+    :rtype: dict
+
+    :statuscode 200: File replaced successfully with updated file data
+    :statuscode 400: Invalid request (missing fields, invalid format, etc.)
+    :statuscode 401: Unauthorized request
+    :statuscode 404: File or user not found
+    :statuscode 500: Server error (database or S3 operations failed)
     """
-
-    response_data = None  # ✅ Unified return point
+    try:
+        db = db_session or get_db_session()
+    except SQLAlchemyError as e:
+        return response.api_response(500, error_details=str(e))
 
     try:
-        s3 = get_s3()
-        files_table = get_files_table()
-
-        # ✅ Step 1: Authenticate the user
-        user_id = get_authenticated_user(event)
+        # Authenticate user
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
         if not user_id:
-            return response.api_response(401)
+            return response.api_response(401, error_details="Unauthorized")
 
-        # ✅ Step 2: Extract and validate request data
-        extracted = extract_request_data(event)
-        if not isinstance(extracted, tuple):
-            return response.api_response(400, message="Invalid request payload")
+        # Parse and validate payload
+        file_id = event.get("pathParameters", {}).get("id")
+        body = json.loads(event.get("body") or "{}")
+        if "files" in body:
+            return response.api_response(400, error_details="Only one file can be replaced at a time")
+        required_fields = {"file_name", "file_data"}
+        if not all(field in body for field in required_fields):
+            missing = required_fields - body.keys()
+            return response.api_response(400, error_details=f"Missing required fields: {', '.join(missing)}")
 
-        file_id, body = extracted
+        file_name = body["file_name"]
+        if not file_name:
+            return response.api_response(400, error_details="File name is required")
+        if not file_name.lower().endswith((".jpg", ".jpeg", ".png", ".pdf")):
+            return response.api_response(400, error_details="Invalid file format")
 
-        # ✅ If body contains an error message, return it
-        if "message" in body:
-            return response.api_response(400, message=body["message"])
-
-        # ✅ Step 3: Retrieve file metadata
-        file_data = files_table.get_item(Key={"id": file_id}).get("Item")
-        if not file_data or file_data["user_id"] != user_id:
-            return response.api_response(404, message="File Not Found")
+        if not body["file_data"]:
+            return response.api_response(400, error_details="File data is empty")
 
         try:
-            # ✅ Step 4: Upload new file to S3
-            upload_file_to_s3(s3, file_data["s3_key"], body["file_data"])
+            base64.b64decode(body["file_data"])
+        except ValueError:
+            return response.api_response(400, error_details="Invalid base64 encoding")
+        # Validate file size
+        file_size = len(base64.b64decode(body["file_data"]))
+        if file_size > 10 * 1024 * 1024:  # 10MB limit
+            return response.api_response(400, error_details="File size exceeds the allowed limit")
 
-            # ✅ Step 5: Update metadata in DynamoDB
-            files_table.update_item(
-                Key={"id": file_id},
-                UpdateExpression="SET file_name = :name",
-                ExpressionAttributeValues={":name": body["file_name"]},
-            )
+        # Fetch user and file
+        user = db.query(User).filter(User.id == uuid.UUID(user_id)).first()
+        if not user:
+            return response.api_response(404, error_details="User not found")
 
-            return response.api_response(200, message="File replaced successfully")
+        try:
+            uuid.UUID(file_id)
+        except ValueError:
+            return response.api_response(400, error_details="Invalid file ID")
 
+        file_record = db.query(File).filter(
+            File.id == uuid.UUID(file_id),
+            File.household_id == user.household_id
+        ).first()
+
+        if not file_record:
+            return response.api_response(404, error_details="File Not Found")
+
+        # Upload new file to S3
+        try:
+            upload_to_s3(file_record.s3_key, body["file_data"])
         except (BotoCoreError, ClientError) as e:
-            return response.api_response(500, message="AWS error", error_details=str(e))
+            logger.error("S3 upload failed for file %s: %s", file_id, str(e))
+            return response.api_response(500, error_details="Failed to upload file to storage")
 
-    except (BotoCoreError, ClientError) as e:
-        return response.api_response(500, message="AWS error", error_details=str(e))
-    except Exception as e:  # pylint: disable=broad-except
-        logger.error("Unhandled exception: %s", str(e), exc_info=True)
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
+        # Update file metadata
+        file_record.file_name = file_name
+        file_record.status = FileStatus.UPLOADED
+        db.commit()
 
-    return response_data  # ✅ Single return point at the end
+        return response.api_response(200, message="File replaced successfully", data=file_record.to_dict())
 
-# --- ✅ Helper Functions ---
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error("Database error: %s", str(e))
+        return response.api_response(500, error_details=str(e))
 
-def get_authenticated_user(event):
-    """
-    Extracts and returns the user ID if authentication is valid.
+    except Exception as e:
+        db.rollback()
+        logger.exception("Unexpected error")
+        return response.api_response(500, error_details=str(e))
 
-    Args:
-        event (dict): The API Gateway event payload.
-
-    Returns:
-        str | None: The authenticated user ID, or None if missing.
-    """
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
-    return claims.get("sub")
-
-def extract_request_data(event):
-    """
-    Extracts and validates request data from the event.
-
-    This function ensures the payload:
-    - Contains a valid JSON body.
-    - Includes all required fields: `file_name`, `file_data`, `s3_key`.
-    - Uses a supported file format (.jpg, .jpeg, .png).
-
-    Args:
-        event (dict): The API Gateway event payload.
-
-    Returns:
-        tuple | dict | None:
-            - (file_id, body) if valid.
-            - {"message": error_message} if invalid.
-            - None if critical fields are missing.
-    """
-    if "pathParameters" not in event or "id" not in event["pathParameters"]:
-        return None
-
-    file_id = event["pathParameters"]["id"]
-
-    try:
-        body = json.loads(event["body"]) if "body" in event and event["body"] else {}
-    except (json.JSONDecodeError, KeyError):
-        return None
-
-    file_name = body.get("file_name")
-
-    # ✅ Prioritize file format validation first
-    if file_name and not file_name.lower().endswith((".jpg", ".jpeg", ".png")):
-        return None, {"message": "Invalid file format"}
-
-    required_fields = {"file_name", "file_data", "s3_key"}
-    missing_fields = required_fields - body.keys()
-    if missing_fields:
-        return None, {"message": f"Missing required fields: {', '.join(missing_fields)}"}
-
-    return file_id, body
-
-def get_s3():
-    """
-    Initializes and returns an S3 client.
-
-    Returns:
-        boto3.client: S3 client instance.
-    """
-    return boto3.client("s3")
-
-def get_files_table():
-    """
-    Retrieves the DynamoDB table used for file storage.
-
-    Returns:
-        boto3.Table: DynamoDB table instance.
-    """
-    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
-
-def upload_file_to_s3(s3, s3_key, file_data_encoded):
-    """
-    Uploads a file to S3.
-
-    Args:
-        s3 (boto3.client): S3 client instance.
-        s3_key (str): The S3 key where the file will be stored.
-        file_data_encoded (str): Base64-encoded file content.
-
-    Raises:
-        BotoCoreError: If there is an issue with AWS SDK.
-        ClientError: If there is an AWS S3-specific error.
-    """
-    file_binary = bytes(file_data_encoded, "utf-8")  # Decode from base64
-    s3.put_object(Bucket=os.getenv("S3_BUCKET_NAME"), Key=s3_key, Body=file_binary)
+    finally:
+        if db_session is None:
+            db.close()

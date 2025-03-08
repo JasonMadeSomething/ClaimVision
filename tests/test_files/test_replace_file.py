@@ -1,164 +1,224 @@
-# pylint: disable=unused-argument
-"""✅ Test replacing an existing file"""
 import json
+import uuid
+import pytest
+import base64
 from unittest.mock import patch
-from test_data.files_data import test_replace_payload
+from sqlalchemy.exc import SQLAlchemyError
+from models import File, Household, User
 from files.replace_file import lambda_handler
 
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_success(mock_dynamodb, mock_s3, api_gateway_event):
-    """✅ Test replacing an existing file"""
-    
-    event = api_gateway_event(http_method="PUT", path_params={"id": "file-1"}, body=test_replace_payload, auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {
-        "Item": {
-            "id": "file-1",
-            "user_id": "user-123",
-            "file_name": "test.jpg",
-            "s3_key": "uploads/user-123/file-1.jpg"
-        }
-    }  # Simulate file exists
-    mock_table.update_item.return_value = {}
-    mock_s3.return_value.put_object.return_value = {}
+def test_replace_file_success(test_db, api_gateway_event, seed_file):
+    """✅ Test successful replacement of an existing file."""
+    file_id, user_id, _ = seed_file
+    replace_payload = {"file_name": "new.jpg", "file_data": base64.b64encode(b"newcontent").decode("utf-8")}
 
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 200
+    with patch("files.replace_file.upload_to_s3") as mock_s3_upload:
+        event = api_gateway_event(http_method="PUT", path_params={"id": str(file_id)}, body=json.dumps(replace_payload), auth_user=str(user_id))
+        response = lambda_handler(event, {}, db_session=test_db)
 
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_not_found(mock_dynamodb, mock_s3, api_gateway_event):
+        assert response["statusCode"] == 200
+        mock_s3_upload.assert_called_once()
+
+def test_replace_file_not_found(test_db, api_gateway_event, seed_file):
     """❌ Test replacing a non-existent file (should return 404)"""
+    _, user_id, _ = seed_file
 
-    event = api_gateway_event(
-        http_method="PUT", 
-        path_params={"id": "file-99"}, 
-        body=test_replace_payload, 
-        auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {}  # No file found
+    with patch("files.replace_file.upload_to_s3") as mock_s3_upload:
+        event = api_gateway_event(http_method="PUT", path_params={"id": str(uuid.uuid4())}, body=json.dumps({"file_name": "new.jpg", "file_data": base64.b64encode(b"newcontent").decode("utf-8")}), auth_user=str(user_id))
+        response = lambda_handler(event, {}, db_session=test_db)
+        print(response)
+        assert response["statusCode"] == 404
+        mock_s3_upload.assert_not_called()
 
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 404
-    assert "File Not Found" in json.loads(response["body"])["message"]
-
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_unauthorized(mock_dynamodb, mock_s3, api_gateway_event):
-    """❌ Test replacing a file owned by another user (should return 404 for security)"""
-
-    event = api_gateway_event(
-        http_method="PUT", 
-        path_params={"id": "file-1"}, 
-        auth_user="user-999", 
-        body=test_replace_payload)
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {
-        "Item": {
-            "id": "file-1",
-            "user_id": "user-123",
-            "file_name": "test.jpg",
-            "s3_key": "uploads/user-123/file-1.jpg"
-        }
-    }  # File exists, but wrong user
-
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 404
-
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_invalid_format(mock_dynamodb, mock_s3, api_gateway_event):
+def test_replace_file_invalid_format(api_gateway_event, test_db, seed_file):
     """❌ Test replacing a file with an invalid format (should return 400)"""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "invalid.exe", "file_data": base64.b64encode(b"invalid").decode("utf-8")}
 
-    invalid_payload = test_replace_payload.copy()  # ✅ This correctly creates a copy of the dict
-    invalid_payload["file_name"] = "test.exe"  # Unsupported format
+    with patch("files.replace_file.upload_to_s3") as mock_s3_upload:
+        event = api_gateway_event(http_method="PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+        response = lambda_handler(event, {}, db_session=test_db)
+
+        assert response["statusCode"] == 400
+        assert "error_details" in json.loads(response["body"])
+        assert "Invalid file format" in json.loads(response["body"])["error_details"]
+        mock_s3_upload.assert_not_called()
+
+def test_replace_file_empty_payload(api_gateway_event, test_db, seed_file):
+    """❌ Test replacing a file with an empty payload (should return 400)"""
+    file_id, user_id, _ = seed_file
+
+    with patch("files.replace_file.upload_to_s3") as mock_s3_upload:
+        event = api_gateway_event(http_method="PUT", path_params={"id": str(file_id)}, body="{}", auth_user=str(user_id))
+        response = lambda_handler(event, {}, db_session=test_db)
+
+        assert response["statusCode"] == 400
+        mock_s3_upload.assert_not_called()
+
+def test_replace_file_s3_failure(api_gateway_event, test_db, seed_file):
+    """❌ Test handling an S3 upload failure (should return 500)"""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "valid.jpg", "file_data": base64.b64encode(b"valid").decode("utf-8")}
+
+    with patch("files.replace_file.upload_to_s3", side_effect=Exception("S3 Failure")) as mock_s3_upload:
+        event = api_gateway_event(http_method="PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+        response = lambda_handler(event, {}, db_session=test_db)
+
+        assert response["statusCode"] == 500
+        mock_s3_upload.assert_called_once()
+
+def test_replace_file_no_auth(api_gateway_event, test_db, seed_file):
+    """❌ Test replacing a file with no authentication provided (should return 401)"""
+    file_id, _, _ = seed_file
+    payload = {
+        "file_name": "new.jpg",
+        "file_data": base64.b64encode(b"newcontent").decode("utf-8")
+    }
+
     event = api_gateway_event(
         http_method="PUT",
-        path_params={"id": "file-1"},
-        body=invalid_payload,
-        auth_user="user-123"
+        path_params={"id": str(file_id)},
+        body=json.dumps(payload),
+        auth_user=None  # No authentication provided
     )
 
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 400
-    assert "Invalid file format" in json.loads(response["body"])["message"]
-
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_empty_payload(mock_dynamodb, mock_s3, api_gateway_event):
-    """❌ Test replacing a file with an empty payload (should return 400)"""
-
-    event = api_gateway_event(
-        http_method="PUT", 
-        path_params={"id": "file-1"}, 
-        body="{}", 
-        auth_user="user-123")
-
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 400
-    assert json.loads(response["body"])["message"].startswith("Missing required fields:")
-
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_dynamodb_error(mock_dynamodb, mock_s3, api_gateway_event):
-    """❌ Test handling a DynamoDB failure (should return 500)"""
-
-    event = api_gateway_event(
-        http_method="PUT",
-        path_params={"id": "file-1"},
-        body=test_replace_payload,
-        auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {
-        "Item": {
-            "id": "file-1",
-            "user_id": "user-123",
-            "s3_key": "uploads/user-123/file-1.jpg"  # ✅ Add missing s3_key
-        }
-    }
-    mock_table.update_item.side_effect = Exception("DynamoDB Failure")  # Simulated DB failure
-
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 500
-    assert "DynamoDB Failure" in json.loads(response["body"])["error_details"]
-
-
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_s3_failure(mock_dynamodb, mock_s3, api_gateway_event):
-    """❌ Test handling an S3 upload failure (should return 500)"""
-
-    event = api_gateway_event(
-        http_method="PUT", 
-        path_params={"id": "file-1"}, 
-        body=test_replace_payload, 
-        auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {
-        "Item": {
-            "id": "file-1",
-            "user_id": "user-123",
-            "s3_key": "uploads/user-123/file-1.jpg"  # ✅ Add missing s3_key
-        }
-    }
-    mock_s3.return_value.put_object.side_effect = Exception("S3 Failure")  # Simulated S3 failure
-
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 500
-    assert "S3 Failure" in json.loads(response["body"])["error_details"]
-
-@patch("files.replace_file.get_s3")
-@patch("files.replace_file.get_files_table")
-def test_replace_file_no_auth(mock_dynamodb, mock_s3, api_gateway_event):
-    """❌ Test replacing a file with no authentication (should return 401)"""
-
-    event = api_gateway_event(
-        http_method="PUT", 
-        path_params={"id": "file-1"}, 
-        auth_user=None, 
-        body=test_replace_payload)
-
-    response = lambda_handler(event, {})
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
     assert response["statusCode"] == 401
-    assert "Unauthorized" in json.loads(response["body"])["message"]
+    assert "Unauthorized" in body["message"]
+    assert "error_details" in body
+    assert "Unauthorized" in body["error_details"]
+
+def test_replace_file_database_failure(api_gateway_event, seed_file):
+    """❌ Test handling a database error during file replacement (should return 500)"""
+    file_id, user_id, _ = seed_file
+    payload = {
+        "file_name": "new.jpg",
+        "file_data": base64.b64encode(b"newcontent").decode("utf-8")
+    }
+
+    with patch("files.replace_file.get_db_session", side_effect=SQLAlchemyError("DB Failure")):
+        event = api_gateway_event(
+            http_method="PUT",
+            path_params={"id": str(file_id)},
+            body=json.dumps(payload),
+            auth_user=str(user_id)
+        )
+
+        response = lambda_handler(event, {})
+        assert response["statusCode"] == 500
+        body = json.loads(response["body"])
+        assert "error_details" in body
+        assert "DB Failure" in body["error_details"]
+
+def test_replace_file_invalid_uuid(api_gateway_event, test_db, seed_file):
+    """❌ Test handling invalid UUID format (should return 400)"""
+    _, user_id, _ = seed_file
+    payload = {"file_name": "valid.jpg", "file_data": base64.b64encode(b"valid").decode("utf-8")}
+
+    with patch("files.replace_file.upload_to_s3") as mock_s3_upload:
+        event = api_gateway_event(http_method="PUT", path_params={"id": "invalid-uuid"}, body=json.dumps(payload), auth_user=str(user_id))
+        response = lambda_handler(event, {}, db_session=test_db)
+        body = json.loads(response["body"])
+
+        assert response["statusCode"] == 400
+        assert "error_details" in body
+        assert "Invalid file ID" in body["error_details"]
+        mock_s3_upload.assert_not_called()
+
+def test_replace_file_too_large(api_gateway_event, test_db, seed_file):
+    """❌ Test replacing a file with a file that exceeds the allowed size limit."""
+    file_id, user_id, _ = seed_file
+    large_file_data = base64.b64encode(b"a" * (10 * 1024 * 1024 + 1)).decode("utf-8")  # 10MB + 1 byte
+    payload = {"file_name": "large.jpg", "file_data": large_file_data}
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "error_details" in body
+    assert "File size exceeds the allowed limit" in body["error_details"]
+
+def test_replace_file_empty_file(api_gateway_event, test_db, seed_file):
+    """❌ Test replacing a file with an empty file."""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "empty.jpg", "file_data": base64.b64encode(b"").decode("utf-8")}
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "error_details" in body
+    assert "File data is empty" in body["error_details"]
+
+def test_replace_file_no_name(api_gateway_event, test_db, seed_file):
+    """❌ Test replacing a file with no file name."""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "", "file_data": base64.b64encode(b"valid").decode("utf-8")}
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "error_details" in body
+    assert "File name is required" in body["error_details"]
+
+def test_replace_file_invalid_extension(api_gateway_event, test_db, seed_file):
+    """❌ Test replacing a file with an invalid extension."""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "invalid.txt", "file_data": base64.b64encode(b"valid").decode("utf-8")}
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "error_details" in body
+    assert "Invalid file format" in body["error_details"]
+
+def test_replace_file_single_upload(api_gateway_event, test_db, seed_file):
+    """✅ Test that file replacements are 1:1 and do not allow multiple uploads."""
+    file_id, user_id, _ = seed_file
+    payload = {
+        "files": [
+            {"file_name": "valid1.jpg", "file_data": base64.b64encode(b"valid1").decode("utf-8")},
+            {"file_name": "valid2.jpg", "file_data": base64.b64encode(b"valid2").decode("utf-8")}
+        ]
+    }
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    assert response["statusCode"] == 400
+    assert "error_details" in body
+    assert "Only one file can be replaced at a time" in body["error_details"]
+
+
+def test_replace_file_invalid_base64(api_gateway_event, test_db, seed_file):
+    """Test replacing a file with non-base64 encoded data (should return 400 Bad Request)"""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "invalid.png", "file_data": "cheese"}
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "error_details" in body
+    assert "Invalid base64 encoding" in body["error_details"]
+
+def test_replace_file_no_extension(api_gateway_event, test_db, seed_file):
+    """Test replacing a file with no extension (should return 400 Bad Request)"""
+    file_id, user_id, _ = seed_file
+    payload = {"file_name": "invalid", "file_data": base64.b64encode(b"valid").decode("utf-8")}
+
+    event = api_gateway_event("PUT", path_params={"id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "error_details" in body
+    assert "Invalid file format" in body["error_details"]
