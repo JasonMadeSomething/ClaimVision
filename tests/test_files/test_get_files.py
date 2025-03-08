@@ -93,3 +93,19 @@ def test_get_files_invalid_limit(api_gateway_event, test_db, seed_files):
     assert response["statusCode"] == 400
     assert "error_details" in body
     assert body["error_details"] == "Invalid pagination parameters"
+
+def test_get_files_s3_failure(api_gateway_event, test_db, mock_s3, seed_files):
+    """❌ Test failure when S3 fails to generate signed URLs."""
+    user_id = seed_files
+
+    # ✅ Mock S3 failure
+    mock_s3.generate_presigned_url.return_value = None
+
+    event = api_gateway_event(http_method="GET", auth_user=str(user_id))
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
+    assert response["statusCode"] == 200  # ✅ Still returns a 200
+    assert "files" in body["data"]
+    assert len(body["data"]["files"]) == 2
+    assert all(file["signed_url"] is None for file in body["data"]["files"])

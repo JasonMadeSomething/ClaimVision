@@ -1,17 +1,17 @@
 from sqlalchemy import Column, String, ForeignKey, UUID, DateTime
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from models.base import Base  
 
 class Claim(Base):
     __tablename__ = "claims"
 
-    id: uuid.UUID = Column(UUID, primary_key=True, default=uuid.uuid4)
-    household_id: uuid.UUID = Column(UUID, ForeignKey("households.id"), nullable=False)
-    title: str = Column(String, nullable=False)
-    description: str = Column(String, nullable=True)
-    date_of_loss: datetime = Column(DateTime, nullable=False, default=datetime.utcnow)  # ✅ Restored date of loss
+    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
+    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(String, nullable=True)
+    date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now(timezone.utc))  # ✅ Restored date of loss
 
     household = relationship("Household", back_populates="claims")
     files = relationship("File", back_populates="claim")
