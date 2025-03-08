@@ -8,44 +8,7 @@ from unittest.mock import patch, MagicMock
 from sqlalchemy.exc import SQLAlchemyError
 
 from files.get_file import lambda_handler
-from models.file import FileStatus
-from models import File, Household, User
-
-
-@pytest.fixture
-def seed_file(test_db):
-    """Insert test file data into the database."""
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    file_id = uuid.uuid4()
-
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(
-        id=user_id,
-        email="test@example.com",
-        first_name="Test",
-        last_name="User",
-        household_id=household_id,
-    )
-
-    test_file = File(
-        id=file_id,
-        uploaded_by=user_id,
-        household_id=household_id,
-        file_name="test.pdf",
-        s3_key="test-key",
-        status=FileStatus.UPLOADED,  # Use the enum directly, not the value
-        labels=[],
-        file_metadata={"mime_type": "application/pdf", "size": 12345},
-        room_name=None,
-        claim_id=None,
-    )
-
-    test_db.add_all([test_household, test_user, test_file])
-    test_db.commit()
-
-    return file_id, user_id, household_id
-
+from models import Household, User
 
 @pytest.mark.usefixtures("seed_file")
 def test_get_file_success(api_gateway_event, test_db, seed_file):
@@ -63,7 +26,7 @@ def test_get_file_success(api_gateway_event, test_db, seed_file):
 
     assert response["statusCode"] == 200
     assert body["data"]["id"] == str(file_id)
-    assert body["data"]["file_name"] == "test.pdf"
+    assert body["data"]["file_name"] == "original.jpg"
 
 
 def test_get_file_not_found(api_gateway_event, test_db):

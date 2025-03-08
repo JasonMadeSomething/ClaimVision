@@ -3,42 +3,7 @@ import json
 import uuid
 import pytest
 from files.get_files import lambda_handler
-from models import File, User, Household
-from models.file import FileStatus
-
-@pytest.fixture
-def seed_files(test_db):
-    """Insert multiple test files into the database."""
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(
-        id=user_id,
-        email="test@example.com",
-        first_name="Test",
-        last_name="User",
-        household_id=household_id,
-    )
-
-    test_files = [
-        File(
-            id=uuid.uuid4(),
-            uploaded_by=user_id,
-            household_id=household_id,
-            file_name=f"file_{i}.jpg",
-            s3_key=f"key_{i}",
-            status=FileStatus.UPLOADED,
-            labels=[],
-            file_metadata={"mime_type": "image/jpeg", "size": 1234 + i},
-        )
-        for i in range(5)
-    ]
-
-    test_db.add_all([test_household, test_user, *test_files])
-    test_db.commit()
-
-    return user_id, household_id, test_files
+from models import User, Household
 
 
 @pytest.mark.usefixtures("seed_files")
