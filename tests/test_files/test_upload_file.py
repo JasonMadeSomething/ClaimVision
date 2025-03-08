@@ -14,7 +14,7 @@ def test_upload_file_success(test_db, api_gateway_event):
     household_id = uuid.uuid4()
     user_id = uuid.uuid4()
     
-    # ✅ Create a household and user
+    #Create a household and user
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
     test_db.add_all([test_household, test_user])

@@ -1,92 +1,137 @@
-"""✅ Test updating a file"""
 import json
+import uuid
+import pytest
 from unittest.mock import patch
-from test_data.files_data import test_update_payload, test_files
+from sqlalchemy.exc import SQLAlchemyError
+from models import File, Household, User
 from files.update_file_metadata import lambda_handler
 
-@patch("files.update_file_metadata.get_files_table")
-def test_update_file_success(mock_dynamodb, api_gateway_event):
-    """✅ Test updating file metadata successfully"""
+@pytest.fixture
+def seed_file(test_db):
+    """Insert a test file into the database for metadata updates."""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    file_id = uuid.uuid4()
 
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(
+        id=user_id,
+        email="test@example.com",
+        first_name="Test",
+        last_name="User",
+        household_id=household_id
+    )
+
+    test_file = File(
+        id=file_id,
+        uploaded_by=user_id,
+        household_id=household_id,
+        file_name="original.jpg",
+        s3_key="original-key",
+        file_metadata={"mime_type": "image/jpeg", "size": 12345},
+        room_name="Living Room"
+    )
+
+    test_db.add_all([test_household, test_user, test_file])
+    test_db.commit()
+
+    return file_id, user_id, household_id
+
+def test_update_file_metadata_success(api_gateway_event, test_db, seed_file):
+    """✅ Test updating file metadata successfully."""
+    file_id, user_id, _ = seed_file
+    update_payload = {"room_name": "Updated Room"}
+    
     event = api_gateway_event(
         http_method="PATCH",
-        path_params={"id": "file-1"},
-        body=test_update_payload
+        path_params={"id": str(file_id)},
+        body=json.dumps(update_payload),
+        auth_user=str(user_id)
     )
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {"Item": test_files[0]}  # ✅ Mock file exists
-    mock_table.update_item.return_value = {}
 
-    response = lambda_handler(event, {})
-    print(response)
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    print(body)
+    
     assert response["statusCode"] == 200
-    assert response["body"] is not None
+    assert body["data"]["room_name"] == "Updated Room"
 
-@patch("files.update_file_metadata.get_files_table")
-def test_update_file_not_found(mock_dynamodb, api_gateway_event):
-    """❌ Test updating a non-existent file"""
-
-    event = api_gateway_event(
-        http_method="PATCH",
-        path_params={"id": "file-99"},
-        body=test_update_payload,
-        auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {}  # No file found
-
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 404
-    assert "File Not Found" in json.loads(response["body"])["message"]
-
-@patch("files.update_file_metadata.get_files_table")
-def test_update_file_unauthorized(mock_dynamodb, api_gateway_event):
-    """❌ Test updating another user's file (unauthorized)"""
+def test_update_file_metadata_not_found(api_gateway_event, test_db, seed_file):
+    """❌ Test updating metadata for a non-existent file (should return 404)."""
+    _, user_id, _ = seed_file
+    update_payload = {"room_name": "Updated Room"}
 
     event = api_gateway_event(
         http_method="PATCH",
-        path_params={"id": "file-1"},
-        body=test_update_payload,
-        auth_user="user-999"
+        path_params={"id": str(uuid.uuid4())},
+        body=json.dumps(update_payload),
+        auth_user=str(user_id)
     )
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {"Item": test_files[0]}  # File exists but different user
 
-    response = lambda_handler(event, {})
+    response = lambda_handler(event, {}, db_session=test_db)
     assert response["statusCode"] == 404
-    assert "File Not Found" in json.loads(response["body"])["message"]
 
-@patch("files.update_file_metadata.get_files_table")
-def test_update_file_invalid_payload(mock_dynamodb, api_gateway_event):
-    """❌ Test updating a file with an invalid payload"""
+def test_update_file_metadata_unauthorized(api_gateway_event, test_db, seed_file):
+    """❌ Test unauthorized user trying to update metadata (should return 404)."""
+    file_id, _, _ = seed_file
+    unauthorized_user_id = uuid.uuid4()
+    update_payload = {"room_name": "Updated Room"}
 
-    invalid_payload = {}  # Missing required fields
     event = api_gateway_event(
         http_method="PATCH",
-        path_params={"id": "file-1"},
-        body=invalid_payload,
-        auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {"Item": test_files[0]}
+        path_params={"id": str(file_id)},
+        body=json.dumps(update_payload),
+        auth_user=str(unauthorized_user_id)
+    )
 
-    response = lambda_handler(event, {})
-    print(response)
+    response = lambda_handler(event, {}, db_session=test_db)
+    assert response["statusCode"] == 404
+
+def test_update_file_metadata_invalid_field(api_gateway_event, test_db, seed_file):
+    """❌ Test attempting to update an invalid field (should return 400)."""
+    file_id, user_id, _ = seed_file
+    update_payload = {"invalid_field": "Invalid Data"}
+
+    event = api_gateway_event(
+        http_method="PATCH",
+        path_params={"id": str(file_id)},
+        body=json.dumps(update_payload),
+        auth_user=str(user_id)
+    )
+
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+
     assert response["statusCode"] == 400
-    assert "Missing required field(s)" in response["body"]
+    assert "Invalid field(s)" in body["message"]
 
-@patch("files.update_file_metadata.get_files_table")
-def test_update_file_dynamodb_error(mock_dynamodb, api_gateway_event):
-    """❌ Test handling of DynamoDB errors during update"""
+def test_update_file_metadata_empty_payload(api_gateway_event, test_db, seed_file):
+    """❌ Test updating metadata with an empty payload (should return 400)."""
+    file_id, user_id, _ = seed_file
 
     event = api_gateway_event(
         http_method="PATCH",
-        path_params={"id": "file-1"},
-        body=test_update_payload,
-        auth_user="user-123")
-    mock_table = mock_dynamodb.return_value
-    mock_table.get_item.return_value = {"Item": test_files[0]}
-    mock_table.update_item.side_effect = Exception("DynamoDB error")  # Simulate AWS error
+        path_params={"id": str(file_id)},
+        body=json.dumps({}),
+        auth_user=str(user_id)
+    )
 
-    response = lambda_handler(event, {})
-    assert response["statusCode"] == 500
-    print(response)
-    assert "DynamoDB error" in json.loads(response["body"])["error_details"]
+    response = lambda_handler(event, {}, db_session=test_db)
+    assert response["statusCode"] == 400
+    assert "Empty request body" in json.loads(response["body"])["message"]
+
+def test_update_file_metadata_database_error(api_gateway_event, test_db, seed_file):
+    """❌ Test handling a database error during metadata update (should return 500)."""
+    file_id, user_id, _ = seed_file
+    update_payload = {"room_name": "Updated Room"}
+
+    with patch("files.update_file_metadata.get_db_session", side_effect=SQLAlchemyError("DB Failure")):
+        event = api_gateway_event(
+            http_method="PATCH",
+            path_params={"id": str(file_id)},
+            body=json.dumps(update_payload),
+            auth_user=str(user_id)
+        )
+
+        response = lambda_handler(event, {})
+        assert response["statusCode"] == 500

@@ -1,122 +1,74 @@
-"""
-File Metadata Update Handler
-
-This module provides functionality for updating metadata fields of a file in the system.
-It ensures user authentication, validates request payloads, and updates allowed metadata
-fields in the database.
-
-Features:
-- Supports PATCH updates for specific metadata fields.
-- Ensures only allowed fields can be modified.
-- Handles authentication and authorization checks.
-- Returns standardized API responses.
-
-Example Usage:
-    ```
-    PATCH /files/{file_id}
-    Body: {
-        "description": "Updated description",
-        "labels": ["label1", "label2"],
-        "associated_claim_id": "claim-123"
-    }
-    ```
-"""
-import os
 import json
-import boto3
-from utils import response, dynamodb_utils
+import logging
+from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
+from models import File, User
+from database.database import get_db_session
+from utils import response
 
-def get_s3():
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger()
+
+def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
     """
-    Initialize and return an S3 client.
-
-    Returns:
-        boto3.client: S3 client instance.
-    """
-    return boto3.client("s3")
-
-def get_files_table():
-    """
-    Retrieve the DynamoDB table used for storing file metadata.
-
-    Returns:
-        boto3.Table: DynamoDB table instance.
-    """
-    return dynamodb_utils.get_dynamodb_table("FILES_TABLE")
-
-def lambda_handler(event, _context):
-    """
-    Handles PATCH requests to update metadata fields of a file.
-
-    This function performs the following steps:
-    1. Ensures the user is authenticated.
-    2. Parses and validates the request body.
-    3. Fetches the existing file metadata from DynamoDB.
-    4. Ensures the user owns the file before making modifications.
-    5. Updates allowed metadata fields.
-
-    Allowed fields for update:
-    - `description`: A text description of the file.
-    - `labels`: A list of labels/tags associated with the file.
-    - `associated_claim_id`: A reference to an insurance claim ID.
+    Handles updating metadata for a file, excluding labels.
 
     Args:
-        event (dict): The API Gateway event payload.
-        _context (dict): The AWS Lambda execution context. (unused)
+        event (dict): API Gateway event containing authentication details, file ID, and update data.
+        _context (dict): Lambda execution context (unused).
+        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
 
     Returns:
-        dict: Standardized API response.
+        dict: API response containing the updated file metadata or an error message.
     """
-
     try:
-        # ✅ Step 1: Authenticate the user
-        user_id = event["requestContext"]["authorizer"]["claims"]["sub"]
-        file_id = event["pathParameters"]["id"]
-
-        # ✅ Step 2: Validate request body
-        try:
-            if not event.get("body"):
-                return response.api_response(400, message="Missing required field(s)", missing_fields=["body"])
-            body = json.loads(event["body"])
-        except json.JSONDecodeError:
-            return response.api_response(400, message="Invalid JSON format")
-
+        db = db_session if db_session else get_db_session()
+    except SQLAlchemyError as e:
+        logger.error("Failed to get database session: %s", str(e))
+        return response.api_response(500, message="Failed to get database session.")
+    
+    try:
+        file_id = event.get("pathParameters", {}).get("id")
+        if not file_id:
+            return response.api_response(400, message="Missing file ID in request.")
+        
+        # Extract update data
+        body = json.loads(event.get("body", "{}"))
+        allowed_fields = {"room_name", "file_metadata"}
+        invalid_fields = set(body.keys()) - allowed_fields
+        if invalid_fields:
+            return response.api_response(400, message=f"Invalid field(s): {', '.join(invalid_fields)}")
+        
+        # Check for empty payload
         if not body:
-            return response.api_response(400, message="Missing required field(s)")
-
-        files_table = get_files_table()
-
-        # ✅ Step 3: Fetch the existing file metadata
-        file_response = files_table.get_item(Key={"id": file_id})
-        file_data = file_response.get("Item")
-
-        if not file_data or file_data["user_id"] != user_id:
-            return response.api_response(404, message="File Not Found")
-
-        # ✅ Step 4: Prepare update expression
-        update_expression = "SET "
-        expression_attribute_values = {}
-
-        allowed_fields = ["description", "labels", "associated_claim_id"]
-
-        for key in allowed_fields:
-            if key in body:
-                update_expression += f"{key} = :{key}, "
-                expression_attribute_values[f":{key}"] = body[key]
-
-        if not expression_attribute_values:
-            return response.api_response(400, message="No valid fields to update")
-
-        update_expression = update_expression.rstrip(", ")
-
-        # ✅ Step 5: Perform the update in DynamoDB
-        files_table.update_item(
-            Key={"id": file_id},
-            UpdateExpression=update_expression,
-            ExpressionAttributeValues=expression_attribute_values
-        )
-
-        return response.api_response(200, message="File metadata updated successfully", data={"file_id": file_id})
-
-    except Exception as e: # pylint: disable=broad-except
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
+            return response.api_response(400, message="Empty request body.")
+        
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        if not user_id:
+            return response.api_response(401, message="Unauthorized: Missing authentication.")
+        user = db.query(User).filter_by(id=user_id).first()
+        if not user:
+            return response.api_response(404, message="User not found.")
+        # Fetch file and validate ownership
+        file = db.query(File).filter_by(id=file_id).first()
+        if not file or file.household_id != user.household_id:
+            return response.api_response(404, message="File not found.")
+        
+        # Apply updates
+        for field, value in body.items():
+            setattr(file, field, value)
+        
+        db.commit()
+        db.refresh(file)
+        db.close()
+        
+        return response.api_response(200, data=file.to_dict())
+    
+    except SQLAlchemyError as e:
+        logger.error("Database error occurred: %s", str(e))
+        return response.api_response(500, message="Database error occurred.")
+    
+    except Exception as e:
+        logger.exception("Unexpected error updating file metadata")
+        return response.api_response(500, message=str(e))
