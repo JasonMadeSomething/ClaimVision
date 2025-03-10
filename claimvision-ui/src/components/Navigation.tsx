@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { getCurrentUser, signOut } from '@aws-amplify/auth';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -11,13 +11,16 @@ import SignInForm from './SignInForm';
 import SignUpForm from './SignUpForm';
 
 export default function Navigation() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  // For development, set isAuthenticated to true by default
+  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [showSignIn, setShowSignIn] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
   const router = useRouter();
 
+  // Skip authentication check for development
   useEffect(() => {
-    checkAuthState();
+    // Development mode: Skip actual auth check
+    // checkAuthState();
   }, []);
 
   const checkAuthState = async () => {
@@ -25,25 +28,19 @@ export default function Navigation() {
       const user = await getCurrentUser();
       setIsAuthenticated(!!user);
     } catch (error) {
-      setIsAuthenticated(false);
+      // For development, keep authenticated even if there's an error
+      // setIsAuthenticated(false);
     }
   };
 
   const handleSignOut = async () => {
     try {
-      await signOut();
+      // For development, just set state without actual signout
+      // await signOut();
       setIsAuthenticated(false);
       router.push('/');
     } catch (error) {
       console.error('Error signing out:', error);
-    }
-  };
-
-  const handleClickOutside = (event: React.MouseEvent<HTMLDivElement>): void => {
-    const target = event.target as HTMLElement;
-    if (!target.closest('.menu-items')) {
-      setShowSignIn(false);
-      setShowSignUp(false);
     }
   };
 
@@ -59,6 +56,9 @@ export default function Navigation() {
             <>
               <Link href="/my-claims" className="text-white hover:text-gray-300">
                 My Claims
+              </Link>
+              <Link href="/workbench" className="text-white hover:text-gray-300">
+                Workbench
               </Link>
               <Menu as="div" className="relative">
                 <Menu.Button className="text-white hover:text-gray-300">
@@ -106,43 +106,13 @@ export default function Navigation() {
             <div className="space-x-4">
               <button
                 onClick={() => {
-                  setShowSignUp(false);
-                  setShowSignIn(!showSignIn);
+                  // For development, just set authenticated to true
+                  setIsAuthenticated(true);
                 }}
                 className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600"
               >
-                Sign In
+                Sign In (Dev Mode)
               </button>
-              <button
-                onClick={() => {
-                  setShowSignIn(false);
-                  setShowSignUp(!showSignUp);
-                }}
-                className="px-4 py-2 bg-green-500 rounded hover:bg-green-600"
-              >
-                Sign Up
-              </button>
-
-              <Menu as="div" className="relative inline-block" onClick={(event: React.MouseEvent<HTMLDivElement>) => handleClickOutside(event)}>
-                <Menu.Items
-                  static
-                  className={`${
-                    showSignIn || showSignUp ? 'block' : 'hidden'
-                  } absolute right-0 mt-2 w-80 origin-top-right bg-white rounded-md shadow-lg focus:outline-none`}
-                >
-                  {showSignIn && (
-                    <SignInForm onClose={() => {
-                      setShowSignIn(false);
-                      checkAuthState();
-                    }} />
-                  )}
-                  {showSignUp && (
-                    <SignUpForm onClose={() => {
-                      setShowSignUp(false);
-                    }} />
-                  )}
-                </Menu.Items>
-              </Menu>
             </div>
           )}
         </div>

@@ -1,36 +1,58 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ClaimVision - Modern Disaster Claims Organization Interface
+
+ClaimVision is a modern, intuitive disaster claims organization interface designed to help users sort and categorize photos of damaged property effortlessly. The UI is fluid, intuitive, and visually clean—more like a productivity tool than an insurance app.
+
+## Features
+
+- **Workbench Interface**: A primary workspace where users can freely organize their uploaded photos
+- **Drag-and-Drop Functionality**: Create items by stacking related photos together
+- **Room Organization**: Assign items to rooms for better organization and reduced clutter
+- **Hybrid Search Modes**: 
+  - "Find" mode removes non-matching photos from view
+  - "Highlight" mode keeps everything visible but fades out non-matching items
+- **AI Photo Labeling**: Automatically label and filter photos to help users quickly find related items
+- **Item Details Panel**: View and edit item information, including associated photos, descriptions, and replacement values
+- **Cached Photo Positioning**: Users don't lose their layout when switching views or filters
 
 ## Getting Started
 
 First, run the development server:
 
-```bash
+```powershell
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Project Structure
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `/src/components/Workbench`: Contains all the components for the workbench interface
+  - `WorkbenchLayout.tsx`: Main layout component for the workbench
+  - `PhotoGrid.tsx`: Displays and organizes photos with drag-and-drop functionality
+  - `ItemDetailsPanel.tsx`: Panel for viewing and editing item details
+  - `RoomSelector.tsx`: Component for selecting and managing rooms
+  - `SearchBar.tsx`: Search and filter functionality for photos
+  - `WorkbenchHeader.tsx`: Header component for the workbench
 
-## Learn More
+- `/src/types`: Contains TypeScript interfaces for the application
+  - `workbench.ts`: Types for photos, items, rooms, and search modes
 
-To learn more about Next.js, take a look at the following resources:
+## Backend Integration
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+The UI integrates with the ClaimVision backend API for:
+- Photo uploads and management
+- AI-powered label generation
+- Item and room organization
+- User authentication
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Technologies Used
 
-## Deploy on Vercel
+- Next.js 15
+- React 19
+- TailwindCSS
+- React DnD (for drag-and-drop functionality)
+- AWS Amplify (for authentication and API integration)
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Design Philosophy
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+ClaimVision's design prioritizes user experience, reducing manual input by leveraging AI to label and filter photos. The interface feels more like productivity software such as Notion or Trello, but optimized for visual organization. It avoids rigid forms, excessive modals, and enterprise-style UI clutter.
