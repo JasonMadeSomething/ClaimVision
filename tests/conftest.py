@@ -10,6 +10,7 @@ from sqlalchemy.orm import sessionmaker
 from testcontainers.postgres import (
     PostgresContainer,  # Optional if using Testcontainers
 )
+from sqlalchemy.orm import Session
 
 from models import Base, File, Household, User, Claim, Label
 from models.file import FileStatus
@@ -215,3 +216,35 @@ def seed_files(test_db):
     test_db.commit()
 
     return user_id, household_id, test_files
+
+@pytest.fixture
+def seed_file_with_labels(test_db: Session):
+    """Insert a test file with AI-generated and user-created labels."""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    file_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+
+    # ✅ Create Household, User, and Claim
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Lost Item")
+
+    # ✅ Create File
+    test_file = File(
+        id=file_id,
+        uploaded_by=user_id,
+        household_id=household_id,
+        claim_id=claim_id,  # ✅ Files must belong to a claim
+        file_name="test.jpg",
+        s3_key="test-key"
+    )
+
+    # ✅ Insert Labels
+    ai_label = Label(id=uuid.uuid4(), file_id=file_id, label_text="AI Label", is_ai_generated=True, deleted=False)
+    user_label = Label(id=uuid.uuid4(), file_id=file_id, label_text="User Label", is_ai_generated=False, deleted=False)
+
+    test_db.add_all([test_household, test_user, test_claim, test_file, ai_label, user_label])
+    test_db.commit()
+
+    return file_id, user_id, household_id
