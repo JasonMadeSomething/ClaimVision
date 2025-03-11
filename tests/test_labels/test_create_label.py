@@ -1,21 +1,25 @@
 import json
-import pytest
 import uuid
 from unittest.mock import patch
+
+import pytest
+from sqlalchemy.exc import SQLAlchemyError
+
 from labels.create_label import lambda_handler
 from models import Label
-from sqlalchemy.exc import SQLAlchemyError
+from models.file_labels import FileLabel
+
+
 def test_create_label_success(api_gateway_event, test_db, seed_file_with_labels):
-    """✅ Test adding a new user-created label."""
+    """✅ Test adding a new label to a file."""
     file_id, user_id, _ = seed_file_with_labels
-    payload = {"label_text": "New User Label"}
+    payload = {"labels": ["New Label"]}
 
     event = api_gateway_event("POST", path_params={"file_id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
     response = lambda_handler(event, {}, db_session=test_db)
-
     body = json.loads(response["body"])
+
     assert response["statusCode"] == 201
-    assert "labels_created" in body["data"]
     assert len(body["data"]["labels_created"]) == 1
 
 def test_create_multiple_labels(api_gateway_event, test_db, seed_file_with_labels):
@@ -84,12 +88,17 @@ def test_create_label_invalid_format(api_gateway_event, test_db, seed_file_with_
 
 def test_create_label_too_many(api_gateway_event, test_db, seed_file_with_labels):
     """❌ Test adding too many labels to a single file."""
-    file_id, user_id, _ = seed_file_with_labels
+    file_id, user_id, household_id = seed_file_with_labels
 
     # Add 50 labels (assuming 50 is the limit)
     for i in range(50):
-        label = Label(file_id=file_id, label_text=f"Label {i}", is_ai_generated=False)
+        label = Label(label_text=f"Existing Label {i}", is_ai_generated=False, household_id=household_id)
         test_db.add(label)
+        test_db.commit()  # Ensure label ID is generated before linking
+
+    # ✅ Associate label with the file
+        file_label = FileLabel(file_id=file_id, label_id=label.id)
+        test_db.add(file_label)
     test_db.commit()
 
     # Try adding one more label
@@ -101,12 +110,19 @@ def test_create_label_too_many(api_gateway_event, test_db, seed_file_with_labels
 
 def test_create_labels_exceeding_file_limit(api_gateway_event, test_db, seed_file_with_labels):
     """❌ Test adding labels that exceed the per-file limit."""
-    file_id, user_id, _ = seed_file_with_labels
+    file_id, user_id, household_id = seed_file_with_labels
 
     # Fill the file with max labels
     for i in range(50):
-        test_db.add(Label(file_id=file_id, label_text=f"Existing Label {i}", is_ai_generated=False))
+        label = Label(label_text=f"Existing Label {i}", is_ai_generated=False, household_id=household_id)
+        test_db.add(label)
+        test_db.commit()  # Ensure label ID is generated before linking
+
+    # ✅ Associate label with the file
+        file_label = FileLabel(file_id=file_id, label_id=label.id)
+        test_db.add(file_label)
     test_db.commit()
+
 
     # Try adding more labels
     payload = {"labels": ["Extra Label 1", "Extra Label 2"]}
@@ -147,8 +163,16 @@ def test_create_label_whitespace_handling(api_gateway_event, test_db, seed_file_
     event = api_gateway_event("POST", path_params={"file_id": str(file_id)}, body=json.dumps(payload), auth_user=str(user_id))
     response = lambda_handler(event, {}, db_session=test_db)
     assert response["statusCode"] == 201
-    stored_label = test_db.query(Label).filter(Label.file_id == file_id, Label.label_text == "Trimmed Label").first().label_text
-    assert stored_label == "Trimmed Label"  # Ensure stored value is trimmed
+    
+    stored_label = (
+        test_db.query(Label)
+        .join(FileLabel, FileLabel.label_id == Label.id)  # ✅ Join with FileLabel
+        .filter(FileLabel.file_id == file_id, Label.label_text == "Trimmed Label")
+        .first()
+    )
+    
+    assert stored_label is not None, "Label should exist in the database"
+    assert stored_label.label_text == "Trimmed Label"  # ✅ Ensure correct value
 
 def test_create_label_database_failure(api_gateway_event, test_db, seed_file_with_labels):
     """❌ Test handling a database failure when adding labels (should return 500)."""

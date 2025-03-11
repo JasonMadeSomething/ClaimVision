@@ -11,7 +11,8 @@ from testcontainers.postgres import (
     PostgresContainer,  # Optional if using Testcontainers
 )
 from sqlalchemy.orm import Session
-
+from models.file_labels import FileLabel
+from sqlalchemy import text
 from models import Base, File, Household, User, Claim, Label
 from models.file import FileStatus
 
@@ -44,6 +45,9 @@ def test_db():
 
     # ✅ Ensure tables are dropped and recreated before each test
     with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS file_labels CASCADE;"))  # ✅ Drop join table first
+        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))  # ✅ Drop labels next
+        conn.execute(text("DROP TABLE IF EXISTS files CASCADE;"))  # ✅ Now it's safe to drop files
         Base.metadata.drop_all(conn)
         Base.metadata.create_all(conn)
 
@@ -55,6 +59,9 @@ def test_db():
     session.rollback()
     session.close()
     with engine.begin() as conn:
+        conn.execute(text("DROP TABLE IF EXISTS file_labels CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS files CASCADE;"))
         Base.metadata.drop_all(conn)
     engine.dispose()
 # -----------------
@@ -241,10 +248,16 @@ def seed_file_with_labels(test_db: Session):
     )
 
     # ✅ Insert Labels
-    ai_label = Label(id=uuid.uuid4(), file_id=file_id, label_text="AI Label", is_ai_generated=True, deleted=False)
-    user_label = Label(id=uuid.uuid4(), file_id=file_id, label_text="User Label", is_ai_generated=False, deleted=False)
+    ai_label = Label(id=uuid.uuid4(), label_text="AI Label", is_ai_generated=True, deleted=False, household_id=household_id)
+    user_label = Label(id=uuid.uuid4(), label_text="User Label", is_ai_generated=False, deleted=False, household_id=household_id)
 
     test_db.add_all([test_household, test_user, test_claim, test_file, ai_label, user_label])
+    test_db.commit()
+
+    ai_file_label = FileLabel(file_id=test_file.id, label_id=ai_label.id)
+    user_file_label = FileLabel(file_id=test_file.id, label_id=user_label.id)
+
+    test_db.add_all([ai_file_label, user_file_label])
     test_db.commit()
 
     return file_id, user_id, household_id

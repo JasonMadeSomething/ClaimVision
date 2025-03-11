@@ -1,13 +1,16 @@
 import json
 import logging
-import uuid
 import re
+import uuid
+
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
-from sqlalchemy.exc import IntegrityError
-from models import File, Label, User
+
 from database.database import get_db_session
+from models import File, Label, User
+from models.file_labels import FileLabel
 from utils import response
-from sqlalchemy.exc import SQLAlchemyError
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
@@ -29,6 +32,10 @@ def lambda_handler(event, _context, db_session: Session = None):
         file_id: str = event.get("pathParameters", {}).get("file_id")
         if not file_id:
             return response.api_response(400, message="File ID is required.")
+
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            return response.api_response(404, message="User not found.")
 
         body = json.loads(event.get("body", "{}"))
 
@@ -57,14 +64,20 @@ def lambda_handler(event, _context, db_session: Session = None):
         # ✅ Enforce batch size limit
         if len(labels_to_add) > MAX_LABELS_PER_REQUEST:
             return response.api_response(400, message=f"Cannot add more than {MAX_LABELS_PER_REQUEST} labels at once.")
-
+        print("Labels to add:", labels_to_add)
         # ✅ Ensure file exists and user owns it
         file = db.query(File).filter(File.id == file_id).first()
         if not file or file.household_id != db.query(User.household_id).filter(User.id == user_id).scalar():
             return response.api_response(404, message="File not found.")
 
         # ✅ Check max label count
-        existing_label_count = db.query(Label).filter(Label.file_id == file_id).count()
+        existing_label_count = (
+            db.query(FileLabel)
+            .join(Label, Label.id == FileLabel.label_id)
+            .filter(FileLabel.file_id == file_id)
+            .count()
+        )
+        print("Existing label count:", existing_label_count)
         if existing_label_count + len(labels_to_add) > MAX_LABELS_PER_FILE:
             return response.api_response(400, message="Too many labels on this file.")
 
@@ -82,19 +95,27 @@ def lambda_handler(event, _context, db_session: Session = None):
                 continue
 
             # ✅ Check for duplicates before adding new labels
-            existing_label = db.query(Label).filter(
-                Label.file_id == file_id,
-                Label.label_text.ilike(label_text)  # Case-insensitive match
-            ).first()
-
+            existing_label = (
+                db.query(Label)
+                .join(FileLabel, FileLabel.label_id == Label.id)
+                .filter(FileLabel.file_id == file_id, Label.label_text.ilike(label_text))
+                .first()
+            )
             if existing_label:
                 failed_labels.append({"label_text": label_text, "reason": "Duplicate label."})
                 continue
-
+            print("Existing label:", existing_label)
             # ✅ Only add new labels
-            new_label = Label(id=uuid.uuid4(), file_id=file_id, label_text=label_text, is_ai_generated=False)
+            new_label = Label(label_text=label_text, is_ai_generated=False, household_id=user.household_id)
             db.add(new_label)
             created_labels.append(new_label)
+            try:
+                db.commit()  # ✅ Attempt DB commit
+            except (IntegrityError, SQLAlchemyError):
+                db.rollback()  # ✅ Ensure rollback
+                return response.api_response(500, message="Database error occurred.")
+            file_label = FileLabel(file_id=file_id, label_id=new_label.id)
+            db.add(file_label)
             try:
                 db.commit()  # ✅ Attempt DB commit
             except (IntegrityError, SQLAlchemyError):
