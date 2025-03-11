@@ -35,9 +35,9 @@ export default function SearchBar({
       
       <div className="flex space-x-2">
         <button
-          onClick={() => onModeChange("find")}
+          onClick={() => onModeChange(SearchMode.Find)}
           className={`flex items-center px-3 py-1.5 rounded-md text-xs ${
-            searchMode === "find"
+            searchMode === SearchMode.Find
               ? "bg-blue-100 text-blue-800"
               : "bg-gray-100 text-gray-700 hover:bg-gray-200"
           } transition-colors`}
@@ -46,9 +46,9 @@ export default function SearchBar({
           Find Mode
         </button>
         <button
-          onClick={() => onModeChange("highlight")}
+          onClick={() => onModeChange(SearchMode.Highlight)}
           className={`flex items-center px-3 py-1.5 rounded-md text-xs ${
-            searchMode === "highlight"
+            searchMode === SearchMode.Highlight
               ? "bg-blue-100 text-blue-800"
               : "bg-gray-100 text-gray-700 hover:bg-gray-200"
           } transition-colors`}
@@ -59,7 +59,7 @@ export default function SearchBar({
       </div>
       
       <div className="mt-2 text-xs text-gray-500">
-        {searchMode === "find" 
+        {searchMode === SearchMode.Find 
           ? "Find mode: Only matching photos are shown" 
           : "Highlight mode: All photos visible, matches highlighted"}
       </div>

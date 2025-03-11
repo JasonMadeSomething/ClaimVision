@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import { Photo, Item, Room } from "@/types/workbench";
+import { Photo, Item, Room, SearchMode } from "@/types/workbench";
 import { useSettingsStore } from "@/stores/settingsStore";
 import WorkbenchHeader from "./WorkbenchHeader";
 import PhotoGrid from "./PhotoGrid";
@@ -19,8 +19,8 @@ export default function WorkbenchLayout() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
-  const [searchMode, setSearchMode] = useState<"find" | "highlight">("highlight");
-  const [searchQuery, setSearchQuery] = useState("");
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.Highlight);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -31,7 +31,12 @@ export default function WorkbenchLayout() {
     const fetchData = async () => {
       try {
         setIsLoading(true);
-        // Mock data for now, will be replaced with actual API calls
+        
+        // Create a simple mock API implementation directly in the component
+        // This will be replaced with actual API calls in the future
+        console.log("Creating mock data...");
+        
+        // Mock photos data
         const mockPhotos: Photo[] = Array.from({ length: 20 }, (_, i) => ({
           id: `photo-${i}`,
           url: `https://source.unsplash.com/random/300x300?disaster&sig=${i}`,
@@ -42,7 +47,8 @@ export default function WorkbenchLayout() {
           roomId: i < 5 ? "room-1" : (i < 10 ? "room-2" : null),
           uploadedAt: new Date().toISOString(),
         }));
-
+        
+        // Mock items data
         const mockItems: Item[] = Array.from({ length: 5 }, (_, i) => ({
           id: `item-${i}`,
           name: `Item ${i + 1}`,
@@ -52,18 +58,26 @@ export default function WorkbenchLayout() {
           roomId: i < 2 ? "room-1" : (i < 4 ? "room-2" : null),
           replacementValue: Math.floor(Math.random() * 1000) + 100,
         }));
-
+        
+        // Mock rooms data
         const mockRooms: Room[] = [
           { id: "room-1", name: "Living Room", itemIds: ["item-0", "item-1"] },
           { id: "room-2", name: "Kitchen", itemIds: ["item-2", "item-3"] },
         ];
+        
+        console.log("Mock data created successfully");
 
+        // Set the state with the mock data
         setPhotos(mockPhotos);
         setItems(mockItems);
         setRooms(mockRooms);
       } catch (err) {
-        setError("Failed to load workbench data");
-        console.error(err);
+        console.error("Error in fetchData:", err);
+        if (err instanceof Error) {
+          setError(`Failed to load workbench data: ${err.message}`);
+        } else {
+          setError("Failed to load workbench data");
+        }
       } finally {
         setIsLoading(false);
       }
@@ -80,7 +94,7 @@ export default function WorkbenchLayout() {
       label.toLowerCase().includes(searchQuery.toLowerCase())
     );
     
-    if (searchMode === "find") {
+    if (searchMode === SearchMode.Find) {
       return matchesSearch;
     } else {
       // In highlight mode, we show all photos but will style them differently in the UI
@@ -148,6 +162,11 @@ export default function WorkbenchLayout() {
 
     // Update items state
     setItems(items.map(i => i.id === itemId ? updatedItem : i));
+
+    // Update the photo's itemId property
+    setPhotos(photos.map(photo => 
+      photo.id === photoId ? { ...photo, itemId: itemId } : photo
+    ));
 
     // If this was the selected item, update that too
     if (selectedItem?.id === itemId) {
@@ -289,16 +308,61 @@ export default function WorkbenchLayout() {
     }
   };
 
+  // Handle rearranging photos
+  const handleRearrangePhotos = (targetIndex: number, draggedIndex: number) => {
+    // Create a copy of the photos array
+    const newPhotos = [...photos];
+    // Get the photo at the dragged index
+    const draggedPhoto = newPhotos[draggedIndex];
+    // Remove the dragged photo from its original position
+    newPhotos.splice(draggedIndex, 1);
+    // Insert the dragged photo at the target position
+    newPhotos.splice(targetIndex, 0, draggedPhoto);
+    // Update the photos state
+    setPhotos(newPhotos);
+  };
+
+  // Handle rearranging items
+  const handleRearrangeItems = (targetIndex: number, draggedIndex: number) => {
+    // Create a copy of the items array
+    const newItems = [...items];
+    // Get the item at the dragged index
+    const draggedItem = newItems[draggedIndex];
+    // Remove the dragged item from its original position
+    newItems.splice(draggedIndex, 1);
+    // Insert the dragged item at the target position
+    newItems.splice(targetIndex, 0, draggedItem);
+    // Update the items state
+    setItems(newItems);
+  };
+
+  // Handle selecting an item
+  const handleSelectItem = (item: Item) => {
+    setSelectedItem(item);
+  };
+
+  // Toggle search mode between highlight and find
+  const toggleSearchMode = () => {
+    setSearchMode(mode => 
+      mode === SearchMode.Highlight ? SearchMode.Find : SearchMode.Highlight
+    );
+  };
+
+  const handleSearchChange = (searchQuery: string) => {
+    setSearchQuery(searchQuery);
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
-      <div className="flex flex-col h-screen bg-gray-50">
+      <div className="flex flex-col h-screen">
         <WorkbenchHeader 
           selectedRoom={selectedRoom}
           onBackToWorkbench={() => setSelectedRoom(null)}
           onCreateEmptyItem={handleCreateEmptyItem}
         />
         
-        <div className="flex-1 flex overflow-hidden">
+        <div className="flex flex-1 overflow-hidden">
+          {/* Sidebar */}
           <div className="w-64 bg-white border-r border-gray-200 p-4 overflow-y-auto">
             <RoomSelector 
               rooms={rooms}
@@ -307,55 +371,60 @@ export default function WorkbenchLayout() {
               onMovePhotoToRoom={handleMovePhotoToRoom}
               onMoveItemToRoom={handleMoveItemToRoom}
             />
-            <SearchBar 
-              searchQuery={searchQuery}
-              searchMode={searchMode}
-              onSearchChange={setSearchQuery}
-              onModeChange={setSearchMode}
-            />
+            <div className="mt-6">
+              <SearchBar 
+                searchQuery={searchQuery}
+                searchMode={searchMode}
+                onSearchChange={handleSearchChange}
+                onModeChange={toggleSearchMode}
+              />
+            </div>
           </div>
           
-          <div className="flex-1 relative">
-            <div className={`w-full p-4 overflow-auto ${selectedItem ? 'mr-96' : ''}`}>
-              {isLoading ? (
-                <div className="flex items-center justify-center h-full">
-                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
-                </div>
-              ) : error ? (
-                <div className="text-red-500 text-center">{error}</div>
-              ) : (
-                <PhotoGrid
-                  photos={visiblePhotos}
-                  items={visibleItems}
-                  searchQuery={searchQuery}
-                  searchMode={searchMode}
-                  selectedItem={selectedItem}
-                  onSelectItem={setSelectedItem}
-                  onCreateItem={handleCreateItem}
-                  onCreateEmptyItem={handleCreateEmptyItem}
-                  onAddPhotoToItem={handleAddPhotoToItem}
-                  detailsPanelOpen={!!selectedItem}
-                />
-              )}
-            </div>
-            
-            {selectedItem && (
-              <div className="fixed top-16 right-0 h-[calc(100vh-4rem)] z-10 max-w-sm">
-                <ItemDetailsPanel 
-                  item={selectedItem}
-                  photos={photos.filter(photo => selectedItem.photoIds.includes(photo.id))}
-                  onClose={() => setSelectedItem(null)}
-                  onUpdate={handleUpdateItem}
-                  onRemovePhoto={handleRemovePhotoFromItem}
-                  onChangeThumbnail={() => handleChangeThumbnail(selectedItem.id)}
-                  onMoveToRoom={handleMoveItemToRoomFromPanel}
-                  onAddPhoto={handleAddPhotoToItem}
-                  rooms={rooms}
-                />
+          {/* Main content area */}
+          <div className="flex-1 overflow-auto">
+            {isLoading ? (
+              <div className="flex items-center justify-center h-full">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
               </div>
+            ) : error ? (
+              <div className="text-red-500 text-center p-4">{error}</div>
+            ) : (
+              <PhotoGrid
+                photos={selectedRoom 
+                  ? photos.filter(photo => photo.roomId === selectedRoom.id)
+                  : photos}
+                items={selectedRoom 
+                  ? items.filter(item => item.roomId === selectedRoom.id)
+                  : items}
+                searchQuery={searchQuery}
+                searchMode={searchMode}
+                onCreateItem={handleCreateItem}
+                onRearrangePhotos={handleRearrangePhotos}
+                onRearrangeItems={handleRearrangeItems}
+                onAddPhotoToItem={handleAddPhotoToItem}
+                onSelectItem={handleSelectItem}
+              />
             )}
           </div>
         </div>
+        
+        {/* Item details panel */}
+        {selectedItem && (
+          <div className="fixed top-16 right-0 h-[calc(100vh-4rem)] z-10 max-w-sm">
+            <ItemDetailsPanel 
+              item={selectedItem}
+              photos={photos.filter(photo => selectedItem.photoIds.includes(photo.id))}
+              onClose={() => setSelectedItem(null)}
+              onUpdate={handleUpdateItem}
+              onRemovePhoto={handleRemovePhotoFromItem}
+              onChangeThumbnail={() => handleChangeThumbnail(selectedItem.id)}
+              onMoveToRoom={handleMoveItemToRoomFromPanel}
+              onAddPhoto={handleAddPhotoToItem}
+              rooms={rooms}
+            />
+          </div>
+        )}
       </div>
     </DndProvider>
   );

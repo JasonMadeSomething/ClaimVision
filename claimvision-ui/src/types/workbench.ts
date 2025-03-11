@@ -33,4 +33,9 @@ export interface DragItem {
   id: string;
 }
 
-export type SearchMode = 'find' | 'highlight';
+export enum SearchMode {
+  Find = 'find',
+  Highlight = 'highlight',
+  Filter = 'filter',
+  All = 'all'
+}

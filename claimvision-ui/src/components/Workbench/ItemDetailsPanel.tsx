@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { XMarkIcon, ArrowPathIcon, HomeIcon, ArrowsRightLeftIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon, ArrowPathIcon, HomeIcon, ArrowsRightLeftIcon, TagIcon } from "@heroicons/react/24/outline";
 import { Item, Photo, Room } from "@/types/workbench";
 
 interface ItemDetailsPanelProps {
@@ -11,19 +11,28 @@ interface ItemDetailsPanelProps {
   onRemovePhoto: (photoId: string) => void;
   onChangeThumbnail: () => void;
   onMoveToRoom: (roomId: string | null) => void;
+  onAddPhoto: (itemId: string, photoId: string) => void;
 }
 
 interface EditableFieldProps {
   value: string;
-  onSave: (value: string) => void;
+  onSave: (value: string) => void | Promise<void>;
   placeholder?: string;
   multiline?: boolean;
+  validate?: (value: string) => string | null;
+  'data-testid'?: string;
 }
 
-const EditableField = ({ value, onSave, placeholder, multiline }: EditableFieldProps) => {
+const EditableField = ({ value, onSave, placeholder, multiline, validate, 'data-testid': dataTestId }: EditableFieldProps) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState(value);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement | HTMLTextAreaElement>(null);
+
+  // Update editValue when value prop changes
+  useEffect(() => {
+    setEditValue(value);
+  }, [value]);
 
   useEffect(() => {
     if (isEditing && inputRef.current) {
@@ -31,50 +40,69 @@ const EditableField = ({ value, onSave, placeholder, multiline }: EditableFieldP
     }
   }, [isEditing]);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (editValue !== value) {
-      onSave(editValue);
-    }
-    setIsEditing(false);
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSave();
-    }
-    if (e.key === 'Escape') {
-      setEditValue(value);
+      const validationError = validate?.(editValue);
+      if (validationError) {
+        setError(validationError);
+        return;
+      }
+      setError(null);
+      try {
+        await onSave(editValue);
+        setIsEditing(false);
+      } catch (err) {
+        // Keep the edited value but show error in parent
+        return;
+      }
+    } else {
       setIsEditing(false);
     }
   };
 
-  if (isEditing) {
-    if (multiline) {
-      return (
-        <textarea
-          ref={inputRef as React.RefObject<HTMLTextAreaElement>}
-          value={editValue}
-          onChange={(e) => setEditValue(e.target.value)}
-          onBlur={handleSave}
-          onKeyDown={handleKeyDown}
-          className="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          rows={3}
-          placeholder={placeholder}
-        />
-      );
+  const handleKeyDown = async (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      await handleSave();
     }
+    if (e.key === 'Escape') {
+      setEditValue(value);
+      setError(null);
+      setIsEditing(false);
+    }
+  };
+
+  const commonProps = {
+    value: editValue,
+    onChange: (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+      setEditValue(e.target.value);
+      setError(null);
+    },
+    onBlur: handleSave,
+    onKeyDown: handleKeyDown,
+    className: `w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 ${error ? 'border-red-500' : ''}`,
+    placeholder,
+    'data-testid': `${dataTestId}-input`,
+  };
+
+  if (isEditing) {
     return (
-      <input
-        ref={inputRef as React.RefObject<HTMLInputElement>}
-        type="text"
-        value={editValue}
-        onChange={(e) => setEditValue(e.target.value)}
-        onBlur={handleSave}
-        onKeyDown={handleKeyDown}
-        className="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        placeholder={placeholder}
-      />
+      <div>
+        {multiline ? (
+          <textarea
+            ref={inputRef as React.RefObject<HTMLTextAreaElement>}
+            rows={3}
+            {...commonProps}
+          />
+        ) : (
+          <input
+            ref={inputRef as React.RefObject<HTMLInputElement>}
+            type="text"
+            {...commonProps}
+          />
+        )}
+        {error && <p className="text-red-500 text-sm mt-1">{error}</p>}
+      </div>
     );
   }
 
@@ -82,10 +110,29 @@ const EditableField = ({ value, onSave, placeholder, multiline }: EditableFieldP
     <div
       onClick={() => setIsEditing(true)}
       className="cursor-pointer p-2 rounded-md hover:bg-gray-100"
+      data-testid={dataTestId}
     >
-      {value || <span className="text-gray-400">{placeholder}</span>}
+      {editValue || <span className="text-gray-400">{placeholder}</span>}
     </div>
   );
+};
+
+const validateName = (value: string) => {
+  if (!value.trim()) {
+    return 'Name is required';
+  }
+  return null;
+};
+
+const validateValue = (value: string) => {
+  const numValue = Number(value);
+  if (isNaN(numValue)) {
+    return 'Value must be a number';
+  }
+  if (numValue < 0) {
+    return 'Value must be positive';
+  }
+  return null;
 };
 
 export default function ItemDetailsPanel({
@@ -96,16 +143,47 @@ export default function ItemDetailsPanel({
   onUpdate,
   onRemovePhoto,
   onChangeThumbnail,
-  onMoveToRoom
+  onMoveToRoom,
+  onAddPhoto,
 }: ItemDetailsPanelProps) {
-  const handleUpdateField = (field: keyof Item, value: any) => {
-    onUpdate({
-      ...item,
-      [field]: value,
-    });
+  const [error, setError] = useState<string | null>(null);
+  const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
+  const thumbnailPhoto = photos.find(p => p.id === item.thumbnailPhotoId);
+
+  // Collect all unique labels from photos
+  const allLabels = Array.from(
+    new Set(
+      photos.flatMap(photo => photo.labels || [])
+    )
+  ).sort();
+
+  // Filter photos based on selected labels
+  const filteredPhotos = selectedLabels.length > 0
+    ? photos.filter(photo => 
+        selectedLabels.some(label => photo.labels && photo.labels.includes(label))
+      )
+    : photos;
+
+  const handleUpdateField = async (field: keyof Item, value: any) => {
+    try {
+      await onUpdate({
+        ...item,
+        [field]: value,
+      });
+      setError(null);
+    } catch (err) {
+      setError('Failed to update item');
+      throw err; // Re-throw to let EditableField know the save failed
+    }
   };
 
-  const thumbnailPhoto = photos.find(p => p.id === item.thumbnailPhotoId);
+  const toggleLabel = (label: string) => {
+    setSelectedLabels(prev => 
+      prev.includes(label)
+        ? prev.filter(l => l !== label)
+        : [...prev, label]
+    );
+  };
 
   return (
     <div className="w-96 border-l border-gray-200 bg-white overflow-y-auto h-full shadow-lg">
@@ -116,6 +194,7 @@ export default function ItemDetailsPanel({
             onClick={onClose}
             className="p-1 rounded-full hover:bg-gray-100 transition-colors"
             aria-label="Close panel"
+            data-testid="close-button"
           >
             <XMarkIcon className="h-5 w-5 text-gray-500" />
           </button>
@@ -123,6 +202,12 @@ export default function ItemDetailsPanel({
       </div>
 
       <div className="p-4">
+        {error && (
+          <div className="mb-4 p-2 bg-red-100 text-red-700 rounded-md">
+            {error}
+          </div>
+        )}
+
         {/* Thumbnail section */}
         <div className="mb-6 relative">
           {thumbnailPhoto ? (
@@ -136,6 +221,7 @@ export default function ItemDetailsPanel({
                 onClick={onChangeThumbnail}
                 className="absolute bottom-2 right-2 p-2 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors"
                 aria-label="Change thumbnail"
+                data-testid="change-thumbnail-button"
               >
                 <ArrowPathIcon className="h-5 w-5 text-gray-700" />
               </button>
@@ -156,84 +242,140 @@ export default function ItemDetailsPanel({
             <EditableField
               value={item.name}
               onSave={(value) => handleUpdateField('name', value)}
-              placeholder="Enter a name"
+              placeholder="Enter item name"
+              validate={validateName}
+              data-testid="name-field"
             />
           </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Description
             </label>
             <EditableField
-              value={item.description}
+              value={item.description || ''}
               onSave={(value) => handleUpdateField('description', value)}
-              placeholder="Enter a description"
+              placeholder="Enter description"
               multiline
+              data-testid="description-field"
             />
           </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Replacement Value ($)
             </label>
             <EditableField
-              value={item.replacementValue.toString()}
-              onSave={(value) => handleUpdateField('replacementValue', parseFloat(value) || 0)}
-              placeholder="Enter a replacement value"
+              value={item.replacementValue?.toString() || ''}
+              onSave={(value) => handleUpdateField('replacementValue', Number(value))}
+              placeholder="Enter value"
+              validate={validateValue}
+              data-testid="value-field"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Room
+            </label>
+            <select
+              value={item.roomId || ''}
+              onChange={(e) => onMoveToRoom(e.target.value || null)}
+              className="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              data-testid="room-select"
+            >
+              <option value="">No Room</option>
+              {rooms.map((room) => (
+                <option key={room.id} value={room.id}>
+                  {room.name}
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
-        {/* Room assignment */}
-        <div className="mb-6">
-          <h4 className="text-sm font-medium text-gray-700 mb-2">Room Assignment</h4>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => onMoveToRoom(null)}
-              className={`flex items-center px-3 py-2 rounded-md text-sm ${
-                item.roomId === null
-                  ? "bg-blue-100 text-blue-800"
-                  : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-              } transition-colors`}
-            >
-              <HomeIcon className="h-4 w-4 mr-1" />
-              Workbench
-            </button>
-            {rooms.map((room) => (
-              <button
-                key={room.id}
-                onClick={() => onMoveToRoom(room.id)}
-                className={`flex items-center px-3 py-2 rounded-md text-sm ${
-                  item.roomId === room.id
-                    ? "bg-blue-100 text-blue-800"
-                    : "bg-gray-100 text-gray-700 hover:bg-gray-200"
-                } transition-colors`}
-              >
-                <ArrowsRightLeftIcon className="h-4 w-4 mr-1" />
-                {room.name}
-              </button>
-            ))}
+        {/* Labels section */}
+        {allLabels.length > 0 && (
+          <div className="mb-6">
+            <div className="flex items-center mb-2">
+              <TagIcon className="h-4 w-4 text-gray-700 mr-1" />
+              <h3 className="text-sm font-medium text-gray-700">Labels</h3>
+            </div>
+            <div className="flex flex-wrap gap-2" data-testid="labels-container">
+              {allLabels.map(label => (
+                <button
+                  key={label}
+                  onClick={() => toggleLabel(label)}
+                  className={`
+                    text-xs px-2 py-1 rounded-full
+                    ${selectedLabels.includes(label)
+                      ? 'bg-blue-500 text-white'
+                      : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
+                    transition-colors
+                  `}
+                  data-testid="label-button"
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Photos section */}
         <div>
-          <h4 className="text-sm font-medium text-gray-700 mb-2">Photos ({photos.length})</h4>
+          <h3 className="text-sm font-medium text-gray-700 mb-2">
+            Photos {selectedLabels.length > 0 && `(Filtered: ${selectedLabels.join(', ')})`}
+          </h3>
+          {selectedLabels.length > 0 && (
+            <button
+              onClick={() => setSelectedLabels([])}
+              className="text-xs text-blue-500 mb-2 hover:underline"
+              data-testid="clear-filters-button"
+            >
+              Clear filters
+            </button>
+          )}
           <div className="grid grid-cols-2 gap-2">
-            {photos.map((photo) => (
-              <div key={photo.id} className="relative group">
+            {filteredPhotos.map((photo) => (
+              <div 
+                key={photo.id} 
+                className="relative rounded-lg overflow-hidden"
+                data-testid="photo-item"
+              >
                 <img
                   src={photo.url}
                   alt={photo.fileName}
-                  className="w-full h-24 object-cover rounded-md"
+                  className="w-full h-24 object-cover"
                 />
-                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all duration-200 rounded-md">
-                  <button
-                    onClick={() => onRemovePhoto(photo.id)}
-                    className="absolute top-1 right-1 p-1 bg-white rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                    aria-label="Remove photo from item"
-                  >
-                    <XMarkIcon className="h-4 w-4 text-gray-700" />
-                  </button>
-                </div>
+                {photo.labels && photo.labels.length > 0 && (
+                  <div className="absolute bottom-0 left-0 right-0 bg-black/50 p-1">
+                    <div className="flex flex-wrap gap-1">
+                      {photo.labels.map((label, index) => (
+                        <span 
+                          key={index} 
+                          className={`
+                            text-xs px-1 py-0.5 rounded
+                            ${selectedLabels.includes(label) 
+                              ? 'bg-blue-500 text-white' 
+                              : 'bg-gray-500 text-white'}
+                          `}
+                          data-testid="photo-label"
+                        >
+                          {label}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                <button
+                  onClick={() => onRemovePhoto(photo.id)}
+                  className="absolute top-1 right-1 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors"
+                  aria-label="Remove photo"
+                  data-testid="remove-photo-button"
+                >
+                  <XMarkIcon className="h-4 w-4 text-gray-700" />
+                </button>
               </div>
             ))}
           </div>
