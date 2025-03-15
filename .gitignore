@@ -98,3 +98,7 @@ terraform/.terraform/terraform.tfstate
 terraform/.terraform/
 terraform/application/lambda/*.zip
 terraform/.terraform.lock.hcl
+
+# windsurf rules
+.windsurfrules
+.windsurfrules
