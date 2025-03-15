@@ -1,69 +1,49 @@
-import json
 import logging
-import uuid
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from models import Claim, User
-from database.database import get_db_session
+from utils.lambda_utils import standard_lambda_handler
+from models import Claim
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-def lambda_handler(event: dict, _context: dict, db_session=None) -> dict:
+@standard_lambda_handler(requires_auth=True)
+def lambda_handler(event: dict, context: dict = None, db_session=None, user=None) -> dict:
     """
     Handles retrieving all claims for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details.
-        _context (dict): Lambda execution context (unused).
+        context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
+        user (User): Authenticated user object (provided by decorator).
 
     Returns:
         dict: API response containing the list of claims or an error message.
     """
     try:
-        db = db_session if db_session else get_db_session()
-    except Exception as e:  # Catch DB connection failure early
-        logger.error("Database connection failed: %s", str(e))
-        return response.api_response(500, error_details="Database error: " + str(e))
-
-    try:
-        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
-        if not user_id:
-            return response.api_response(401, error_details="Unauthorized") 
-
-        try:
-            user_uuid = uuid.UUID(user_id)  # Ensure user ID is a UUID
-        except ValueError:
-            return response.api_response(400, error_details="Invalid user ID format. Expected UUID")
-
-        user = db.query(User).filter_by(id=user_uuid).first()
-        if not user:
-            return response.api_response(401, error_details="Unauthorized")
-
-        claims = db.query(Claim).filter_by(household_id=user.household_id).all()
-
-        claims_data = [
-            {
+        # Get all claims for the user's household
+        claims = db_session.query(Claim).filter_by(household_id=user.household_id).all()
+        
+        # Format claims for response
+        claims_data = []
+        for claim in claims:
+            claims_data.append({
                 "id": str(claim.id),
                 "title": claim.title,
-                "description": claim.description,
+                "description": claim.description or "",
                 "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d"),
-            }
-            for claim in claims
-        ]
-
-        return response.api_response(200, data={"results": claims_data}, success_message="Claims retrieved successfully")
-
+                "created_at": claim.created_at.isoformat() if hasattr(claim, 'created_at') else None,
+                "updated_at": claim.updated_at.isoformat() if hasattr(claim, 'updated_at') and claim.updated_at else None,
+                "household_id": str(claim.household_id)
+            })
+        
+        return response.api_response(200, data=claims_data)
+        
     except SQLAlchemyError as e:
-        logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, error_details="Database error: " + str(e))
+        logger.error("Database error: %s", str(e))
+        return response.api_response(500, error_details=f"Database error: {str(e)}")
     except Exception as e:
-        logger.error("Unexpected error: %s", str(e))
-        return response.api_response(500, error_details="An unexpected error occurred")
-
-    finally:
-        if db_session is None:
-            db.close()
+        logger.error("Error retrieving claims: %s", str(e))
+        return response.api_response(500, error_details=f"Error retrieving claims: {str(e)}")

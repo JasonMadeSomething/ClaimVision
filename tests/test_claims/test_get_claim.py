@@ -7,6 +7,7 @@ from models.claim import Claim
 from models.household import Household
 from models.user import User
 from datetime import datetime
+from sqlalchemy.exc import SQLAlchemyError
 
 def test_get_claim_success(test_db, api_gateway_event):
     """ Test retrieving a claim successfully by ID"""
@@ -99,22 +100,61 @@ def test_get_claim_unauthorized(test_db, api_gateway_event):
     assert response["statusCode"] == 404  # Security: Pretend it doesn't exist
     assert body["error_details"] == "Claim not found"
 
-def test_get_claim_invalid_id(api_gateway_event):
-    """ Test retrieving a claim with an invalid UUID"""
-    event = api_gateway_event(http_method="GET", path_params={"claim_id": "invalid-uuid"}, auth_user=str(uuid.uuid4()))
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
+@pytest.fixture
+def seed_test_user(test_db):
+    """Creates a household and a user for testing."""
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
 
-    assert response["statusCode"] == 400
-    assert "error_details" in body, "Expected 'error_details' in response body"
-    assert "Invalid claim ID" in body["error_details"] or "Invalid claim ID format" in body["error_details"]
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(
+        id=user_id,
+        email="test@example.com",
+        first_name="Test",
+        last_name="User",
+        household_id=household_id
+    )
+
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+
+    return household_id, user_id
+
+def test_get_claim_invalid_id(api_gateway_event, seed_test_user, test_db):
+    """ Test retrieving a claim with an invalid UUID"""
+    # Get the user ID from the fixture
+    household_id, user_id = seed_test_user
+    
+    # Use a completely invalid format for claim_id that will trigger the 400 error
+    event = api_gateway_event(http_method="GET", path_params={"claim_id": "abc"}, auth_user=str(user_id))
+    
+    # Call the lambda handler directly with the invalid UUID
+    response_obj = lambda_handler(event, {})
+    body = json.loads(response_obj["body"])
+    
+    # The extract_uuid_param function should return a 400 status code for invalid UUIDs
+    assert response_obj["statusCode"] == 400
+    assert "Invalid claim ID" in body["error_details"]
 
 def test_get_claim_db_failure(api_gateway_event):
     """ Test handling a database failure during claim retrieval"""
-    with patch("claims.get_claim.get_db_session", side_effect=Exception("DB Failure")):
-        event = api_gateway_event(http_method="GET", path_params={"claim_id": str(uuid.uuid4())}, auth_user=str(uuid.uuid4()))
+    # Create a valid UUID for the test
+    valid_uuid = str(uuid.uuid4())
+    
+    # We need to patch the database session after it's been created by the decorator
+    with patch("utils.lambda_utils.get_db_session") as mock_db:
+        # Configure the mock to raise an exception when used
+        mock_session = mock_db.return_value
+        mock_session.query.side_effect = SQLAlchemyError("Database error occurred")
+        
+        # Call the lambda handler with a valid UUID
+        event = api_gateway_event(
+            http_method="GET", 
+            path_params={"claim_id": valid_uuid}, 
+            auth_user=str(uuid.uuid4())
+        )
         response = lambda_handler(event, {})
         body = json.loads(response["body"])
-
+    
     assert response["statusCode"] == 500
-    assert "Internal Server Error" in body["message"]
+    assert "Database error" in body["error_details"]

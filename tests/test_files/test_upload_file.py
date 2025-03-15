@@ -315,6 +315,7 @@ def test_upload_database_failure(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user, test_claim])
     test_db.commit()
 
+    # Patch the upload_file module's get_db_session function to simulate a database error
     with patch("files.upload_file.get_db_session", side_effect=SQLAlchemyError("DB Failure")) as mock_db:
         valid_base64_data = base64.b64encode(b"dummydata").decode("utf-8")
         upload_payload = {"files": [{"file_name": "dbfail.jpg", "file_data": valid_base64_data}], "claim_id": str(test_claim.id)}
@@ -326,7 +327,7 @@ def test_upload_database_failure(test_db, api_gateway_event):
         mock_db.assert_called_once()
 
         assert response["statusCode"] == 500
-        assert "Internal Server Error" in body["message"]
+        assert "DB Failure" in body["error_details"]
 
 def test_upload_file_no_extension(test_db, api_gateway_event):
     """❌ Test uploading a file with no extension (should return 400 Bad Request)"""

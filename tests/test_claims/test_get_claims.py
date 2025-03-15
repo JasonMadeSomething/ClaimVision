@@ -7,6 +7,7 @@ from models.household import Household
 from claims.get_claims import lambda_handler
 from models.claim import Claim
 from models.user import User
+from sqlalchemy.exc import SQLAlchemyError
 
 def test_get_claims_success(test_db, api_gateway_event):
     """Test retrieving claims successfully using household ID from JWT"""
@@ -107,14 +108,19 @@ def test_get_claims_unauthorized(test_db, api_gateway_event):
 
 def test_get_claims_db_failure(api_gateway_event):
     """Test handling a database connection failure"""
-    event = api_gateway_event(http_method="GET", auth_user=str(uuid.uuid4()))
-    
-    with patch('claims.get_claims.get_db_session', side_effect=Exception("Database connection error")):
+    # We need to patch the database session after it's been created by the decorator
+    with patch("utils.lambda_utils.get_db_session") as mock_db:
+        # Configure the mock to raise an exception when used
+        mock_session = mock_db.return_value
+        mock_session.query.side_effect = SQLAlchemyError("Database error occurred")
+        
+        # Call the lambda handler
+        event = api_gateway_event(http_method="GET", auth_user=str(uuid.uuid4()))
         response = lambda_handler(event, {})
         body = json.loads(response["body"])
-        
-        assert response["statusCode"] == 500
-        assert "Database error" in body["error_details"]
+    
+    assert response["statusCode"] == 500
+    assert "Database error" in body["error_details"]
 
 
 def test_get_claims_invalid_jwt(api_gateway_event):

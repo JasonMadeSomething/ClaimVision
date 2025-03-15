@@ -1,82 +1,66 @@
-import json
 import logging
-import uuid
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from models import Claim, User
-from database.database import get_db_session
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from models import Claim
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-def lambda_handler(event: dict, _context: dict, db_session=None) -> dict:
+@standard_lambda_handler(requires_auth=True)
+def lambda_handler(event: dict, context: dict = None, db_session=None, user=None) -> dict:
     """
-    Handles retrieving a single claim by ID for the authenticated user's household.
+    Handles retrieving a claim by ID for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
-        _context (dict): Lambda execution context (unused).
+        context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
+        user (User): Authenticated user object (provided by decorator).
 
     Returns:
         dict: API response containing the claim details or an error message.
     """
+    # Extract claim ID from path parameters
+    success, result = extract_uuid_param(event, "claim_id")
+    if not success:
+        return result  # Return error response
+    
+    claim_id = result
+    
     try:
-        db = db_session if db_session else get_db_session()
-    except Exception as e:  # Catch DB connection failure immediately
-        logger.error("Database connection failed: %s", str(e))
-        return response.api_response(500, error_details=f"Database error: {str(e)}")
-
-    try:
-        logger.info("Received request for retrieving a single claim")
-
-        # Extract and validate claim ID before querying the database
-        claim_id = event.get("pathParameters", {}).get("claim_id")
-        if not claim_id:
-            return response.api_response(400, error_details="Missing claim ID in request")
-
-        try:
-            claim_uuid = uuid.UUID(claim_id)
-        except ValueError:
-            return response.api_response(400, error_details="Invalid claim ID format. Expected UUID")
-
-        # Extract and validate user ID
-        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
-        if not user_id:
-            return response.api_response(400, error_details="Invalid authentication. JWT missing or malformed")
-
-        try:
-            user_uuid = uuid.UUID(user_id)  # Ensure user ID is a UUID
-        except ValueError:
-            return response.api_response(400, error_details="Invalid user ID format. Expected UUID")
-
-        user = db.query(User).filter_by(id=user_uuid).first()
-        if not user:
-            return response.api_response(404, error_details="User not found")
-
-        claim = db.query(Claim).filter_by(id=claim_uuid).first()
-        if not claim or claim.household_id != user.household_id:
+        # Query the claim
+        claim = db_session.query(Claim).filter_by(id=claim_id).first()
+        
+        # Check if claim exists
+        if not claim:
             return response.api_response(404, error_details="Claim not found")
-
+        
+        # Check if user has access to the claim (belongs to their household)
+        if str(claim.household_id) != str(user.household_id):
+            # Return 404 for security reasons (don't reveal that the claim exists)
+            return response.api_response(404, error_details="Claim not found")
+        
+        # Prepare response
         claim_data = {
             "id": str(claim.id),
             "title": claim.title,
-            "description": claim.description,
+            "description": claim.description or "",
             "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d"),
+            "created_at": claim.created_at.isoformat() if hasattr(claim, 'created_at') else None,
+            "updated_at": claim.updated_at.isoformat() if hasattr(claim, 'updated_at') and claim.updated_at else None,
+            "household_id": str(claim.household_id)
         }
-
-        return response.api_response(200, data=claim_data, success_message="Claim retrieved successfully")
-
+        
+        return response.api_response(200, data=claim_data)
+        
     except SQLAlchemyError as e:
-        logger.error("Database error occurred: %s", str(e))
+        logger.error("Database error: %s", str(e))
         return response.api_response(500, error_details=f"Database error: {str(e)}")
-
     except Exception as e:
-        logger.exception("Unexpected error retrieving claim")
-        return response.api_response(500, error_details=f"Internal server error: {str(e)}")
+        logger.error("Error retrieving claim: %s", str(e))
+        return response.api_response(500, error_details=f"Error retrieving claim: {str(e)}")
 
-    finally:
-        if db_session is None:
-            db.close()
+    if db_session is None and 'db_session' in locals():
+        db_session.close()

@@ -43,19 +43,19 @@ def test_db():
     engine = create_engine(os.getenv("DATABASE_URL"))
     TestingSessionLocal = sessionmaker(bind=engine)
 
-    # ✅ Ensure tables are dropped and recreated before each test
+    # Ensure tables are dropped and recreated before each test
     with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS file_labels CASCADE;"))  # ✅ Drop join table first
-        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))  # ✅ Drop labels next
-        conn.execute(text("DROP TABLE IF EXISTS files CASCADE;"))  # ✅ Now it's safe to drop files
+        conn.execute(text("DROP TABLE IF EXISTS file_labels CASCADE;"))  # Drop join table first
+        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))  # Drop labels next
+        conn.execute(text("DROP TABLE IF EXISTS files CASCADE;"))  # Now it's safe to drop files
         Base.metadata.drop_all(conn)
         Base.metadata.create_all(conn)
 
     session = TestingSessionLocal()
 
-    yield session  # ✅ Provide session for the test
+    yield session  # Provide session for the test
 
-    # ✅ Teardown: Drop all tables after each test
+    # Teardown: Drop all tables after each test
     session.rollback()
     session.close()
     with engine.begin() as conn:
@@ -113,18 +113,18 @@ def auth_event():
 
 @pytest.fixture(scope="function", autouse=True)
 def mock_cognito():
-    """✅ Fully mock Cognito interactions for all tests."""
+    """Fully mock Cognito interactions for all tests."""
     with patch("boto3.client") as mock_boto_client:
         mock_cognito_client = MagicMock()
         mock_boto_client.return_value = mock_cognito_client
 
-        # ✅ Ensure a **unique** Cognito UserSub is generated per test
+        # Ensure a **unique** Cognito UserSub is generated per test
         def generate_unique_user_sub(*args, **kwargs):
-            return {"UserSub": str(uuid.uuid4())}  # ✅ Unique ID for each test
+            return {"UserSub": str(uuid.uuid4())}  # Unique ID for each test
 
-        mock_cognito_client.sign_up.side_effect = generate_unique_user_sub  # ✅ Apply dynamic user generation
+        mock_cognito_client.sign_up.side_effect = generate_unique_user_sub  # Apply dynamic user generation
 
-        # ✅ Assign exception classes directly, instead of using a nested class
+        # Assign exception classes directly, instead of using a nested class
         mock_cognito_client.exceptions = MagicMock()
         mock_cognito_client.exceptions.UsernameExistsException = type("UsernameExistsException", (Exception,), {})
         mock_cognito_client.exceptions.InvalidPasswordException = type("InvalidPasswordException", (Exception,), {})
@@ -134,13 +134,13 @@ def mock_cognito():
         mock_cognito_client.exceptions.TooManyRequestsException = type("TooManyRequestsException", (Exception,), {})
         mock_cognito_client.exceptions.UserNotConfirmedException = type("UserNotConfirmedException", (Exception,), {})
         mock_cognito_client.exceptions.PasswordResetRequiredException = type("PasswordResetRequiredException", (Exception,), {})
-        mock_cognito_client.exceptions.CodeMismatchException = type("CodeMismatchException", (Exception,), {})  # ✅ Assign properly
-        mock_cognito_client.exceptions.LimitExceededException = type("LimitExceededException", (Exception,), {})  # ✅ Assign properly
+        mock_cognito_client.exceptions.CodeMismatchException = type("CodeMismatchException", (Exception,), {})  # Assign properly
+        mock_cognito_client.exceptions.LimitExceededException = type("LimitExceededException", (Exception,), {})  # Assign properly
 
-        # ✅ Mock Attribute Updates (e.g., Household ID)
+        # Mock Attribute Updates (e.g., Household ID)
         mock_cognito_client.admin_update_user_attributes.return_value = {}
 
-        # ✅ Mock Cognito Login
+        # Mock Cognito Login
         mock_cognito_client.initiate_auth.return_value = {
             "AuthenticationResult": {
                 "AccessToken": "mock-access-token",
@@ -149,7 +149,7 @@ def mock_cognito():
             }
         }
 
-        yield mock_cognito_client  # ✅ Provide mock to all tests
+        yield mock_cognito_client  # Provide mock to all tests
 
         mock_cognito_client.reset_mock()
 
@@ -226,38 +226,82 @@ def seed_files(test_db):
 
 @pytest.fixture
 def seed_file_with_labels(test_db: Session):
-    """Insert a test file with AI-generated and user-created labels."""
+    """Insert a test file with AI-generated and user-created labels, ensuring uniqueness."""
+
     household_id = uuid.uuid4()
     user_id = uuid.uuid4()
     file_id = uuid.uuid4()
     claim_id = uuid.uuid4()
 
-    # ✅ Create Household, User, and Claim
+    # Create Household, User, and Claim
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
     test_claim = Claim(id=claim_id, household_id=household_id, title="Lost Item")
 
-    # ✅ Create File
+    # Create File
     test_file = File(
         id=file_id,
         uploaded_by=user_id,
         household_id=household_id,
-        claim_id=claim_id,  # ✅ Files must belong to a claim
+        claim_id=claim_id,  # Files must belong to a claim
         file_name="test.jpg",
-        s3_key="test-key"
+        s3_key="test-key",
+        file_hash="test_hash"
     )
 
-    # ✅ Insert Labels
+    # Insert Labels (Ensuring Unique Entries)
     ai_label = Label(id=uuid.uuid4(), label_text="AI Label", is_ai_generated=True, deleted=False, household_id=household_id)
     user_label = Label(id=uuid.uuid4(), label_text="User Label", is_ai_generated=False, deleted=False, household_id=household_id)
 
     test_db.add_all([test_household, test_user, test_claim, test_file, ai_label, user_label])
     test_db.commit()
 
-    ai_file_label = FileLabel(file_id=test_file.id, label_id=ai_label.id)
-    user_file_label = FileLabel(file_id=test_file.id, label_id=user_label.id)
+    # Link Labels to File
+    ai_file_label = FileLabel(file_id=file_id, label_id=ai_label.id)
+    user_file_label = FileLabel(file_id=file_id, label_id=user_label.id)
 
     test_db.add_all([ai_file_label, user_file_label])
     test_db.commit()
 
-    return file_id, user_id, household_id
+    return file_id, user_id, household_id, ai_label.id, user_label.id  # Include label IDs
+
+@pytest.fixture
+def seed_labels(test_db: Session):
+    """Insert a test file with labels for label deletion tests."""
+    
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    file_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+
+    # Create Household, User, and Claim
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
+
+    # Create File
+    test_file = File(
+        id=file_id,
+        uploaded_by=user_id,
+        household_id=household_id,
+        claim_id=claim_id,
+        file_name="test.jpg",
+        s3_key="test-key",
+        file_hash="test_hash"
+    )
+
+    # Insert Labels
+    ai_label = Label(id=uuid.uuid4(), label_text="AI Label", is_ai_generated=True, deleted=False, household_id=household_id)
+    user_label = Label(id=uuid.uuid4(), label_text="User Label", is_ai_generated=False, deleted=False, household_id=household_id)
+
+    test_db.add_all([test_household, test_user, test_claim, test_file, ai_label, user_label])
+    test_db.commit()
+
+    # Link Labels to File
+    ai_file_label = FileLabel(file_id=file_id, label_id=ai_label.id)
+    user_file_label = FileLabel(file_id=file_id, label_id=user_label.id)
+
+    test_db.add_all([ai_file_label, user_file_label])
+    test_db.commit()
+
+    return file_id, user_id, ai_label.id, user_label.id

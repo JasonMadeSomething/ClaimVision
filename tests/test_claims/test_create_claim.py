@@ -54,20 +54,26 @@ def test_create_claim_invalid_date_format(test_db, api_gateway_event):
     assert response["statusCode"] == 400
     assert "Invalid date format" in body["error_details"]
 
-def test_create_claim_dynamodb_failure(test_db, api_gateway_event):
-    """Test creating a claim when PostgreSQL fails"""
-    # Simulate DB failure
-    test_db.rollback()
-    test_db.close()
-
+def test_create_claim_database_failure(test_db, api_gateway_event):
+    """Test creating a claim when PostgreSQL connection fails"""
+    # Create a mock database session that raises an exception when queried
+    from unittest.mock import MagicMock
+    from sqlalchemy.exc import SQLAlchemyError
+    
+    # Create a mock session that raises an exception
+    mock_db = MagicMock()
+    mock_db.query.side_effect = SQLAlchemyError("Database connection error")
+    
+    # Use a valid event
     event = api_gateway_event(
         http_method="POST",
-        body={"title": "Lost Laptop", "date_of_loss": "2024-01-10", "household_id": str(uuid.uuid4())},
+        body={"title": "Lost Laptop", "date_of_loss": "2024-01-10"},
     )
-
-    response = lambda_handler(event, {})
+    
+    # Pass the mock session to the handler
+    response = lambda_handler(event, {}, db_session=mock_db)
     body = json.loads(response["body"])
-
+    
     assert response["statusCode"] == 500
     assert "Database error" in body["error_details"]
 

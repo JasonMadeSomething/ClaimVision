@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
 
 from files.get_file import lambda_handler
@@ -96,7 +96,7 @@ def test_get_file_invalid_uuid(api_gateway_event, test_db):
     assert response["statusCode"] == 400
     assert body["status"] == "Bad Request"
     assert "error_details" in body
-    assert "Invalid UUID format" in body["error_details"]
+    assert "Invalid id format. Expected UUID." in body["error_details"]
 
     # Test with invalid user UUID
     event = api_gateway_event(
@@ -108,10 +108,10 @@ def test_get_file_invalid_uuid(api_gateway_event, test_db):
     response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
 
-    assert response["statusCode"] == 400
-    assert body["status"] == "Bad Request"
+    assert response["statusCode"] == 401
+    assert body["status"] == "Unauthorized"
     assert "error_details" in body
-    assert "Invalid UUID format" in body["error_details"]
+    assert "Unauthorized" in body["error_details"]
 
 
 def test_get_file_unauthorized_access(api_gateway_event, test_db, seed_file):
@@ -170,20 +170,18 @@ def test_get_file_missing_parameters(api_gateway_event, test_db, seed_file):
     response = lambda_handler(event, {}, db_session=test_db)
     body = json.loads(response["body"])
     
-    # The lambda handler returns 500 when pathParameters is None
+    # The lambda handler returns 400 when pathParameters is None
     # because it tries to call .get("id") on None which causes an exception
-    assert response["statusCode"] == 500
-    assert body["status"] == "Internal Server Error"
+    assert response["statusCode"] == 400
+    assert body["status"] == "Bad Request"
     assert "error_details" in body
 
 
-@patch('files.get_file.get_db_session')
+@patch('utils.lambda_utils.get_db_session')
 def test_get_file_database_error(mock_get_db, api_gateway_event):
     """ Test database error handling"""
     # Mock the database session to raise an SQLAlchemyError
-    mock_session = MagicMock()
-    mock_session.query.side_effect = SQLAlchemyError("Database error")
-    mock_get_db.return_value = mock_session
+    mock_get_db.side_effect = SQLAlchemyError("Database error")
     
     # Create a test event
     user_id = uuid.uuid4()
@@ -200,5 +198,4 @@ def test_get_file_database_error(mock_get_db, api_gateway_event):
     
     assert response["statusCode"] == 500
     assert body["status"] == "Internal Server Error"
-    assert "error_details" in body
-    assert "Database error" in body["error_details"]
+    assert "Failed to establish database connection" in body["error_details"]

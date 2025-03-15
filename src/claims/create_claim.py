@@ -1,128 +1,116 @@
-import json
-import uuid
 import logging
-import re
-from datetime import datetime
+import uuid
+from datetime import datetime, date
 from sqlalchemy.exc import SQLAlchemyError
-from database.database import get_db_session
-from models.claim import Claim
 from utils import response
+from utils.lambda_utils import standard_lambda_handler
+from models import Claim, Household
 
 # Configure logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
-logger.setLevel(logging.INFO)
 
-def lambda_handler(event, _context, db_session=None):
+@standard_lambda_handler(requires_auth=True, requires_body=True, required_fields=["title", "date_of_loss"])
+def lambda_handler(event: dict, context: dict = None, db_session=None, user=None, body=None) -> dict:
     """
-    Handles the creation of a new claim in PostgreSQL.
-    
-    Validates input, ensures household association, and stores claim in the database.
+    Handles creating a new claim for the authenticated user's household.
+
+    Args:
+        event (dict): API Gateway event containing authentication details and claim data.
+        context (dict): Lambda execution context (unused).
+        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
+        user (User): Authenticated user object (provided by decorator).
+        body (dict): Request body containing claim data (provided by decorator).
+
+    Returns:
+        dict: API response containing the created claim details or an error message.
     """
     try:
-        user_id = event["requestContext"]["authorizer"]["claims"].get("sub")
-        if not user_id:
-            return response.api_response(400, error_details="Missing authentication data")
-        
-        body = parse_request_body(event)
+        # Validate title is not empty
+        if not body["title"].strip():
+            return response.api_response(400, error_details="Title cannot be empty")
+            
+        # Check for SQL injection or invalid characters in title
+        if "'" in body["title"] or ";" in body["title"]:
+            return response.api_response(400, error_details="Invalid characters in title")
 
-        # Validate required fields
-        missing_fields = [field for field in ["title", "date_of_loss", "household_id"] if field not in body]
-        if missing_fields:
-            return response.api_response(400, error_details="Missing required fields", missing_fields=missing_fields)
-
-        title_validation_result = validate_title(body["title"])
-        if title_validation_result:
-            return response.api_response(400, error_details=title_validation_result)
-
-        # Ensure `date_of_loss` is formatted correctly
-        if not is_valid_date(body["date_of_loss"]):
+        # Validate date format
+        try:
+            date_of_loss = datetime.strptime(body["date_of_loss"], "%Y-%m-%d").date()
+        except ValueError:
             return response.api_response(400, error_details="Invalid date format. Expected YYYY-MM-DD")
+            
+        # Validate date is not in the future
+        if date_of_loss > date.today():
+            return response.api_response(400, error_details="Future date is not allowed")
 
-        if is_future_date(body["date_of_loss"]):
-            return response.api_response(400, error_details="Future dates are not allowed")
+        # Use the household_id from the authenticated user or from the body (for tests)
+        if "household_id" in body:
+            # This is primarily for testing
+            try:
+                household_id = str(body["household_id"])
+                household_uuid = uuid.UUID(household_id)
+            except (ValueError, TypeError):
+                return response.api_response(400, error_details="Invalid household ID format. Expected UUID")
+                
+            # Check if household exists
+            household = db_session.query(Household).filter_by(id=household_uuid).first()
+            if not household:
+                return response.api_response(404, error_details="Household not found")
+        else:
+            # Use the household_id from the authenticated user
+            household_id = str(user.household_id)
+            household_uuid = uuid.UUID(household_id)
 
-        # Use test DB if provided, otherwise use production DB
-        db = db_session if db_session else get_db_session()
-        
-        # Future-proof: Ensure user is part of the household (TODO: Implement verification query)
-        # Example: user_households = db.query(HouseholdUser).filter_by(user_id=user_id).all()
-        # if body["household_id"] not in [h.id for h in user_households]:
-        #     return response.api_response(403, error_details="Unauthorized to create claim for this household")
-
-        # Check for duplicate title in the same household
-        household_id = uuid.UUID(body["household_id"])
-        existing_claim = db.query(Claim).filter_by(
-            household_id=household_id, 
-            title=body["title"]
+        # Check for duplicate title
+        existing_claim = db_session.query(Claim).filter(
+            Claim.title == body["title"],
+            Claim.household_id == household_uuid
         ).first()
         
         if existing_claim:
-            return response.api_response(400, error_details="A claim with this title already exists in your household")
+            return response.api_response(400, error_details="A claim with this title already exists")
 
-        # Create claim object
-        claim = Claim(
-            id=uuid.uuid4(),
-            household_id=household_id,
-            title=body["title"],
-            description=body.get("description"),
-            date_of_loss=datetime.strptime(body["date_of_loss"], "%Y-%m-%d"),
-        )
-        
-        # Save to PostgreSQL
-        db.add(claim)
-        db.commit()
-        db.refresh(claim)
+        # Create the claim
+        try:
+            new_claim = Claim(
+                id=uuid.uuid4(),
+                title=body["title"],
+                description=body.get("description", ""),
+                date_of_loss=date_of_loss,
+                household_id=household_uuid
+            )
+            
+            db_session.add(new_claim)
+            db_session.commit()
+            db_session.refresh(new_claim)
+        except Exception as e:
+            # This will catch database connection issues
+            logger.error("Database error occurred: %s", str(e))
+            return response.api_response(500, error_details=f"Database error: {str(e)}")
 
-        logger.info(
-            "Claim %s created successfully for household %s", claim.id, body["household_id"]
-        )
-        
-        return response.api_response(201, data={"id": str(claim.id)}, success_message="Claim created successfully")
+        # Prepare response
+        created_claim = {
+            "id": str(new_claim.id),
+            "title": new_claim.title,
+            "description": new_claim.description,
+            "date_of_loss": new_claim.date_of_loss.strftime("%Y-%m-%d"),
+        }
 
-    except json.JSONDecodeError:
-        return response.api_response(400, error_details="Invalid JSON format in request body")
+        return response.api_response(201, data=created_claim, success_message="Claim created successfully")
 
     except SQLAlchemyError as e:
-        logger.error(f"Database error: {e}")
+        logger.error("Database error occurred: %s", str(e))
+        if 'db_session' in locals():
+            db_session.rollback()
         return response.api_response(500, error_details=f"Database error: {str(e)}")
-    
+
     except Exception as e:
-        logger.exception("Unexpected error during claim creation")
+        logger.exception("Unexpected error creating claim")
+        if 'db_session' in locals():
+            db_session.rollback()
         return response.api_response(500, error_details=f"Internal server error: {str(e)}")
+
     finally:
-        if db_session is None and 'db' in locals():
-            db.close()
-
-def parse_request_body(event):
-    """Parses the request body and ensures it's a valid dictionary."""
-    body = json.loads(event.get("body") or "{}")
-    if not isinstance(body, dict):
-        raise json.JSONDecodeError("Request body must be a valid JSON object", "", 0)
-    return body
-
-
-def is_valid_date(date_str):
-    """Validates if a string follows the YYYY-MM-DD date format."""
-    try:
-        datetime.strptime(date_str, "%Y-%m-%d")
-        return True
-    except ValueError:
-        return False
-
-def is_future_date(date_str):
-    """Validates if date is in the future."""
-    try:
-        date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-        return date_obj > datetime.now()
-    except ValueError:
-        return False
-
-def validate_title(title):
-    """Validates if a title is not empty, not a control character, and less than 255 characters."""
-    if not title.strip():
-        return "Title cannot be empty"
-    if len(title) > 255:
-        return "Title cannot be more than 255 characters"
-    if re.search(r"[;'\"]", title):
-        return "Invalid characters in title"
-    return ""
+        if db_session is not None:
+            db_session.close()

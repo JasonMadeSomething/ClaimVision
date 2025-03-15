@@ -1,6 +1,6 @@
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from unittest.mock import patch
 from claims.update_claim import lambda_handler
 from models.claim import Claim
@@ -163,14 +163,33 @@ def test_update_claim_invalid_id(test_db, api_gateway_event):
     body = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert "Invalid claim ID format" in body["error_details"]
+    assert "Invalid claim ID" in body["error_details"]
 
-def test_update_claim_invalid_fields(api_gateway_event):
+def test_update_claim_invalid_fields(test_db, api_gateway_event):
     """ Test updating a claim with invalid fields"""
+    # Create a test household, user, and claim first
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(
+        id=claim_id,
+        title="Test Claim",
+        description="Test Description",
+        date_of_loss=date.today(),
+        household_id=household_id
+    )
+    
+    test_db.add_all([test_household, test_user, test_claim])
+    test_db.commit()
+    
+    # Now try to update with invalid fields
     event = api_gateway_event(
         http_method="PUT",
-        path_params={"claim_id": str(uuid.uuid4())},
-        auth_user=str(uuid.uuid4()),
+        path_params={"claim_id": str(claim_id)},
+        auth_user=str(user_id),
         body={"invalid_field": "Bad Data"},
     )
     response = lambda_handler(event, {})
@@ -183,7 +202,7 @@ def test_update_claim_invalid_fields(api_gateway_event):
 def test_update_claim_db_failure(api_gateway_event):
     """ Test handling a database failure during claim update"""
     with patch(
-        "claims.update_claim.get_db_session", side_effect=Exception("DB Failure")
+        "utils.lambda_utils.get_db_session", side_effect=Exception("DB Failure")
     ):
         event = api_gateway_event(
             http_method="PUT",
@@ -195,7 +214,7 @@ def test_update_claim_db_failure(api_gateway_event):
         body = json.loads(response["body"])
 
     assert response["statusCode"] == 500
-    assert "Internal Server Error" in body["error_details"]
+    assert "DB Failure" in body["error_details"]
 
 def test_update_claim_no_future_date(test_db, api_gateway_event):
     """ Test that claim date of loss cannot be set to a future date"""
@@ -217,4 +236,4 @@ def test_update_claim_no_future_date(test_db, api_gateway_event):
     body = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert "Date of loss cannot be in the future" in body["error_details"]
+    assert "Future date is not allowed" in body["error_details"]

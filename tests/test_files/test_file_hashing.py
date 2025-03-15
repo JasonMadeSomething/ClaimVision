@@ -90,10 +90,13 @@ def test_replace_file_updates_hash(api_gateway_event, test_db, seed_household_us
     assert file.file_hash == old_file_hash
 
     # Replace the file with new data
-    replace_payload = {"file_name": "replace.jpg", "file_data": base64.b64encode(new_file_data).decode("utf-8"),
-                       "claim_id": str(claim_id)}
+    replace_payload = {"file_name": "replace.jpg", "file_data": base64.b64encode(new_file_data).decode("utf-8")}
     event = api_gateway_event(http_method="PUT", path_params={"id": str(file_id)}, body=json.dumps(replace_payload), auth_user=str(user_id))
-    response = replace_handler(event, {}, db_session=test_db)
+    
+    # Use the patch to avoid actual S3 uploads during testing
+    from unittest.mock import patch
+    with patch("files.replace_file.upload_to_s3"):
+        response = replace_handler(event, {}, db_session=test_db)
 
     assert response["statusCode"] == 200
     updated_file = test_db.query(File).filter_by(id=file_id).first()

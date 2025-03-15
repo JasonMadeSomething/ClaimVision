@@ -1,74 +1,64 @@
 import logging
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
-from botocore.exceptions import BotoCoreError, ClientError
-from database.database import get_db_session
-from models import File, User
+from models import File
 from utils import response
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
+@standard_lambda_handler(requires_auth=True)
+def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None) -> dict:
     """
     Handles deleting a file from both AWS S3 and PostgreSQL.
 
     This function:
     1. Ensures the file exists and belongs to the user's household.
-    2. If the file is attached to a claim, marks it as `deleted=True` (soft delete).
-    3. If the file is not attached to a claim, returns 400 (files must be claim-related).
-    4. Deletes the file from S3.
-    5. Returns a 204 response if successful.
+    2. Performs a soft delete by updating the file status rather than removing the record.
+    3. Returns a success response with the deleted file's details.
 
     Args:
         event (dict): API Gateway event containing authentication details and file ID.
-        _context (dict): Lambda execution context (unused).
-        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
+        context/_context (dict): Lambda execution context (unused).
+        db_session (Session, optional): Database session for testing.
+        user (User): Authenticated user object (provided by decorator).
 
     Returns:
-        dict: API response confirming deletion or an error message.
+        dict: API response with deleted file details or error.
     """
-    db = db_session if db_session else get_db_session()
+    # Extract and validate file ID
+    success, result = extract_uuid_param(event, "id")
+    if not success:
+        return result  # Return error response
+        
+    file_id = result
+    
+    # Retrieve the file, ensuring it belongs to user's household
+    file_data = db_session.query(File).filter(
+        File.id == file_id,
+        File.household_id == user.household_id
+    ).first()
 
+    if not file_data:
+        return response.api_response(404, error_details="File not found")
+    
+    # Check if file is attached to a claim
+    if file_data.claim_id is None:
+        return response.api_response(400, error_details="Files must be attached to a claim")
+    
+    # Perform soft delete
     try:
-        # ✅ Step 1: Get user ID from JWT claims
-        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
-        file_id = event.get("pathParameters", {}).get("id")
-
-        if not file_id:
-            return response.api_response(400, error_details="Missing file ID in request.")
-
-        # ✅ Step 2: Fetch file metadata
-        file = db.query(File).filter_by(id=file_id).first()
-
-        if not file:
-            return response.api_response(404, error_details="File not found.")
-
-        # ✅ Step 3: Ensure the user belongs to the file’s household
-        user = db.query(User).filter_by(id=user_id).first()
-        if not user or file.household_id != user.household_id:
-            return response.api_response(404, error_details="File not found.")
-
-        # ✅ Step 4: Handle claim-related deletion logic
-        if file.claim_id:
-            # 🔄 Soft delete (mark as `deleted=True`) if the file is attached to a claim
-            file.deleted = True
-            file.deleted_at = datetime.now(timezone.utc)
-            db.commit()
-            return response.api_response(204, success_message="File marked as deleted.")
-        else:
-            # 🚨 If no claim is attached, return 400 (files must be part of a claim)
-            return response.api_response(400, error_details="Files must be attached to a claim.")
-
+        file_data.deleted = True
+        file_data.deleted_at = datetime.now(timezone.utc)
+        file_data.updated_at = datetime.now(timezone.utc)
+        db_session.commit()
+        
+        # Return a 204 No Content response for successful deletion
+        return response.api_response(204)
+        
     except SQLAlchemyError as e:
-        logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, error_details="Database error occurred.")
-
-    except Exception as e:
-        logger.exception("Unexpected error deleting file")
-        return response.api_response(500, error_details=str(e))
-
-    finally:
-        db.close()
+        logger.error(f"Database error deleting file: {str(e)}")
+        db_session.rollback()
+        return response.api_response(500, error_details="Failed to delete file")

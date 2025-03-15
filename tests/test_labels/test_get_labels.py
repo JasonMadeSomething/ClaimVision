@@ -10,7 +10,7 @@ from models.file_labels import FileLabel
 
 def test_get_labels_success(api_gateway_event, test_db, seed_file_with_labels):
     """✅ Test retrieving all labels for a file."""
-    file_id, user_id, _ = seed_file_with_labels
+    file_id, user_id, _, _, _ = seed_file_with_labels
     event = api_gateway_event("GET", path_params={"file_id": str(file_id)}, auth_user=str(user_id))
 
     response = lambda_handler(event, {}, db_session=test_db)
@@ -30,7 +30,7 @@ def test_get_labels_file_not_found(api_gateway_event, test_db):
 
 def test_get_labels_unauthorized(api_gateway_event, test_db, seed_file_with_labels):
     """❌ Test retrieving labels for a file the user does not have access to."""
-    file_id, _, _ = seed_file_with_labels  # ✅ File exists, but the user doesn't belong to the household
+    file_id, _, _, _, _ = seed_file_with_labels  # ✅ File exists, but the user doesn't belong to the household
     unauthorized_user_id = str(uuid.uuid4())
 
     event = api_gateway_event("GET", path_params={"file_id": str(file_id)}, auth_user=unauthorized_user_id)
@@ -60,7 +60,7 @@ def test_get_labels_empty(api_gateway_event, test_db):
 
 def test_get_labels_database_failure(api_gateway_event, test_db, seed_file_with_labels):
     """❌ Test handling a database failure when retrieving labels."""
-    file_id, user_id, _ = seed_file_with_labels
+    file_id, user_id, _, _, _ = seed_file_with_labels
 
     with patch.object(test_db, "query", side_effect=SQLAlchemyError("DB Failure")):
         event = api_gateway_event("GET", path_params={"file_id": str(file_id)}, auth_user=str(user_id))
@@ -71,7 +71,7 @@ def test_get_labels_database_failure(api_gateway_event, test_db, seed_file_with_
 def test_get_labels_excludes_soft_deleted_ai_labels(api_gateway_event, test_db, seed_file_with_labels):
     """❌ Test that soft-deleted AI labels are not returned in get labels response."""
     
-    file_id, user_id, household_id = seed_file_with_labels
+    file_id, user_id, household_id, _, _ = seed_file_with_labels
 
     # ✅ Create labels: One AI (soft deleted), One User (should always show)
     ai_label = Label(

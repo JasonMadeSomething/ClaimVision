@@ -1,118 +1,105 @@
-import json
 import logging
-import uuid
-import datetime
-from sqlalchemy.orm import Session
+from datetime import datetime, date
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from models import Claim, User
-from database.database import get_db_session
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from models import Claim
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger()
 
-
-def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
+@standard_lambda_handler(requires_auth=True, requires_body=True)
+def lambda_handler(event: dict, context: dict = None, db_session=None, user=None, body=None) -> dict:
     """
-    Handles updating a claim for the authenticated user's household.
+    Handles updating a claim by ID for the authenticated user's household.
 
     Args:
-        event (dict): API Gateway event containing authentication details, claim ID, and update data
-        _context (dict): Lambda execution context (unused).
+        event (dict): API Gateway event containing authentication details and claim ID.
+        context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
+        user (User): Authenticated user object (provided by decorator).
+        body (dict): Request body containing updated claim data (provided by decorator).
 
     Returns:
         dict: API response containing the updated claim details or an error message.
     """
+    # Extract claim ID from path parameters
+    success, result = extract_uuid_param(event, "claim_id")
+    if not success:
+        return result  # Return error response
     
-
+    claim_id = result
+    
     try:
-        db = db_session if db_session else get_db_session()
-        logger.info("Received request for updating a claim")
-
-
-        claim_id = event.get("pathParameters", {}).get("claim_id")
-        if not claim_id:
-            return response.api_response(
-                400, error_details="Missing required parameter: claim_id"
-            )
-        # Extract update data
-        body = json.loads(event.get("body", "{}"))
-        allowed_fields = {"title", "description", "date_of_loss"}
-        invalid_fields = set(body.keys()) - allowed_fields
+        # Query the claim
+        claim = db_session.query(Claim).filter_by(id=claim_id).first()
+        
+        # Check if claim exists
+        if not claim:
+            return response.api_response(404, error_details="Claim not found")
+        
+        # Check if user has access to the claim (belongs to their household)
+        if str(claim.household_id) != str(user.household_id):
+            # Return 404 for security reasons (don't reveal that the claim exists)
+            return response.api_response(404, error_details="Claim not found")
+        
+        # Validate that only allowed fields are being updated
+        allowed_fields = ["title", "description", "date_of_loss"]
+        invalid_fields = [field for field in body.keys() if field not in allowed_fields]
         if invalid_fields:
             return response.api_response(400, error_details="Invalid update fields")
-
-        # Extract user information from JWT claims
-        user_id = (
-            event.get("requestContext", {})
-            .get("authorizer", {})
-            .get("claims", {})
-            .get("sub")
-        )
-        if not user_id:
-            return response.api_response(
-                401, error_details="Unauthorized"
-            )
-
-        try:
-            user_uuid = uuid.UUID(user_id)  # Ensure user ID is a UUID
-        except ValueError:
-            return response.api_response(
-                400, error_details="Invalid user ID format. Expected UUID"
-            )
-
+            
+        # Validate fields
+        if "title" in body and not body["title"].strip():
+            return response.api_response(400, error_details="Title cannot be empty")
         
-        user = db.query(User).filter_by(id=user_uuid).first()
-        if not user:
-            return response.api_response(404, error_details="User not found")
-
-        # Extract claim ID from path parameters
+        # Check for SQL injection or invalid characters in title
+        if "title" in body and ("'" in body["title"] or ";" in body["title"]):
+            return response.api_response(400, error_details="Invalid characters in title")
+            
+        # Validate date format if provided
+        if "date_of_loss" in body:
+            try:
+                date_of_loss = datetime.strptime(body["date_of_loss"], "%Y-%m-%d").date()
+                
+                # Validate date is not in the future
+                if date_of_loss > date.today():
+                    return response.api_response(400, error_details="Future date is not allowed")
+                    
+                claim.date_of_loss = date_of_loss
+            except ValueError:
+                return response.api_response(400, error_details="Invalid date format. Expected YYYY-MM-DD")
         
-
-        try:
-            claim_uuid = uuid.UUID(claim_id)
-        except ValueError:
-            return response.api_response(
-                400, error_details="Invalid claim ID format. Expected UUID"
-            )
-
-        claim = db.query(Claim).filter_by(id=claim_uuid).first()
-        if not claim or claim.household_id != user.household_id:
-            return response.api_response(404, error_details="Claim not found")
-
+        # Update fields if provided
+        if "title" in body:
+            claim.title = body["title"]
+            
+        if "description" in body:
+            claim.description = body["description"]
+            
+        # Update the claim
+        if hasattr(claim, 'updated_at'):
+            claim.updated_at = datetime.now()
+        db_session.commit()
+        db_session.refresh(claim)
         
-
-        # Apply updates
-        for field, value in body.items():
-            if field == "date_of_loss":
-                try:
-                    value = datetime.datetime.strptime(value, "%Y-%m-%d").date()
-                    if value > datetime.date.today():  # Prevent future dates
-                        return response.api_response(400, error_details="Date of loss cannot be in the future")
-                except ValueError:
-                    return response.api_response(
-                        400, error_details="Invalid date format. Expected YYYY-MM-DD"
-                    )
-            setattr(claim, field, value)
-
-        db.commit()
-        db.refresh(claim)
-        
-        claim_data = {
+        # Prepare response
+        updated_claim = {
             "id": str(claim.id),
             "title": claim.title,
-            "description": claim.description,
+            "description": claim.description or "",
             "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d"),
+            "created_at": claim.created_at.isoformat() if hasattr(claim, 'created_at') else None,
+            "updated_at": claim.updated_at.isoformat() if hasattr(claim, 'updated_at') and claim.updated_at else None,
+            "household_id": str(claim.household_id)
         }
-
-        return response.api_response(200, data=claim_data, success_message="Claim updated successfully")
-
+        
+        return response.api_response(200, data=updated_claim, success_message="Claim updated successfully")
+        
     except SQLAlchemyError as e:
-        logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, error_details="Internal Server Error")
-
+        logger.error("Database error: %s", str(e))
+        return response.api_response(500, error_details=f"Database error: {str(e)}")
     except Exception as e:
-        logger.exception("Unexpected error updating claim")
-        return response.api_response(500, error_details="Internal Server Error")
+        logger.error("Error updating claim: %s", str(e))
+        return response.api_response(500, error_details=f"Error updating claim: {str(e)}")
