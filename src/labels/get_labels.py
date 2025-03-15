@@ -10,13 +10,13 @@ Example Usage:
 
 import json
 import logging
-import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from models import Label, File, User
+from models import Label, File
 from models.file_labels import FileLabel
 from database.database import get_db_session
 from utils import response
+from utils import auth_utils
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -53,38 +53,42 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         return response.api_response(500, message="Database error: " + str(e))
 
     try:
-        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
-        if not user_id:
-            return response.api_response(400, message="Invalid authentication. JWT missing or malformed.")
+        # Extract and validate user ID
+        success, result = auth_utils.extract_user_id(event)
+        if not success:
+            return result  # Return error response
+        
+        user_id = result
+        
+        # Extract and validate file ID
+        success, result = auth_utils.extract_resource_id(event, "file_id")
+        if not success:
+            return result  # Return error response
+            
+        file_id = result
 
-        try:
-            user_uuid = uuid.UUID(user_id)  # Ensure user ID is a UUID
-        except ValueError:
-            return response.api_response(400, message="Invalid user ID format. Expected UUID.")
-
-        file_id = event.get("pathParameters", {}).get("file_id")
-        if not file_id:
-            return response.api_response(400, message="Missing file ID in request.")
-
-        try:
-            file_uuid = uuid.UUID(file_id)  # Ensure file ID is a valid UUID
-        except ValueError:
-            return response.api_response(400, message="Invalid file ID format. Expected UUID.")
-
-        # ✅ Step 1: Retrieve file and check household ownership
-        file = db.query(File).filter(File.id == file_uuid).first()
+        # Step 1: Retrieve file
+        file = db.query(File).filter(File.id == file_id).first()
         if not file:
             return response.api_response(404, message="File not found.")
 
-        user = db.query(User).filter(User.id == user_uuid).first()
-        if not user or user.household_id != file.household_id:
-            return response.api_response(404, message="File not found.")  # ✅ Prevents leaking existence
+        # Get authenticated user and check authorization
+        success, result = auth_utils.get_authenticated_user(db, user_id)
+        if not success:
+            return result  # Return error response
+            
+        user = result
+        
+        # Check if user has access to the file's household
+        success, error_response = auth_utils.check_resource_access(user, file.household_id)
+        if not success:
+            return error_response
 
-        # ✅ Step 2: Retrieve labels (including soft-deleted AI ones)
+        # Step 2: Retrieve labels (including soft-deleted AI ones)
         labels = (
             db.query(Label)
             .join(FileLabel, FileLabel.label_id == Label.id)
-            .filter(FileLabel.file_id == file_uuid)
+            .filter(FileLabel.file_id == file_id)
             .filter(Label.household_id == user.household_id)
             .filter(
                 (Label.is_ai_generated.is_(False))  # User-created labels always appear
