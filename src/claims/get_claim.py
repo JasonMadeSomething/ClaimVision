@@ -1,24 +1,26 @@
+"""
+Lambda handler for retrieving a claim and its associated data.
+
+This module handles the retrieval of claim details from the ClaimVision system,
+ensuring proper authorization and data access.
+"""
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
-from utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
 
-
-# Configure logging
-logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context: dict = None, db_session=None, user=None) -> dict:
+def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
     Handles retrieving a claim by ID for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
-        context (dict): Lambda execution context (unused).
+        _context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
         user (User): Authenticated user object (provided by decorator).
 
@@ -45,22 +47,27 @@ def lambda_handler(event: dict, context: dict = None, db_session=None, user=None
             # Return 404 for security reasons (don't reveal that the claim exists)
             return response.api_response(404, error_details="Claim not found")
         
-        # Prepare response
+        # Convert claim to dictionary for response
         claim_data = {
             "id": str(claim.id),
+            "household_id": str(claim.household_id),
             "title": claim.title,
             "description": claim.description or "",
-            "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d"),
-            "created_at": claim.created_at.isoformat() if hasattr(claim, 'created_at') else None,
-            "updated_at": claim.updated_at.isoformat() if hasattr(claim, 'updated_at') and claim.updated_at else None,
-            "household_id": str(claim.household_id)
+            "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d") if claim.date_of_loss else None
         }
+        
+        # Add created_at and updated_at if they exist
+        if hasattr(claim, 'created_at') and claim.created_at:
+            claim_data["created_at"] = claim.created_at.isoformat()
+        
+        if hasattr(claim, 'updated_at') and claim.updated_at:
+            claim_data["updated_at"] = claim.updated_at.isoformat()
         
         return response.api_response(200, data=claim_data)
         
     except SQLAlchemyError as e:
-        logger.error("Database error: %s", str(e))
-        return response.api_response(500, error_details=f"Database error: {str(e)}")
+        logger.error(f"Database error when retrieving claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Database error when retrieving claim")
     except Exception as e:
         logger.error("Error retrieving claim: %s", str(e))
         return response.api_response(500, error_details=f"Error retrieving claim: {str(e)}")

@@ -12,7 +12,8 @@ class Household(Base):
     users = relationship("User", back_populates="household")
     claims = relationship("Claim", back_populates="household")
     files = relationship("File", back_populates="household")
-
+    rooms = relationship("Room", back_populates="household", cascade="all, delete-orphan")
+    
     def to_dict(self):
         return {
             "id": str(self.id),

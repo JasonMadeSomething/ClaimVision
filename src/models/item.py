@@ -19,6 +19,8 @@ class Item(Base):
     estimated_value = Column(Float, nullable=True)
     condition = Column(String, nullable=True)  # (New, Good, Average, Bad, etc.)
     is_ai_suggested = Column(Boolean, default=False)
-
+    room_id = Column(UUID, ForeignKey("rooms.id"), nullable=True)
+    
     claim = relationship("Claim", back_populates="items")
     files = relationship("File", secondary="item_files", back_populates="items")
+    room = relationship("Room", back_populates="items")

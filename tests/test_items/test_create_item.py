@@ -50,7 +50,8 @@ def test_create_item_with_file_association(api_gateway_event, test_db, seed_clai
 
     assert response["statusCode"] == 201
     response_body = json.loads(response["body"])
-    item_id = response_body["data"]["item_id"]
+    print(response_body)
+    item_id = response_body["data"]["id"]
     
     # Verify the file association exists
     association = test_db.query(ItemFile).filter(

@@ -1,3 +1,9 @@
+"""
+Lambda handler for file uploads to the ClaimVision system.
+
+This module handles the uploading of files to S3 and stores their metadata
+in PostgreSQL, ensuring proper authorization and data validation.
+"""
 import os
 from utils.logging_utils import get_logger
 import uuid
@@ -7,20 +13,23 @@ from hashlib import sha256
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, get_s3_client
 from models.file import FileStatus, File
+from models.room import Room
 from database.database import get_db_session as db_get_session
-from utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
 
-
-# Configure logging
-logger = get_logger(__name__)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB file size limit
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
 
 # For backward compatibility with tests
 def get_db_session():
+    """
+    Wrapper function for database session creation to maintain backward compatibility with tests.
+    
+    Returns:
+        Session: SQLAlchemy database session
+    """
     return db_get_session()
 
 def upload_to_s3(file_name: str, file_data: bytes) -> str:
@@ -42,13 +51,13 @@ def upload_to_s3(file_name: str, file_data: bytes) -> str:
     return f"s3://{S3_BUCKET_NAME}/{file_name}"
 
 @standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None, body=None) -> dict:
+def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
     """
     Handles uploading files and storing metadata in PostgreSQL.
     
     Args:
         event (dict): API Gateway event containing authentication details and file data
-        context/context (dict): Lambda execution context (unused)
+        _context (dict): Lambda execution context (unused)
         db_session (Session, optional): SQLAlchemy session for testing
         user (User): Authenticated user object (provided by decorator)
         body (dict): Parsed request body (provided by decorator)
@@ -85,6 +94,19 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
     except ValueError:
         return response.api_response(400, error_details='Invalid claim ID format. Expected UUID.'
         )
+        
+    # Check for room_id and validate if present
+    room_id = body.get("room_id")
+    room_uuid = None
+    if room_id:
+        try:
+            room_uuid = uuid.UUID(room_id)
+            # Verify room exists and belongs to the claim
+            room = db_session.query(Room).filter_by(id=room_uuid, claim_id=claim_uuid, household_id=household_id).first()
+            if not room:
+                return response.api_response(404, error_details='Room not found or not associated with this claim.')
+        except ValueError:
+            return response.api_response(400, error_details='Invalid room ID format. Expected UUID.')
         
     allowed_extensions = {"jpg", "jpeg", "png", "gif", "pdf"}
     uploaded_files = []
@@ -147,6 +169,7 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
             file_name=file_name,
             s3_key=s3_key,
             claim_id=claim_uuid,
+            room_id=room_uuid,  # Add room_id if provided
             status=FileStatus.UPLOADED,
             file_hash=file_hash,
             created_at=datetime.now(timezone.utc),
@@ -158,7 +181,17 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
         # Upload file to S3 after DB commit
         try:
             s3_url = upload_to_s3(s3_key, decoded_data)
-            uploaded_files.append({"file_name": file_name, "file_id": str(file_id), "s3_url": s3_url})
+            
+            file_response = {
+                "file_id": str(new_file.id),
+                "file_name": file_name,
+                "s3_url": s3_url
+            }
+            
+            if room_uuid:
+                file_response["room_id"] = str(room_uuid)
+                
+            uploaded_files.append(file_response)
         except Exception:
             logger.error("S3 upload failed for file: %s", file_name)
             db_session.rollback()  # Rollback DB entry if S3 upload fails

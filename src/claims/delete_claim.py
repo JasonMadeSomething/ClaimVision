@@ -1,25 +1,27 @@
+"""
+Lambda handler for deleting a claim and its associated items and files.
+
+This module handles the deletion of claims from the ClaimVision system,
+ensuring proper authorization and data integrity.
+"""
 from utils.logging_utils import get_logger
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
 from database.database import get_db_session
-from utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
 
-
-# Configure logging
-logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context: dict = None, db_session=None, user=None) -> dict:
+def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
     Handles deleting a claim for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
-        context (dict): Lambda execution context (unused).
+        _context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
         user (User): Authenticated user object (provided by decorator).
 
@@ -50,14 +52,24 @@ def lambda_handler(event: dict, context: dict = None, db_session=None, user=None
             return response.api_response(404, error_details="Claim not found")
 
         # Delete the claim
-        db_session.delete(claim)
+        db_session.query(Claim).filter(Claim.id == claim_id).delete()
         db_session.commit()
         
+        logger.info(f"Claim {claim_id} deleted successfully")
         return response.api_response(200, success_message="Claim deleted successfully")
         
+    except IntegrityError as e:
+        db_session.rollback()
+        logger.error(f"Integrity error when deleting claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Integrity error when deleting claim")
+    except OperationalError as e:
+        db_session.rollback()
+        logger.error(f"Operational error when deleting claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Operational error when deleting claim")
     except SQLAlchemyError as e:
-        logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, error_details=f"Database error: {str(e)}")
+        db_session.rollback()
+        logger.error(f"Database error when deleting claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Database error when deleting claim")
     except Exception as e:
         logger.exception("Unexpected error deleting claim")
         return response.api_response(500, error_details=f"Internal server error: {str(e)}")

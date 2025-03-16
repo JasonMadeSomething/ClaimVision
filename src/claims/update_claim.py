@@ -1,25 +1,29 @@
+"""
+Lambda handler for updating claim information.
+
+This module handles the updating of claim details in the ClaimVision system,
+ensuring proper authorization, data validation, and consistency.
+"""
 from utils.logging_utils import get_logger
 from datetime import datetime, date
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
-from utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
 
 
 # Configure logging
-logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, context: dict = None, db_session=None, user=None, body=None) -> dict:
+def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
     """
     Handles updating a claim by ID for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
-        context (dict): Lambda execution context (unused).
+        _context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
         user (User): Authenticated user object (provided by decorator).
         body (dict): Request body containing updated claim data (provided by decorator).
@@ -82,10 +86,20 @@ def lambda_handler(event: dict, context: dict = None, db_session=None, user=None
             claim.description = body["description"]
             
         # Update the claim
+        updates = {
+            "title": claim.title,
+            "description": claim.description,
+            "date_of_loss": claim.date_of_loss
+        }
+        for key, value in updates.items():
+            setattr(claim, key, value)
+        
+        # Update the updated_at timestamp
         if hasattr(claim, 'updated_at'):
             claim.updated_at = datetime.now()
+        
+        # Commit the changes
         db_session.commit()
-        db_session.refresh(claim)
         
         # Prepare response
         updated_claim = {
@@ -100,9 +114,18 @@ def lambda_handler(event: dict, context: dict = None, db_session=None, user=None
         
         return response.api_response(200, data=updated_claim, success_message="Claim updated successfully")
         
+    except IntegrityError as e:
+        db_session.rollback()
+        logger.error(f"Integrity error when updating claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Integrity error when updating claim")
+    except OperationalError as e:
+        db_session.rollback()
+        logger.error(f"Operational error when updating claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Operational error when updating claim")
     except SQLAlchemyError as e:
-        logger.error("Database error: %s", str(e))
-        return response.api_response(500, error_details=f"Database error: {str(e)}")
+        db_session.rollback()
+        logger.error(f"Database error when updating claim {claim_id}: {str(e)}")
+        return response.api_response(500, error_details="Database error when updating claim")
     except Exception as e:
         logger.error("Error updating claim: %s", str(e))
         return response.api_response(500, error_details=f"Error updating claim: {str(e)}")

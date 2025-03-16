@@ -10,6 +10,7 @@ from models.item_labels import ItemLabel
 from models.label import Label
 from models.claim import Claim
 from models.user import User
+from models.room import Room
 from utils import response
 
 # Configure logging
@@ -103,6 +104,38 @@ def lambda_handler(event, _context, db_session=None):
             item.is_ai_suggested = body["is_ai_suggested"]
             item_updated = True
             
+        # Handle room_id updates
+        if "room_id" in body:
+            room_id_str = body["room_id"]
+            
+            # If room_id is None, remove room association
+            if room_id_str is None:
+                item.room_id = None
+                item_updated = True
+            else:
+                try:
+                    # Handle case where room_id is already a UUID object
+                    if isinstance(room_id_str, uuid.UUID):
+                        room_id = room_id_str
+                    else:
+                        room_id = uuid.UUID(room_id_str)
+                        
+                    # Verify the room exists and belongs to the same claim
+                    room = db.query(Room).filter(Room.id == room_id).first()
+                    if not room:
+                        return response.api_response(404, error_details='Room not found.')
+                        
+                    # Verify the room belongs to the same claim as the item
+                    if room.claim_id != item.claim_id:
+                        return response.api_response(400, error_details='Room must belong to the same claim as the item.')
+                        
+                    # Update the item's room_id
+                    item.room_id = room_id
+                    item_updated = True
+                    
+                except ValueError:
+                    return response.api_response(400, error_details='Invalid room ID format.')
+            
         # Handle file and label associations if file_id is provided
         file_id_str = body.get("file_id")
         if file_id_str:
@@ -147,14 +180,29 @@ def lambda_handler(event, _context, db_session=None):
 
         db.commit()
         
+        # Prepare response data with updated item information
+        response_data = {
+            "id": str(item.id),
+            "name": item.name,
+            "description": item.description,
+            "estimated_value": item.estimated_value,
+            "condition": item.condition,
+            "is_ai_suggested": item.is_ai_suggested,
+            "claim_id": str(item.claim_id)
+        }
+        
+        # Include room_id in response if it exists
+        if item.room_id:
+            response_data["room_id"] = str(item.room_id)
+        
         # Return appropriate success message based on what was updated
         if file_id_str:
             if item_updated:
-                return response.api_response(200, success_message='Item properties and file/label associations updated successfully.')
+                return response.api_response(200, success_message='Item properties and file/label associations updated successfully.', data=response_data)
             else:
-                return response.api_response(200, success_message='File associated with item and labels updated successfully.')
+                return response.api_response(200, success_message='File associated with item and labels updated successfully.', data=response_data)
         else:
-            return response.api_response(200, success_message='Item properties updated successfully.')
+            return response.api_response(200, success_message='Item properties updated successfully.', data=response_data)
 
     except Exception as e:
         logger.exception("Unexpected error updating item")

@@ -9,6 +9,7 @@ from models.file import File
 from models.item_files import ItemFile
 from models.claim import Claim
 from models.user import User
+from models.room import Room
 from utils import response
 
 # Configure logging
@@ -69,6 +70,25 @@ def lambda_handler(event, _context, db_session: Session = None):
         estimated_value = body.get("estimated_value", None)
         condition = body.get("condition", None)
         is_ai_suggested = body.get("is_ai_suggested", False)
+        
+        # Handle room_id if provided
+        room_id = None
+        room_id_str = body.get("room_id")
+        if room_id_str:
+            try:
+                room_id = uuid.UUID(room_id_str) if not isinstance(room_id_str, uuid.UUID) else room_id_str
+                
+                # Verify the room exists and belongs to the same claim
+                room = db.query(Room).filter(Room.id == room_id).first()
+                if not room:
+                    return response.api_response(404, error_details='Room not found.')
+                    
+                # Verify the room belongs to the same claim
+                if room.claim_id != claim_uuid:
+                    return response.api_response(400, error_details='Room must belong to the same claim.')
+                    
+            except ValueError:
+                return response.api_response(400, error_details='Invalid room ID format.')
 
         # ✅ Create new item
         new_item = Item(
@@ -77,7 +97,8 @@ def lambda_handler(event, _context, db_session: Session = None):
             description=description,
             estimated_value=estimated_value,
             condition=condition,
-            is_ai_suggested=is_ai_suggested
+            is_ai_suggested=is_ai_suggested,
+            room_id=room_id
         )
 
         db.add(new_item)
@@ -108,8 +129,23 @@ def lambda_handler(event, _context, db_session: Session = None):
             db.add(ItemFile(item_id=new_item.id, file_id=file_id))
 
         db.commit()
+        
+        # Prepare response data with item information
+        response_data = {
+            "id": str(new_item.id),
+            "name": new_item.name,
+            "description": new_item.description,
+            "estimated_value": new_item.estimated_value,
+            "condition": new_item.condition,
+            "is_ai_suggested": new_item.is_ai_suggested,
+            "claim_id": str(new_item.claim_id)
+        }
+        
+        # Include room_id in response if it exists
+        if new_item.room_id:
+            response_data["room_id"] = str(new_item.room_id)
 
-        return response.api_response(201, success_message='Item created successfully.', data={"item_id": str(new_item.id)})
+        return response.api_response(201, success_message='Item created successfully.', data=response_data)
 
     except SQLAlchemyError as e:
         db.rollback()

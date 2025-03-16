@@ -1,4 +1,9 @@
-import json
+"""
+Lambda handler for retrieving files for a user's household.
+
+This module handles the retrieval of file metadata and generates
+presigned URLs for file access when needed.
+"""
 import os
 from utils.logging_utils import get_logger
 from models.file import File
@@ -8,19 +13,25 @@ from database.database import get_db_session as db_get_session
 
 # For backward compatibility with tests
 def get_db_session():
+    """
+    Wrapper function for database session creation to maintain backward compatibility with tests.
+    
+    Returns:
+        Session: SQLAlchemy database session
+    """
     return db_get_session()
 
 logger = get_logger(__name__)
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
 
 @standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None) -> dict:
+def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
     Lambda handler to retrieve files for the authenticated user's household.
     
     Args:
         event (dict): API Gateway event
-        context/context (dict): Lambda execution context (unused)
+        _context (dict): Lambda execution context (unused)
         db_session (Session, optional): Database session for testing
         user (User): Authenticated user object (provided by decorator)
         
