@@ -15,18 +15,24 @@ class FileStatus(PyEnum):
     FAILED = "failed"
 
 class File(Base):
+    """
+    Represents a file uploaded by a user.
+    
+    Files can be associated with claims and items, and can have labels attached.
+    Files are stored in S3 with their metadata tracked in the database.
+    """
     __tablename__ = "files"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False)
-    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False)
+    uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False, index=True)
+    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False, index=True)
     file_name: Mapped[str] = mapped_column(String, nullable=False)
-    room_name: Mapped[str | None] = mapped_column(String, nullable=True)  # ✅ Room is stored as a field, not a separate table
+    room_name: Mapped[str | None] = mapped_column(String, nullable=True)  # Room is stored as a field, not a separate table
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
-    status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.UPLOADED)
-    claim_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("claims.id"), nullable=True)
-    file_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # ✅ Restored metadata field
-    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.UPLOADED, index=True)
+    claim_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("claims.id"), nullable=True, index=True)
+    file_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Restored metadata field
+    deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
@@ -35,7 +41,7 @@ class File(Base):
     user = relationship("User")
     claim = relationship("Claim", back_populates="files")
     items = relationship("Item", secondary="item_files", back_populates="files")
-    labels = relationship("Label", secondary="file_labels", back_populates="files")  # ✅ Many-to-Many
+    labels = relationship("Label", secondary="file_labels", back_populates="files")  # Many-to-Many
 
     def to_dict(self):
         return {

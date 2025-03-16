@@ -5,13 +5,19 @@ from datetime import datetime, timezone
 from models.base import Base  
 
 class Claim(Base):
+    """
+    Represents an insurance claim filed by a household.
+    
+    Claims contain multiple items and can have files directly associated with them.
+    Each claim belongs to a specific household and tracks information about the loss event.
+    """
     __tablename__ = "claims"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False)
+    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False, index=True)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
-    date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now(timezone.utc))  # ✅ Restored date of loss
+    date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now(timezone.utc), index=True)  # Added index for date queries
 
     household = relationship("Household", back_populates="claims")
     files = relationship("File", back_populates="claim")
