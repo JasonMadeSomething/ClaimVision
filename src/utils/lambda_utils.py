@@ -13,7 +13,6 @@ and reduce code duplication.
 """
 
 import json
-import logging
 import inspect
 import uuid
 from functools import wraps
@@ -25,9 +24,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database.database import get_db_session
 from utils import response, auth_utils
+from utils.logging_utils import get_logger
 
 # Configure logging
-logger = logging.getLogger()
+logger = get_logger(__name__)
 
 # Type variables for handler function
 T = TypeVar('T')
@@ -53,6 +53,14 @@ def standard_lambda_handler(
     def decorator(handler_func: HandlerFunction) -> HandlerFunction:
         @wraps(handler_func)
         def wrapper(event: Dict[str, Any], context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+            # Get function name for logging
+            function_name = handler_func.__name__
+            
+            # Log request
+            http_method = event.get('httpMethod', 'UNKNOWN')
+            path = event.get('path', 'UNKNOWN')
+            logger.info(f"Request started: {http_method} {path} -> {function_name}")
+            
             # Initialize database session
             db_session = kwargs.get('db_session')
             session_created = False
@@ -63,9 +71,9 @@ def standard_lambda_handler(
                     try:
                         db_session = get_db_session()
                         session_created = True
-                        logger.debug("Created new database session")
+                        logger.debug(f"{function_name}: Created new database session")
                     except SQLAlchemyError as db_error:
-                        logger.error("Failed to get database session: %s", str(db_error))
+                        logger.error(f"{function_name}: Failed to get database session: {str(db_error)}")
                         return response.api_response(500, message="Database connection error", 
                                                    error_details="Failed to establish database connection")
                 
@@ -74,29 +82,37 @@ def standard_lambda_handler(
                 # Authenticate user if required
                 if requires_auth:
                     # Extract user ID from JWT claims
+                    logger.debug(f"{function_name}: Authenticating user")
                     success, result = auth_utils.extract_user_id(event)
                     if not success:
+                        logger.warning(f"{function_name}: Authentication failed - Missing or invalid token")
                         return response.api_response(401, message="Unauthorized", error_details="Unauthorized: Missing authentication")
                     
                     user_id = result
+                    logger.debug(f"{function_name}: User ID extracted: {user_id}")
                     success, result = auth_utils.get_authenticated_user(db_session, user_id)
                     if not success:
+                        logger.warning(f"{function_name}: User not found or not authorized: {user_id}")
                         return result  # Return error response
                     
                     user = result
+                    logger.debug(f"{function_name}: User authenticated: {user.id}")
                 
                 # Process request body if required
                 body_data = {}
                 if requires_body:
+                    logger.debug(f"{function_name}: Processing request body")
                     try:
                         body_data = json.loads(event.get("body", "{}"))
                     except json.JSONDecodeError:
+                        logger.warning(f"{function_name}: Invalid JSON in request body")
                         return response.api_response(400, error_details="Invalid JSON in request body")
                 
                     # Validate required fields
                     if required_fields:
                         missing = [field for field in required_fields if field not in body_data]
                         if missing:
+                            logger.warning(f"{function_name}: Missing required fields: {missing}")
                             return response.api_response(
                                 400, 
                                 message="Bad Request",
@@ -106,6 +122,7 @@ def standard_lambda_handler(
                 
                 # Call the actual handler with extracted data
                 try:
+                    logger.debug(f"{function_name}: Calling handler function")
                     # Create a dictionary with all possible parameters
                     handler_params = {
                         'event': event,
@@ -134,19 +151,24 @@ def standard_lambda_handler(
                     
                     # Call the handler with the appropriate parameters
                     result = handler_func(**filtered_params)
+                    
+                    # Log response status code
+                    status_code = result.get("statusCode", 0)
+                    logger.info(f"Request completed: {http_method} {path} -> {function_name} (Status: {status_code})")
+                    
                     return result
                     
                 except Exception as e:
-                    logger.exception(f"Error calling handler function: {str(e)}")
+                    logger.exception(f"{function_name}: Error calling handler function: {str(e)}")
                     return response.api_response(500, message="Internal Server Error", 
                                                error_details=str(e))
                 
             except SQLAlchemyError as db_error:
-                logger.error("Database error: %s", str(db_error))
+                logger.error(f"{function_name}: Database error: {str(db_error)}")
                 return response.api_response(500, message="Database error", error_details=str(db_error))
             
             except Exception as e:
-                logger.exception("Unexpected error in Lambda handler")
+                logger.exception(f"{function_name}: Unexpected error in Lambda handler: {str(e)}")
                 return response.api_response(500, message="Internal Server Error", error_details=str(e))
             
             finally:
@@ -154,9 +176,9 @@ def standard_lambda_handler(
                 if session_created and db_session is not None:
                     try:
                         db_session.close()
-                        logger.debug("Closed database session")
+                        logger.debug(f"{function_name}: Closed database session")
                     except Exception as e:
-                        logger.error("Error closing database session: %s", str(e))
+                        logger.error(f"{function_name}: Error closing database session: {str(e)}")
             
         return wrapper
     return decorator
@@ -173,9 +195,16 @@ def extract_path_param(event: Dict[str, Any], param_name: str) -> Tuple[bool, Un
     Returns:
         Tuple containing success flag and either the parameter value or an error response
     """
-    param_value = event.get("pathParameters", {}).get(param_name)
+    path_params = event.get("pathParameters") or {}
+    param_value = path_params.get(param_name)
+    
     if not param_value:
-        return False, response.api_response(400, error_details=f"Missing required path parameter: {param_name}")
+        logger.warning(f"Missing required path parameter: {param_name}")
+        return False, response.api_response(
+            400, 
+            message="Bad Request", 
+            error_details=f"Missing required path parameter: {param_name}"
+        )
     
     return True, param_value
 
@@ -191,34 +220,41 @@ def extract_uuid_param(event: Dict[str, Any], param_name: str) -> Tuple[bool, Un
     Returns:
         Tuple containing success flag and either the UUID string or an error response
     """
+    # First extract the parameter as a string
     success, result = extract_path_param(event, param_name)
     if not success:
         return False, result
     
     param_value = result
+    
+    # Validate UUID format
     try:
-        # Validate UUID format
-        uuid_value = uuid.UUID(param_value)
-        return True, str(uuid_value)
+        # Convert to UUID to validate format, but return the original string
+        param_uuid = uuid.UUID(param_value)
+        logger.debug("Valid UUID extracted for %s: %s" % (param_name, param_uuid))
+        return True, param_value
     except ValueError:
-        # Use specific error messages to maintain compatibility with tests
-        if param_name == "user_id":
-            return False, response.api_response(400, error_details="Invalid UUID format")
+        logger.warning("Invalid %s format: %s" % (param_name, param_value))
+        
+        # Create appropriate error message based on parameter name
+        if param_name == "item_id":
+            error_msg = "Invalid item_id format"
+        elif param_name == "file_id":
+            error_msg = "Invalid file_id format"
         elif param_name == "claim_id":
-            return False, response.api_response(400, error_details="Invalid claim ID")
+            error_msg = "Invalid claim_id format"
+        elif param_name == "label_id":
+            error_msg = "Invalid label_id format"
         elif param_name == "id":
-            # Check which file is calling this function to return the appropriate error message
-            import inspect
-            caller_frame = inspect.currentframe().f_back
-            caller_module = inspect.getmodule(caller_frame)
-            module_name = caller_module.__name__ if caller_module else ""
-            
-            if "get_file" in module_name:
-                return False, response.api_response(400, error_details="Invalid id format. Expected UUID.")
-            else:
-                return False, response.api_response(400, error_details="Invalid file ID")
+            error_msg = "Invalid id format. Expected UUID."
         else:
-            return False, response.api_response(400, error_details=f"Invalid {param_name} format. Expected UUID.")
+            error_msg = f"Invalid {param_name} format"
+        
+        return False, response.api_response(
+            400, 
+            message="Bad Request", 
+            error_details=error_msg
+        )
 
 
 def s3_operation(func: Callable) -> Callable:
@@ -234,18 +270,27 @@ def s3_operation(func: Callable) -> Callable:
     @wraps(func)
     def wrapper(*args, **kwargs):
         try:
-            return func(*args, **kwargs)
+            logger.debug(f"Starting S3 operation: {func.__name__}")
+            result = func(*args, **kwargs)
+            logger.debug(f"S3 operation completed: {func.__name__}")
+            return result
         except ClientError as e:
-            error_code = e.response.get('Error', {}).get('Code', 'Unknown')
-            error_message = e.response.get('Error', {}).get('Message', str(e))
-            logger.error(f"S3 error ({error_code}): {error_message}")
-            return None
+            error_code = e.response['Error']['Code']
+            error_message = e.response['Error']['Message']
+            logger.error(f"S3 client error in {func.__name__}: {error_code} - {error_message}")
+            
+            if error_code == 'NoSuchKey':
+                return response.api_response(404, message="File not found", error_details=error_message)
+            elif error_code == 'AccessDenied':
+                return response.api_response(403, message="Access denied", error_details=error_message)
+            else:
+                return response.api_response(500, message="S3 operation failed", error_details=error_message)
         except BotoCoreError as e:
-            logger.error(f"S3 connection error: {str(e)}")
-            return None
+            logger.error(f"Boto core error in {func.__name__}: {str(e)}")
+            return response.api_response(500, message="S3 operation failed", error_details=str(e))
         except Exception as e:
-            logger.error(f"Unexpected error in S3 operation: {str(e)}")
-            return None
+            logger.exception(f"Unexpected error in S3 operation {func.__name__}: {str(e)}")
+            return response.api_response(500, message="S3 operation failed", error_details=str(e))
     
     return wrapper
 
@@ -264,12 +309,21 @@ def generate_presigned_url(s3_client, bucket_name: str, s3_key: str, expiration:
     Returns:
         Pre-signed URL or None if an error occurred
     """
-    url = s3_client.generate_presigned_url(
-        'get_object',
-        Params={'Bucket': bucket_name, 'Key': s3_key},
-        ExpiresIn=expiration
-    )
-    return url
+    try:
+        logger.debug("Generating presigned URL for bucket: %s, key: %s" % (bucket_name, s3_key))
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': bucket_name, 'Key': s3_key},
+            ExpiresIn=expiration
+        )
+        logger.debug("Presigned URL generated successfully")
+        return url
+    except ClientError as e:
+        logger.error("Failed to generate presigned URL: %s" % str(e))
+        return None
+    except Exception as e:
+        logger.exception("Unexpected error generating presigned URL: %s" % str(e))
+        return None
 
 
 def get_s3_client():
@@ -279,4 +333,5 @@ def get_s3_client():
     Returns:
         Configured S3 client
     """
+    logger.debug("Creating S3 client")
     return boto3.client('s3')

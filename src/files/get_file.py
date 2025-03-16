@@ -1,11 +1,10 @@
-import logging
+from utils.logging_utils import get_logger
 import os
 from models.file import File
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, generate_presigned_url, get_s3_client
 
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
 
 @standard_lambda_handler(requires_auth=True)

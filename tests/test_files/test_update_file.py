@@ -119,7 +119,7 @@ def test_update_file_metadata_empty_payload(api_gateway_event, test_db, seed_fil
 
     response = lambda_handler(event, {}, db_session=test_db)
     assert response["statusCode"] == 400
-    assert "Empty request body" in json.loads(response["body"])["message"]
+    assert "Empty request body" in json.loads(response["body"])["error_details"]
 
 def test_update_file_metadata_database_error(api_gateway_event, test_db, seed_file):
     """ Test handling a database error during metadata update (should return 500)."""

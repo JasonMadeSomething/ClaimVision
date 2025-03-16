@@ -1,14 +1,17 @@
 import os
 import json
-import logging
+from utils.logging_utils import get_logger
 import boto3
 import botocore.exceptions
 from utils import response
+from utils.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
+
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 # Initialize Cognito client
 cognito_client = boto3.client("cognito-idp", region_name="us-east-1")
 

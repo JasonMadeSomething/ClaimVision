@@ -1,15 +1,18 @@
-import logging
+from utils.logging_utils import get_logger
 import uuid
 from datetime import datetime, date
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler
 from models import Claim, Household
+from utils.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
+
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True, requires_body=True, required_fields=["title", "date_of_loss"])
 def lambda_handler(event: dict, context: dict = None, db_session=None, user=None, body=None) -> dict:
     """

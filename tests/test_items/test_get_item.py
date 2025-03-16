@@ -1,7 +1,7 @@
 import pytest
 import json
 import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from sqlalchemy.exc import SQLAlchemyError
 from items.get_item import lambda_handler
 from models.item import Item
@@ -157,10 +157,10 @@ def test_get_item_not_found(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "Item not found" in response_body["message"]
+    assert "Item not found" in response_body["error_details"]
 
 def test_get_item_invalid_id_format(api_gateway_event, test_db, seed_claim):
-    """Test attempting to retrieve an item with an invalid ID format."""
+    """Test attempting to get an item with an invalid ID format."""
     claim_id, user_id, file_id = seed_claim
     
     event = api_gateway_event("GET", path_params={"item_id": "not-a-uuid"}, auth_user=str(user_id))
@@ -168,10 +168,10 @@ def test_get_item_invalid_id_format(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "Invalid item ID format" in response_body["message"]
+    assert "Invalid item_id format" in response_body["error_details"]
 
 def test_get_item_missing_id(api_gateway_event, test_db, seed_claim):
-    """Test attempting to retrieve an item without providing an ID."""
+    """Test attempting to get an item without providing an ID."""
     claim_id, user_id, file_id = seed_claim
     
     event = api_gateway_event("GET", path_params={}, auth_user=str(user_id))
@@ -179,10 +179,10 @@ def test_get_item_missing_id(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "Item ID is required" in response_body["message"]
+    assert "Missing required path parameter: item_id" in response_body["error_details"]
 
 def test_get_item_unauthorized(api_gateway_event, test_db, seed_claim):
-    """Test attempting to retrieve an item without authentication."""
+    """Test attempting to get an item without authentication."""
     claim_id, user_id, file_id = seed_claim
     
     # Create an item
@@ -197,27 +197,25 @@ def test_get_item_unauthorized(api_gateway_event, test_db, seed_claim):
     test_db.commit()
     
     # Attempt to get without authentication (no user_id)
-    event = api_gateway_event("GET", path_params={"item_id": str(item_id)}, auth_user=None)  # Explicitly set auth_user to None
+    event = api_gateway_event("GET", path_params={"item_id": str(item_id)}, auth_user=None)
     response = lambda_handler(event, {}, db_session=test_db)
     
     # Check that the response indicates unauthorized access
-    assert response["statusCode"] == 400
+    assert response["statusCode"] == 401
     response_body = json.loads(response["body"])
-    assert "Invalid authentication" in response_body["message"]
+    assert "Unauthorized: Missing authentication" in response_body["error_details"]
 
-@patch("items.get_item.get_db_session")
-def test_get_item_database_error(mock_get_db, api_gateway_event, test_db, seed_item):
-    """Test handling of database errors when retrieving an item."""
+@patch("sqlalchemy.orm.Session")
+def test_get_item_database_error(mock_session, api_gateway_event, test_db, seed_item):
+    """Test handling of database errors when getting an item."""
     item_id, user_id, file_id = seed_item
     
     # Mock the database session to raise an exception
-    mock_session = MagicMock()
     mock_session.query.side_effect = SQLAlchemyError("Database error")
-    mock_get_db.return_value = mock_session
     
     event = api_gateway_event("GET", path_params={"item_id": str(item_id)}, auth_user=str(user_id))
-    response = lambda_handler(event, {})
+    response = lambda_handler(event, {}, db_session=mock_session)
     
     assert response["statusCode"] == 500
     response_body = json.loads(response["body"])
-    assert "Internal Server Error" in response_body["message"]
+    assert "Database error" in response_body["error_details"]

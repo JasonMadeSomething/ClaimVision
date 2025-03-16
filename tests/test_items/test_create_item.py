@@ -105,7 +105,7 @@ def test_create_item_with_file_from_different_claim(api_gateway_event, test_db, 
     # Should fail with a 400 status code
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "File must belong to the same claim" in response_body["message"]
+    assert "File must belong to the same claim" in response_body["error_details"]
 
 def test_create_item_with_file_not_owned(api_gateway_event, test_db, seed_claim):
     """Test attempting to create an item with a file not owned by the user's household."""
@@ -168,7 +168,7 @@ def test_create_item_with_file_not_owned(api_gateway_event, test_db, seed_claim)
     # Should fail with a 404 status code (file not found for security reasons)
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "File not found" in response_body["message"]
+    assert "File not found" in response_body["error_details"]
 
 def test_create_item_with_invalid_claim(api_gateway_event, test_db, seed_claim):
     """Test attempting to create an item with a claim that doesn't exist."""
@@ -187,7 +187,7 @@ def test_create_item_with_invalid_claim(api_gateway_event, test_db, seed_claim):
     # Should fail with a 404 status code
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "Claim not found" in response_body["message"]
+    assert "Claim not found" in response_body["error_details"]
 
 def test_create_item_with_claim_from_different_household(api_gateway_event, test_db, seed_claim):
     """Test attempting to create an item with a claim from a different household."""
@@ -225,4 +225,4 @@ def test_create_item_with_claim_from_different_household(api_gateway_event, test
     # Should fail with a 404 status code (claim not found for security reasons)
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "Claim not found" in response_body["message"]
+    assert "Claim not found" in response_body["error_details"]

@@ -1,5 +1,5 @@
 import json
-import logging
+from utils.logging_utils import get_logger
 import uuid
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -12,9 +12,7 @@ from models.user import User
 from utils import response
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 def lambda_handler(event, _context, db_session: Session = None):
     """
     Creates a new item under a claim. Allows blank items and file associations.
@@ -32,36 +30,36 @@ def lambda_handler(event, _context, db_session: Session = None):
     try:
         user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
         if not user_id:
-            return response.api_response(400, message="Invalid authentication.")
+            return response.api_response(400, error_details='Invalid authentication.')
 
         claim_id = event.get("pathParameters", {}).get("claim_id")
         if not claim_id:
-            return response.api_response(400, message="Claim ID is required.")
+            return response.api_response(400, error_details='Claim ID is required.')
 
         try:
             claim_uuid = uuid.UUID(claim_id)
         except ValueError:
-            return response.api_response(400, message="Invalid claim ID format.")
+            return response.api_response(400, error_details='Invalid claim ID format.')
             
         # Convert user_id to UUID if it's not already
         try:
             user_uuid = uuid.UUID(user_id) if not isinstance(user_id, uuid.UUID) else user_id
         except ValueError:
-            return response.api_response(400, message="Invalid user ID format.")
+            return response.api_response(400, error_details='Invalid user ID format.')
             
         # Verify the claim exists and belongs to the user's household
         claim = db.query(Claim).filter(Claim.id == claim_uuid).first()
         if not claim:
-            return response.api_response(404, message="Claim not found.")
+            return response.api_response(404, error_details='Claim not found.')
             
         # Get the user from the database
         user = db.query(User).filter(User.id == user_uuid).first()
         if not user:
-            return response.api_response(404, message="User not found.")
+            return response.api_response(404, error_details='User not found.')
             
         # Check if the user's household matches the claim's household
         if user.household_id != claim.household_id:
-            return response.api_response(404, message="Claim not found.")
+            return response.api_response(404, error_details='Claim not found.')
 
         body = json.loads(event.get("body", "{}"))
 
@@ -91,37 +89,37 @@ def lambda_handler(event, _context, db_session: Session = None):
             try:
                 file_id = uuid.UUID(file_id_str) if not isinstance(file_id_str, uuid.UUID) else file_id_str
             except ValueError:
-                return response.api_response(400, message="Invalid file ID format.")
+                return response.api_response(400, error_details='Invalid file ID format.')
                 
             # Ensure file exists
             file = db.query(File).filter(File.id == file_id).first()
             if not file:
-                return response.api_response(404, message="File not found.")
+                return response.api_response(404, error_details='File not found.')
                 
             # Verify the file belongs to the user's household
             if file.household_id != user.household_id:
-                return response.api_response(404, message="File not found.")
+                return response.api_response(404, error_details='File not found.')
                 
             # Verify the file belongs to the same claim
             if file.claim_id != claim_uuid:
-                return response.api_response(400, message="File must belong to the same claim as the item.")
+                return response.api_response(400, error_details='File must belong to the same claim as the item.')
                 
             # Create the file-item association
             db.add(ItemFile(item_id=new_item.id, file_id=file_id))
 
         db.commit()
 
-        return response.api_response(201, message="Item created successfully.", data={"item_id": str(new_item.id)})
+        return response.api_response(201, success_message='Item created successfully.', data={"item_id": str(new_item.id)})
 
     except SQLAlchemyError as e:
         db.rollback()
         logger.error(f"Database error creating item: {str(e)}")
-        return response.api_response(500, message="Database error.")
+        return response.api_response(500, error_details='Database error.')
 
     except Exception as e:
         db.rollback()
         logger.exception("Unexpected error creating item")
-        return response.api_response(500, message="Internal Server Error")
+        return response.api_response(500, error_details='Internal Server Error')
 
     finally:
         db.close()

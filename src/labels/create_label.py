@@ -1,5 +1,5 @@
 import json
-import logging
+from utils.logging_utils import get_logger
 import re
 
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -11,10 +11,11 @@ from models.file_labels import FileLabel
 from utils import response
 from utils import auth_utils
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
 
+logger = get_logger(__name__)
+
+
+# Configure logging
 # Set max labels per file & max labels per request
 MAX_LABELS_PER_FILE = 50
 MAX_LABELS_PER_REQUEST = 10
@@ -58,11 +59,11 @@ def lambda_handler(event, _context, db_session: Session = None):
         elif isinstance(labels_to_add, list):
             labels_to_add = labels_to_add
         else:
-            return response.api_response(400, message="Invalid label format. Provide 'label_text' or 'labels'.")
+            return response.api_response(400, error_details='Invalid label format. Provide "label_text" or "labels".')
         
         # Ensure at least one valid label remains
         if not labels_to_add:
-            return response.api_response(400, message="No valid labels provided.")
+            return response.api_response(400, error_details='No valid labels provided.')
 
         # Validate format before anything else
         invalid_labels = [label for label in labels_to_add if not LABEL_REGEX.fullmatch(label) or len(label) > MAX_LABEL_LENGTH or '\n' in label or '\t' in label or '\r' in label or '\f' in label or '\v' in label]
@@ -79,7 +80,7 @@ def lambda_handler(event, _context, db_session: Session = None):
         # Ensure file exists and user owns it
         file = db.query(File).filter(File.id == file_id).first()
         if not file:
-            return response.api_response(404, message="File not found.")
+            return response.api_response(404, error_details='File not found.')
             
         # Check if user has access to the file's household
         success, error_response = auth_utils.check_resource_access(user, file.household_id)
@@ -95,7 +96,7 @@ def lambda_handler(event, _context, db_session: Session = None):
         )
         
         if existing_label_count + len(labels_to_add) > MAX_LABELS_PER_FILE:
-            return response.api_response(400, message="Too many labels on this file.")
+            return response.api_response(400, error_details='Too many labels on this file.')
 
         # Insert labels
         created_labels = []
@@ -129,14 +130,14 @@ def lambda_handler(event, _context, db_session: Session = None):
                 db.commit()  # Attempt DB commit
             except (IntegrityError, SQLAlchemyError):
                 db.rollback()  # Ensure rollback
-                return response.api_response(500, message="Database error occurred.")
+                return response.api_response(500, error_details='Database error occurred.')
             file_label = FileLabel(file_id=file_id, label_id=new_label.id)
             db.add(file_label)
             try:
                 db.commit()  # Attempt DB commit
             except (IntegrityError, SQLAlchemyError):
                 db.rollback()  # Ensure rollback
-                return response.api_response(500, message="Database error occurred.")
+                return response.api_response(500, error_details='Database error occurred.')
 
         # Construct response
         response_data = {
@@ -148,19 +149,19 @@ def lambda_handler(event, _context, db_session: Session = None):
         if failed_labels and created_labels:
             return response.api_response(207, message="Some labels failed to create.", data=response_data)
         elif created_labels:
-            return response.api_response(201, message="Labels created successfully.", data=response_data)
+            return response.api_response(201, success_message='Labels created successfully.', data=response_data)
         else:
-            return response.api_response(409, message="All labels failed due to duplicates or errors.", data=response_data)
+            return response.api_response(409, error_details='All labels failed due to duplicates or errors.', data=response_data)
 
     except IntegrityError:
         db.rollback()
         logger.error("Database integrity error occurred.")
-        return response.api_response(500, message="Database error occurred.")
+        return response.api_response(500, error_details='Database error occurred.')
 
     except Exception as e:
         db.rollback()
         logger.exception("Unexpected error creating labels")
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
+        return response.api_response(500, error_details=f'Internal Server Error: {str(e)}')
 
     finally:
         db.close()

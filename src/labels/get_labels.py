@@ -8,21 +8,21 @@ Example Usage:
     GET /files/{file_id}/labels
 """
 
-import json
-import logging
+from utils.logging_utils import get_logger
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from models import Label, File
 from models.file_labels import FileLabel
-from database.database import get_db_session
 from utils import response
-from utils import auth_utils
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+
+
+logger = get_logger(__name__)
+
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
-def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
+@standard_lambda_handler(requires_auth=True)
+def lambda_handler(event: dict, context=None, _context=None, db_session: Session = None, user=None) -> dict:
     """
     Retrieves all labels associated with a given file.
 
@@ -36,57 +36,38 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
     ----------
     event : dict
         The API Gateway event payload.
-    _context : dict
+    context/_context : dict
         The AWS Lambda execution context (unused).
-    db_session : Session, optional
-        SQLAlchemy session for testing. Defaults to None.
+    db_session : Session
+        SQLAlchemy session (provided by decorator).
+    user : User
+        Authenticated user object (provided by decorator).
 
     Returns
     -------
     dict
         Standardized API response containing the list of labels.
     """
-    try:
-        db = db_session if db_session else get_db_session()
-    except Exception as e:
-        logger.error("Database connection failed: %s", str(e))
-        return response.api_response(500, message="Database error: " + str(e))
+    # Extract and validate file ID
+    success, result = extract_uuid_param(event, "file_id")
+    if not success:
+        return result  # Return error response
+        
+    file_id = result
 
     try:
-        # Extract and validate user ID
-        success, result = auth_utils.extract_user_id(event)
-        if not success:
-            return result  # Return error response
-        
-        user_id = result
-        
-        # Extract and validate file ID
-        success, result = auth_utils.extract_resource_id(event, "file_id")
-        if not success:
-            return result  # Return error response
-            
-        file_id = result
-
         # Step 1: Retrieve file
-        file = db.query(File).filter(File.id == file_id).first()
+        file = db_session.query(File).filter(File.id == file_id).first()
         if not file:
-            return response.api_response(404, message="File not found.")
-
-        # Get authenticated user and check authorization
-        success, result = auth_utils.get_authenticated_user(db, user_id)
-        if not success:
-            return result  # Return error response
-            
-        user = result
+            return response.api_response(404, error_details='File not found.')
         
         # Check if user has access to the file's household
-        success, error_response = auth_utils.check_resource_access(user, file.household_id)
-        if not success:
-            return error_response
+        if file.household_id != user.household_id:
+            return response.api_response(403, error_details='Access denied to this file.')
 
         # Step 2: Retrieve labels (including soft-deleted AI ones)
         labels = (
-            db.query(Label)
+            db_session.query(Label)
             .join(FileLabel, FileLabel.label_id == Label.id)
             .filter(FileLabel.file_id == file_id)
             .filter(Label.household_id == user.household_id)
@@ -97,20 +78,10 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
             .all()
         )
 
-        return response.api_response(
-            200,
-            message="Labels retrieved successfully.",
+        return response.api_response(200, success_message='Labels retrieved successfully.',
             data={"labels": [label.to_dict() for label in labels]}
         )
 
     except SQLAlchemyError as e:
         logger.error("Database error occurred: %s", str(e))
-        return response.api_response(500, message="Database error occurred.", error_details=str(e))
-
-    except Exception as e:
-        logger.exception("Unexpected error retrieving labels")
-        return response.api_response(500, message="Internal server error.", error_details=str(e))
-
-    finally:
-        if db_session is None:
-            db.close()
+        return response.api_response(500, error_details=f'Database error occurred: {str(e)}')

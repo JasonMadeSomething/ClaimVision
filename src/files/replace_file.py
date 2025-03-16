@@ -1,4 +1,4 @@
-import logging
+from utils.logging_utils import get_logger
 import base64
 import os
 from datetime import datetime, timezone
@@ -10,8 +10,7 @@ from models.file import File
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 
-logger = logging.getLogger()
-logger.setLevel(logging.INFO)
+logger = get_logger(__name__)
 
 # Get S3 bucket name from environment variable
 S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "your-s3-bucket-name")

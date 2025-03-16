@@ -39,10 +39,10 @@ def test_update_claim_success(test_db, api_gateway_event):
         body={"title": "New Title"},
     )
     response = lambda_handler(event, {}, db_session=test_db)
-    body = json.loads(response["body"])
+    response_body = json.loads(response["body"])
 
     assert response["statusCode"] == 200
-    assert body["data"]["title"] == "New Title"
+    assert response_body["data"]["title"] == "New Title"
 
 
 def test_update_claim_unauthorized(test_db, api_gateway_event):
@@ -102,7 +102,6 @@ def test_update_claim_unauthorized(test_db, api_gateway_event):
         body={"title": "New Title"},
     )
     response = lambda_handler(event, {}, db_session=test_db)
-    body = json.loads(response["body"])
 
     assert response["statusCode"] == 404  # Security: Pretend it doesn't exist
 
@@ -133,10 +132,10 @@ def test_update_claim_not_found(test_db, api_gateway_event):
         body={"title": "Updated Title"},
     )
     response = lambda_handler(event, {}, db_session=test_db)
-    body = json.loads(response["body"])
+    response_body = json.loads(response["body"])
 
     assert response["statusCode"] == 404
-    assert "Claim not found" in body["error_details"]
+    assert "Claim not found" in response_body["error_details"]
 
 
 def test_update_claim_invalid_id(test_db, api_gateway_event):
@@ -160,10 +159,10 @@ def test_update_claim_invalid_id(test_db, api_gateway_event):
     )
 
     response = lambda_handler(event, {}, db_session=test_db)
-    body = json.loads(response["body"])
+    response_body = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert "Invalid claim ID" in body["error_details"]
+    assert "Invalid claim_id format" in response_body["error_details"]
 
 def test_update_claim_invalid_fields(test_db, api_gateway_event):
     """ Test updating a claim with invalid fields"""
@@ -193,10 +192,10 @@ def test_update_claim_invalid_fields(test_db, api_gateway_event):
         body={"invalid_field": "Bad Data"},
     )
     response = lambda_handler(event, {})
-    body = json.loads(response["body"])
+    response_body = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert "Invalid update fields" in body["error_details"]
+    assert "Invalid update fields" in response_body["error_details"]
 
 
 def test_update_claim_db_failure(api_gateway_event):
@@ -211,10 +210,10 @@ def test_update_claim_db_failure(api_gateway_event):
             body={"title": "New Title"},
         )
         response = lambda_handler(event, {})
-        body = json.loads(response["body"])
+        response_body = json.loads(response["body"])
 
     assert response["statusCode"] == 500
-    assert "DB Failure" in body["error_details"]
+    assert "DB Failure" in response_body["error_details"]
 
 def test_update_claim_no_future_date(test_db, api_gateway_event):
     """ Test that claim date of loss cannot be set to a future date"""
@@ -233,7 +232,7 @@ def test_update_claim_no_future_date(test_db, api_gateway_event):
 
     event = api_gateway_event(http_method="PUT", path_params={"claim_id": str(claim_id)}, auth_user=str(test_user.id), body={"date_of_loss": future_date})
     response = lambda_handler(event, {}, db_session=test_db)
-    body = json.loads(response["body"])
+    response_body = json.loads(response["body"])
 
     assert response["statusCode"] == 400
-    assert "Future date is not allowed" in body["error_details"]
+    assert "Future date is not allowed" in response_body["error_details"]

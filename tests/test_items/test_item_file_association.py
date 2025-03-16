@@ -5,7 +5,7 @@ from models.item_labels import ItemLabel
 from models.label import Label
 from models.item_files import ItemFile
 
-def test_associate_file_to_item(api_gateway_event, test_db, seed_item, seed_file):
+def test_associate_file_to_item(api_gateway_event, test_db, seed_item):
     """ Test associating a file to an item."""
     item_id, user_id, file_id = seed_item
 

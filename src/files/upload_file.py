@@ -1,5 +1,5 @@
 import os
-import logging
+from utils.logging_utils import get_logger
 import uuid
 import base64
 from datetime import datetime, timezone
@@ -8,11 +8,14 @@ from utils import response
 from utils.lambda_utils import standard_lambda_handler, get_s3_client
 from models.file import FileStatus, File
 from database.database import get_db_session as db_get_session
+from utils.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
+
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB file size limit
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
 
@@ -68,25 +71,19 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
     # Validate request body
     files = body.get("files", [])
     if not files:
-        return response.api_response(
-            400,
-            message="No files provided in request."
+        return response.api_response(400, error_details='No files provided in request.'
         )
       
     claim_id = body.get("claim_id")
     if not claim_id:
-        return response.api_response(
-            400,
-            message="Claim ID is required."
+        return response.api_response(400, error_details='Claim ID is required.'
         )
         
     # Validate claim ID format
     try:
         claim_uuid = uuid.UUID(claim_id)
     except ValueError:
-        return response.api_response(
-            400,
-            message="Invalid claim ID format. Expected UUID."
+        return response.api_response(400, error_details='Invalid claim ID format. Expected UUID.'
         )
         
     allowed_extensions = {"jpg", "jpeg", "png", "gif", "pdf"}
@@ -170,9 +167,9 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
     if not uploaded_files and failed_files:
         # Return 500 if S3 failures caused all uploads to fail
         if any(f["reason"] == "Failed to upload to S3." for f in failed_files):
-            return response.api_response(500, message="Internal Server Error", data={"files_failed": failed_files})
+            return response.api_response(500, error_details='Internal Server Error', data={"files_failed": failed_files})
         elif any(f["reason"] == "Duplicate file." for f in failed_files):
-            return response.api_response(409, message="Duplicate file detected", data={"files_failed": failed_files})
+            return response.api_response(409, error_details='Duplicate file detected', data={"files_failed": failed_files})
         primary_reason = failed_files[0]["reason"] if failed_files else "All file uploads failed."
         return response.api_response(400, message=primary_reason, data={"files_failed": failed_files})
     

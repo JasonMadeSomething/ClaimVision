@@ -1,14 +1,17 @@
-import logging
+from utils.logging_utils import get_logger
 from datetime import datetime, date
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
+from utils.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
+
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True, requires_body=True)
 def lambda_handler(event: dict, context: dict = None, db_session=None, user=None, body=None) -> dict:
     """

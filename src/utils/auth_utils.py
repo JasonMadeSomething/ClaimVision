@@ -5,7 +5,7 @@ This module provides common functions for user authentication, authorization,
 and parameter validation used across Lambda functions.
 """
 
-import logging
+from utils.logging_utils import get_logger
 import uuid
 from typing import Tuple, Optional, Union
 from sqlalchemy.orm import Session
@@ -14,8 +14,7 @@ from models import User
 from utils import response
 
 # Configure logging
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 def extract_user_id(event: dict) -> Tuple[bool, Union[str, dict]]:
     """
     Extract and validate user ID from JWT claims in the event.

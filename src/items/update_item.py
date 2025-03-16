@@ -1,5 +1,5 @@
 import json
-import logging
+from utils.logging_utils import get_logger
 import uuid
 
 from database.database import get_db_session
@@ -13,9 +13,7 @@ from models.user import User
 from utils import response
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 def lambda_handler(event, _context, db_session=None):
     """
     Updates an item's properties and/or associates a file with an item and specifies applicable labels.
@@ -39,17 +37,17 @@ def lambda_handler(event, _context, db_session=None):
             user_id_str = event.get("auth_user")
             
         if not user_id_str:
-            return response.api_response(401, message="Authentication required.")
+            return response.api_response(401, error_details='Authentication required.')
             
         try:
             user_id = uuid.UUID(user_id_str) if not isinstance(user_id_str, uuid.UUID) else user_id_str
         except ValueError:
-            return response.api_response(400, message="Invalid user ID format.")
+            return response.api_response(400, error_details='Invalid user ID format.')
 
         # Get item_id from path parameters
         item_id_str = event.get("pathParameters", {}).get("item_id")
         if not item_id_str:
-            return response.api_response(400, message="Item ID is required.")
+            return response.api_response(400, error_details='Item ID is required.')
             
         try:
             # Handle case where item_id is already a UUID object
@@ -58,7 +56,7 @@ def lambda_handler(event, _context, db_session=None):
             else:
                 item_id = uuid.UUID(item_id_str)
         except ValueError:
-            return response.api_response(400, message="Invalid item ID format.")
+            return response.api_response(400, error_details='Invalid item ID format.')
 
         # Parse request body
         body = json.loads(event.get("body", "{}")) if event.get("body") else {}
@@ -66,22 +64,22 @@ def lambda_handler(event, _context, db_session=None):
         # Ensure item exists
         item = db.query(Item).filter(Item.id == item_id).first()
         if not item:
-            return response.api_response(404, message="Item not found.")
+            return response.api_response(404, error_details='Item not found.')
             
         # Authorization check - verify the user has access to this item
         # Get the claim associated with this item
         claim = db.query(Claim).filter(Claim.id == item.claim_id).first()
         if not claim:
-            return response.api_response(404, message="Associated claim not found.")
+            return response.api_response(404, error_details='Associated claim not found.')
             
         # Get the user from the database
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
-            return response.api_response(404, message="User not found.")
+            return response.api_response(404, error_details='User not found.')
             
         # Check if the user's household matches the claim's household
         if user.household_id != claim.household_id:
-            return response.api_response(404, message="Item not found.")
+            return response.api_response(404, error_details='Item not found.')
             
         # Handle item property updates (name, description, etc.)
         item_updated = False
@@ -115,16 +113,16 @@ def lambda_handler(event, _context, db_session=None):
                 else:
                     file_id = uuid.UUID(file_id_str)
             except ValueError:
-                return response.api_response(400, message="Invalid file ID format.")
+                return response.api_response(400, error_details='Invalid file ID format.')
                 
             # Ensure file exists
             file = db.query(File).filter(File.id == file_id).first()
             if not file:
-                return response.api_response(404, message="File not found.")
+                return response.api_response(404, error_details='File not found.')
                 
             # Verify the file belongs to the same claim as the item
             if file.claim_id != item.claim_id:
-                return response.api_response(404, message="File not found.")
+                return response.api_response(404, error_details='File not found.')
     
             # Create the file-item association if it doesn't exist
             existing_association = db.query(ItemFile).filter(
@@ -152,16 +150,16 @@ def lambda_handler(event, _context, db_session=None):
         # Return appropriate success message based on what was updated
         if file_id_str:
             if item_updated:
-                return response.api_response(200, message="Item properties and file/label associations updated successfully.")
+                return response.api_response(200, success_message='Item properties and file/label associations updated successfully.')
             else:
-                return response.api_response(200, message="File associated with item and labels updated successfully.")
+                return response.api_response(200, success_message='File associated with item and labels updated successfully.')
         else:
-            return response.api_response(200, message="Item properties updated successfully.")
+            return response.api_response(200, success_message='Item properties updated successfully.')
 
     except Exception as e:
         logger.exception("Unexpected error updating item")
         db.rollback()
-        return response.api_response(500, message="Internal Server Error", error_details=str(e))
+        return response.api_response(500, error_details=f'Internal Server Error: {str(e)}')
 
     finally:
         if db_session is None and db:

@@ -107,7 +107,7 @@ def test_get_items_invalid_pagination(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 400
     response_data = json.loads(response["body"])
-    assert "Invalid pagination parameters" in response_data["message"]
+    assert "Invalid pagination parameters" in response_data["error_details"]
     
     # Test invalid limit (non-numeric)
     event = api_gateway_event(
@@ -120,7 +120,7 @@ def test_get_items_invalid_pagination(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 400
     response_data = json.loads(response["body"])
-    assert "Invalid pagination parameters" in response_data["message"]
+    assert "Invalid pagination parameters" in response_data["error_details"]
     
     # Test invalid offset (negative)
     event = api_gateway_event(
@@ -133,7 +133,7 @@ def test_get_items_invalid_pagination(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 400
     response_data = json.loads(response["body"])
-    assert "Invalid pagination parameters" in response_data["message"]
+    assert "Invalid pagination parameters" in response_data["error_details"]
     
     # Test invalid offset (non-numeric)
     event = api_gateway_event(
@@ -146,46 +146,53 @@ def test_get_items_invalid_pagination(api_gateway_event, test_db, seed_claim):
     
     assert response["statusCode"] == 400
     response_data = json.loads(response["body"])
-    assert "Invalid pagination parameters" in response_data["message"]
+    assert "Invalid pagination parameters" in response_data["error_details"]
 
 def test_get_items_unauthorized(api_gateway_event, test_db, seed_claim):
-    """ Test attempting to retrieve items without authentication."""
-    claim_id, _, _ = seed_claim
+    """Test attempting to get items without authentication."""
+    claim_id, user_id, file_id = seed_claim
+    
+    # Create some items
+    for i in range(3):
+        item = Item(
+            id=uuid.uuid4(),
+            claim_id=claim_id,
+            name=f"Test Item {i}",
+            description=f"Description for test item {i}"
+        )
+        test_db.add(item)
+    test_db.commit()
     
     # Attempt to get items without authentication
-    event = api_gateway_event("GET", path_params={"claim_id": str(claim_id)}, auth_user=None)
+    event = api_gateway_event("GET", query_params={"claim_id": str(claim_id)}, auth_user=None)
     response = lambda_handler(event, {}, db_session=test_db)
     
     # Check that the response indicates unauthorized access
-    assert response["statusCode"] == 400
+    assert response["statusCode"] == 401
     response_body = json.loads(response["body"])
-    assert "Invalid authentication" in response_body["message"]
+    assert "Unauthorized: Missing authentication" in response_body["error_details"]
 
 def test_get_items_missing_claim_id(api_gateway_event, test_db, seed_claim):
-    """ Test retrieving items without providing a claim ID."""
-    _, user_id, _ = seed_claim
+    """Test attempting to get items without providing a claim ID."""
+    claim_id, user_id, file_id = seed_claim
     
-    # Attempt to get items without a claim ID
-    event = api_gateway_event("GET", auth_user=str(user_id))
+    event = api_gateway_event("GET", path_params={}, auth_user=str(user_id))
     response = lambda_handler(event, {}, db_session=test_db)
     
-    # Check that the response indicates a missing claim ID
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "Claim ID is required" in response_body["message"]
+    assert "Missing required path parameter: claim_id" in response_body["error_details"]
 
 def test_get_items_invalid_claim_id(api_gateway_event, test_db, seed_claim):
-    """ Test retrieving items with an invalid claim ID format."""
-    _, user_id, _ = seed_claim
+    """Test attempting to get items with an invalid claim ID format."""
+    claim_id, user_id, file_id = seed_claim
     
-    # Attempt to get items with an invalid claim ID
-    event = api_gateway_event("GET", path_params={"claim_id": "invalid-uuid"}, auth_user=str(user_id))
+    event = api_gateway_event("GET", path_params={"claim_id": "not-a-uuid"}, auth_user=str(user_id))
     response = lambda_handler(event, {}, db_session=test_db)
     
-    # Check that the response indicates an invalid claim ID format
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "Invalid claim ID format" in response_body["message"]
+    assert "Invalid claim_id format" in response_body["error_details"]
 
 def test_get_items_empty_result(api_gateway_event, test_db, seed_claim):
     """ Test retrieving items for a claim with no items."""

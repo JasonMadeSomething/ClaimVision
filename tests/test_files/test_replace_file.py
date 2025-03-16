@@ -123,7 +123,7 @@ def test_replace_file_invalid_uuid(api_gateway_event, test_db, seed_file):
 
         assert response["statusCode"] == 400
         assert "error_details" in body
-        assert "Invalid file ID" in body["error_details"]
+        assert "Invalid id format. Expected UUID" in body["error_details"]
         mock_s3_upload.assert_not_called()
 
 def test_replace_file_too_large(api_gateway_event, test_db, seed_file):

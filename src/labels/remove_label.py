@@ -1,4 +1,4 @@
-import logging
+from utils.logging_utils import get_logger
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from database.database import get_db_session
@@ -8,9 +8,7 @@ from utils import response
 from utils import auth_utils
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
+logger = get_logger(__name__)
 def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
     """
     Handles label removal from a file.
@@ -61,7 +59,7 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         # Check if the label exists
         label = db.query(Label).filter(Label.id == label_id).first()
         if not label:
-            return response.api_response(404, message="Label not found.")
+            return response.api_response(404, error_details='Label not found.')
         
         # Check if user has access to the label's household
         success, error_response = auth_utils.check_resource_access(user, label.household_id)
@@ -74,7 +72,7 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
             FileLabel.label_id == label_id
         ).first()
         if not file_label:
-            return response.api_response(404, message="Label is not associated with this file.")
+            return response.api_response(404, error_details='Label is not associated with this file.')
 
         # Handle AI vs User Label Deletion
         if label.is_ai_generated:
@@ -82,7 +80,7 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
             file_label.deleted = True
             db.commit()
             logger.info("Soft deleted AI label %s from file %s in household %s", label_id, file_id, label.household_id)
-            return response.api_response(204, message="AI label removed from file.")
+            return response.api_response(204, success_message='AI label removed from file.')
 
         else:
             # User Label → Fully remove from `Label` (global delete)
@@ -93,16 +91,16 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
                 db.delete(label)  # Only delete globally if no remaining links
                 db.commit()
             logger.info(f"Deleted user label {label_id} globally from household {label.household_id}")
-            return response.api_response(204, message="User label deleted globally.")
+            return response.api_response(204, success_message='User label deleted globally.')
 
     except SQLAlchemyError as db_error:
         db.rollback()
         logger.error(f"Database error removing label: {str(db_error)}")
-        return response.api_response(500, message="Database error.")
+        return response.api_response(500, error_details='Database error.')
 
     except Exception:
         logger.exception("Unexpected error removing label")
-        return response.api_response(500, message="Internal Server Error")
+        return response.api_response(500, error_details='Internal Server Error')
 
     finally:
         db.close()

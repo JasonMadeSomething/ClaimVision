@@ -134,7 +134,7 @@ def test_get_claim_invalid_id(api_gateway_event, seed_test_user, test_db):
     
     # The extract_uuid_param function should return a 400 status code for invalid UUIDs
     assert response_obj["statusCode"] == 400
-    assert "Invalid claim ID" in body["error_details"]
+    assert "Invalid claim_id format" in body["error_details"]
 
 def test_get_claim_db_failure(api_gateway_event):
     """ Test handling a database failure during claim retrieval"""

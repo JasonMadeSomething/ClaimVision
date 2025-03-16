@@ -7,7 +7,7 @@ Otherwise, it creates a new user in the database and registers them in AWS Cogni
 """
 import os
 import json
-import logging
+from utils.logging_utils import get_logger
 import re
 import boto3
 from sqlalchemy.exc import OperationalError
@@ -15,11 +15,14 @@ from utils import response
 from models import User, Household
 from database.database import get_db_session
 from sqlalchemy.orm import Session
+from utils.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
+
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 def get_cognito_client() -> boto3.client:
     """
     Get an AWS Cognito client for user authentication.

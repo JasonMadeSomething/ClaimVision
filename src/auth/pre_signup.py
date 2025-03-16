@@ -1,10 +1,12 @@
 import json
-import logging
+from utils.logging_utils import get_logger
+from utils.logging_utils import get_logger
+
+
+logger = get_logger(__name__)
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger()
-
+logger = get_logger(__name__)
 def lambda_handler(event, context):
     """
     Auto-confirms user sign-ups in Cognito.

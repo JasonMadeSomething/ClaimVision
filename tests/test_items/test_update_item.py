@@ -29,7 +29,7 @@ def test_update_item_multiple_properties(api_gateway_event, test_db, seed_item):
     }
     event = api_gateway_event("PATCH", path_params={"item_id": str(item_id)}, body=json.dumps(payload), auth_user=str(user_id))
     response = lambda_handler(event, {}, db_session=test_db)
-
+    
     assert response["statusCode"] == 200
     
     # Verify the item was updated correctly
@@ -54,11 +54,11 @@ def test_update_item_no_auth(api_gateway_event, test_db, seed_item):
 
     assert response["statusCode"] == 401
     response_body = json.loads(response["body"])
-    assert "Authentication required" in response_body["message"]
+    assert "Authentication required" in response_body["error_details"]
 
 def test_update_item_invalid_id(api_gateway_event, test_db, seed_item):
     """ Test updating an item with an invalid ID."""
-    _, user_id, _ = seed_item
+    item_id, user_id, _ = seed_item
 
     payload = {"name": "Invalid ID Update"}
     event = api_gateway_event("PATCH", path_params={"item_id": "not-a-uuid"}, body=json.dumps(payload), auth_user=str(user_id))
@@ -66,7 +66,7 @@ def test_update_item_invalid_id(api_gateway_event, test_db, seed_item):
 
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "Invalid item ID format" in response_body["message"]
+    assert "Invalid item ID format" in response_body["error_details"]
 
 def test_update_nonexistent_item(api_gateway_event, test_db, seed_item):
     """ Test updating an item that doesn't exist."""
@@ -81,7 +81,7 @@ def test_update_nonexistent_item(api_gateway_event, test_db, seed_item):
 
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "Item not found" in response_body["message"]
+    assert "Item not found" in response_body["error_details"]
 
 def test_update_item_with_invalid_file_id(api_gateway_event, test_db, seed_item):
     """ Test updating an item with an invalid file ID."""
@@ -96,7 +96,7 @@ def test_update_item_with_invalid_file_id(api_gateway_event, test_db, seed_item)
 
     assert response["statusCode"] == 400
     response_body = json.loads(response["body"])
-    assert "Invalid file ID format" in response_body["message"]
+    assert "Invalid file ID format" in response_body["error_details"]
 
 def test_update_item_with_nonexistent_file(api_gateway_event, test_db, seed_item):
     """ Test updating an item with a file that doesn't exist."""
@@ -114,7 +114,7 @@ def test_update_item_with_nonexistent_file(api_gateway_event, test_db, seed_item
 
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "File not found" in response_body["message"]
+    assert "File not found" in response_body["error_details"]
 
 def test_update_item_unauthorized_user(api_gateway_event, test_db, seed_item):
     """ Test updating an item with an unauthorized user."""
@@ -141,7 +141,7 @@ def test_update_item_unauthorized_user(api_gateway_event, test_db, seed_item):
 
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "Item not found" in response_body["message"]
+    assert "Item not found" in response_body["error_details"]
 
 def test_update_item_with_file_from_different_claim(api_gateway_event, test_db, seed_item):
     """ Test updating an item with a file from a different claim."""
@@ -163,7 +163,7 @@ def test_update_item_with_file_from_different_claim(api_gateway_event, test_db, 
     # Create a file for the new claim
     different_claim_file = File(
         claim_id=new_claim.id,
-        uploaded_by=user_id,
+        uploaded_by=user.id,
         household_id=user.household_id,
         file_name="different_claim_file.jpg",
         s3_key="different_claim_file.jpg",
@@ -176,9 +176,9 @@ def test_update_item_with_file_from_different_claim(api_gateway_event, test_db, 
         "name": "Different Claim File Update",
         "file_id": str(different_claim_file.id)
     }
-    event = api_gateway_event("PATCH", path_params={"item_id": str(item_id)}, body=json.dumps(payload), auth_user=str(user_id))
+    event = api_gateway_event("PATCH", path_params={"item_id": str(item_id)}, body=json.dumps(payload), auth_user=str(user.id))
     response = lambda_handler(event, {}, db_session=test_db)
 
     assert response["statusCode"] == 404
     response_body = json.loads(response["body"])
-    assert "File not found" in response_body["message"]
+    assert "File not found" in response_body["error_details"]
