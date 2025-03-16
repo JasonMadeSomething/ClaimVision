@@ -15,7 +15,10 @@ from models.file_labels import FileLabel
 from sqlalchemy import text
 from models import Base, File, Household, User, Claim, Label
 from models.file import FileStatus
-
+from models.item_files import ItemFile
+from models.item_labels import ItemLabel
+from models.item import Item
+from models.claim import Claim
 load_dotenv()
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
@@ -305,3 +308,135 @@ def seed_labels(test_db: Session):
     test_db.commit()
 
     return file_id, user_id, ai_label.id, user_label.id
+
+@pytest.fixture
+def seed_claim(test_db: Session):
+    """Seeds a claim and returns its ID."""
+    claim_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    household_id = uuid.uuid4()
+    file_id = uuid.uuid4()
+    
+    test_household = Household(id=household_id, name="Test Household")  
+    test_user = User(id=user_id, email=f"{user_id}@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
+    test_file = File(
+        id=file_id,
+        uploaded_by=user_id,
+        household_id=household_id,
+        claim_id=claim_id,
+        file_name="test.jpg",
+        s3_key="test-key",
+        file_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    )
+    test_db.add_all([test_household, test_user, test_claim, test_file])
+    test_db.commit()
+    
+    return claim_id, user_id, file_id
+
+
+@pytest.fixture
+def seed_item(test_db: Session, seed_claim):
+    """Seeds a single item under a claim."""
+    claim_id, user_id, file_id = seed_claim
+    item_id = uuid.uuid4()
+    household_id = uuid.uuid4()
+    test_household = Household(id=household_id, name="Test Household")
+    test_item = Item(id=item_id, claim_id=claim_id, name="Test Item", description="A sample item", estimated_value=100.00)
+    test_db.add_all([test_household, test_item])
+    test_db.commit()
+
+    return item_id, user_id, file_id
+
+@pytest.fixture
+def seed_multiple_items(test_db: Session, seed_claim):
+    """Seeds multiple items under the same claim."""
+    claim_id, user_id, file_id = seed_claim
+    item_ids = []
+
+    for _ in range(3):
+        item_id = uuid.uuid4()
+        test_item = Item(id=item_id, claim_id=claim_id, name=f"Test Item {_}", description="A sample item", estimated_value=100.00)
+        test_db.add_all([test_item])
+        item_ids.append(item_id)
+
+    test_db.commit()
+    return claim_id, user_id, item_ids
+
+@pytest.fixture
+def seed_item_with_file_labels(test_db: Session, seed_item):
+    """Seeds an item with a file and labels."""
+    item_id, user_id, _ = seed_item  # Ignore the original file_id
+    
+    # Get the item to find its claim_id
+    item = test_db.query(Item).filter(Item.id == item_id).first()
+    user = test_db.query(User).filter(User.id == user_id).first()
+    
+    # Create file with the same claim_id and household_id
+    test_file = File(
+        id=uuid.uuid4(),
+        uploaded_by=user_id,
+        household_id=user.household_id,  # Use the same household_id as the user
+        claim_id=item.claim_id,  # Use the same claim_id as the item
+        file_name="test.jpg",
+        s3_key="test-key",
+        file_hash="test_file_hash"
+    )
+    test_db.add(test_file)
+    test_db.commit()
+
+    # Associate file with item
+    test_db.add(ItemFile(item_id=item_id, file_id=test_file.id))
+    test_db.commit()
+
+    # Create labels with the same household_id
+    label_1 = Label(
+        id=uuid.uuid4(),
+        label_text="TV",
+        is_ai_generated=True,
+        household_id=user.household_id  # Use the same household_id as the user
+    )
+    label_2 = Label(
+        id=uuid.uuid4(),
+        label_text="Couch",
+        is_ai_generated=True,
+        household_id=user.household_id  # Use the same household_id as the user
+    )
+
+    test_db.add_all([label_1, label_2])
+    test_db.commit()
+
+    # Associate only the TV label with the item
+    test_db.add(ItemLabel(item_id=item_id, label_id=label_1.id))
+    test_db.commit()
+
+    return item_id, user_id, test_file.id
+
+@pytest.fixture
+def seed_multiple_items_with_labels(test_db: Session, seed_multiple_items):
+    """Seeds multiple items, each with different labels, ensuring label inheritance is correct."""
+    _, user_id, item_ids = seed_multiple_items
+    labels = ["TV", "Couch", "Table"]
+    
+    # Get the user to find their household_id
+    user = test_db.query(User).filter(User.id == user_id).first()
+    
+    # Ensure we're using the same household_id as the user
+    household_id = user.household_id
+
+    for i, item_id in enumerate(item_ids):
+        # Create label with the same household_id as the user
+        label = Label(
+            id=uuid.uuid4(), 
+            label_text=labels[i], 
+            is_ai_generated=True, 
+            household_id=household_id
+        )
+        test_db.add(label)
+        test_db.commit()
+
+        # Associate label with item
+        test_db.add(ItemLabel(item_id=item_id, label_id=label.id))
+        test_db.commit()
+
+    return item_ids, user_id

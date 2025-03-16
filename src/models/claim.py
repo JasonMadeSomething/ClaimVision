@@ -15,6 +15,7 @@ class Claim(Base):
 
     household = relationship("Household", back_populates="claims")
     files = relationship("File", back_populates="claim")
+    items = relationship("Item", back_populates="claim", cascade="all, delete-orphan")
 
     def to_dict(self):
         return {

@@ -1,9 +1,8 @@
-from sqlalchemy import Table, Column, ForeignKey, UUID
-from models.base import Base  # ✅ Restored Base import
+from sqlalchemy import Column, ForeignKey, UUID, Table
+from models.base import Base
 
-item_files = Table(
-    "item_files",
-    Base.metadata,
-    Column("item_id", UUID, ForeignKey("items.id"), primary_key=True),
-    Column("file_id", UUID, ForeignKey("files.id"), primary_key=True)
-)
+class ItemFile(Base):
+    __tablename__ = "item_files"
+
+    item_id = Column(UUID, ForeignKey("items.id"), primary_key=True)
+    file_id = Column(UUID, ForeignKey("files.id"), primary_key=True)
