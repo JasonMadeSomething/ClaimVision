@@ -3,6 +3,8 @@ import boto3
 import os
 import jwt
 from utils import response
+# Import for future database operations
+from utils.database import get_database_url  # noqa
 from botocore.exceptions import ClientError
 
 def get_cognito_client() -> boto3.client:
