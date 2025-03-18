@@ -25,7 +25,7 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
     if event.get("pathParameters") is None:
         return response.api_response(400, error_details="Missing file ID parameter")
         
-    success, result = extract_uuid_param(event, "id")
+    success, result = extract_uuid_param(event, "file_id")
     if not success:
         return result  # Return error response
         

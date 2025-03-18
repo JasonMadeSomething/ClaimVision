@@ -26,7 +26,7 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
         dict: API response with updated file metadata or error.
     """
     # Extract and validate file ID
-    success, result = extract_uuid_param(event, "id")
+    success, result = extract_uuid_param(event, "file_id")
     if not success:
         return result  # Return error response
         

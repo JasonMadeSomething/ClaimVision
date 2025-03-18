@@ -8,10 +8,53 @@ Parameters:
     AllowedValues:
       - dev
       - prod
-    Description: 'Specify the environment: dev or prod'
+    Description: Environment name
+  S3BucketNameSSMPath:
+    Type: String
+    Default: /terraform/s3/bucket_name
+    Description: SSM Parameter Store path for S3 bucket name
   CognitoUserPoolId:
     Type: String
     Description: The Cognito User Pool ID from the external stack
+  RDSEndpointSSMPath:
+    Type: String
+    Default: /terraform/database/host
+    Description: SSM Parameter Store path for RDS endpoint
+  DBUsernameSSMPath:
+    Type: String
+    Default: /terraform/database/username
+    Description: SSM Parameter Store path for database username
+  DBPasswordSSMPath:
+    Type: String
+    Default: /terraform/database/password
+    Description: SSM Parameter Store path for database password
+  DBUsername:
+    Type: String
+    Description: Database username
+  DBPassword:
+    Type: String
+    Description: Database password
+  DBEndpoint:
+    Type: String
+    Description: Database endpoint
+  FileUploadQueueURL:
+    Type: String
+    Description: URL of the file upload SQS queue
+  FileUploadQueueARN:
+    Type: String
+    Description: ARN of the file upload SQS queue
+  FileUploadQueueName:
+    Type: String
+    Description: Name of the file upload SQS queue
+  FileAnalysisQueueURL:
+    Type: String
+    Description: URL of the file analysis SQS queue
+  FileAnalysisQueueARN:
+    Type: String
+    Description: ARN of the file analysis SQS queue
+  FileAnalysisQueueName:
+    Type: String
+    Description: Name of the file analysis SQS queue
 
 Conditions:
   IsDev: !Equals
@@ -32,75 +75,161 @@ Globals:
     Runtime: python3.12
     Environment:
       Variables:
-        COGNITO_USER_POOL_CLIENT_ID: !If
-          - IsDev
-          - !ImportValue CognitoUserPoolClientId-dev
-          - !ImportValue CognitoUserPoolClientId-prod
-        COGNITO_USER_POOL_ID: !If
-          - IsDev
-          - !ImportValue CognitoUserPoolId-dev
-          - !ImportValue CognitoUserPoolId-prod
+        DB_USERNAME: !Ref DBUsername
+        DB_PASSWORD: !Ref DBPassword
+        DB_HOST: !Ref DBEndpoint
+        DB_NAME: "claimvision"
 
 Resources:
-  ####Tables####
-  # Claims
-  ClaimsTable:
-    Type: AWS::DynamoDB::Table
+  # IAM Role for Lambda functions
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
     Properties:
-      TableName: !Sub ClaimsTable-${Env}
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: id # ✅ Primary Key
-          AttributeType: S
-        - AttributeName: user_id # ✅ Secondary Index (GlobalSecondaryIndexes uses this)
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH # ✅ The main partition key
-      GlobalSecondaryIndexes:
-        - IndexName: UserIdIndex
-          KeySchema:
-            - AttributeName: user_id
-              KeyType: HASH
-          Projection:
-            ProjectionType: ALL
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SSMParameterAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: 
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBUsernameSSMPath}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBPasswordSSMPath}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RDSEndpointSSMPath}'
+                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${S3BucketNameSSMPath}'
+        - PolicyName: DBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-db:connect
+                Resource: "*"
 
-  # Files
-  FilesTable:
-    Type: AWS::DynamoDB::Table
+  # IAM Role for Process File Lambda
+  ProcessFileLambdaRole:
+    Type: AWS::IAM::Role
     Properties:
-      TableName: !Sub FilesTable-${Env}
-      BillingMode: PAY_PER_REQUEST
-      AttributeDefinitions:
-        - AttributeName: id
-          AttributeType: S
-        - AttributeName: user_id
-          AttributeType: S
-      KeySchema:
-        - AttributeName: id
-          KeyType: HASH
-      GlobalSecondaryIndexes:
-        - IndexName: UserIdIndex
-          KeySchema:
-            - AttributeName: user_id
-              KeyType: HASH
-          Projection:
-            ProjectionType: ALL
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource:
+                  - !Ref FileUploadQueueARN
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource:
+                  - !Ref FileAnalysisQueueARN
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                Resource:
+                  - !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}
+                  - !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
+        - PolicyName: DBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-db:connect
+                Resource: "*"
 
-  # User Pool ID
-  UserPoolId:
+  # IAM Role for Analyze File Lambda
+  AnalyzeFileLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource:
+                  - !Ref FileAnalysisQueueARN
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource:
+                  - !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}
+                  - !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
+        - PolicyName: DBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-db:connect
+                Resource: "*"
+        - PolicyName: RekognitionAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rekognition:DetectLabels
+                  - rekognition:DetectText
+                Resource: "*"
+
+  S3BucketName:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !FindInMap
-        - CognitoExports
-        - !Ref Env
-        - UserPoolId
+      Name: !Sub "/claimvision/${Env}/s3-bucket-name"
       Type: String
-      Value: !ImportValue
-        Fn::FindInMap:
-          - CognitoExports
-          - !Ref Env
-          - UserPoolId
+      Value: !Sub "{{resolve:ssm:${S3BucketNameSSMPath}}}"
+      Description: "S3 bucket name for ClaimVision"
 
   ###API###
   # API Gateway
@@ -130,6 +259,14 @@ Resources:
       CodeUri: src/
       Timeout: 10
       MemorySize: 128
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          USER_POOL_ID: !Ref CognitoUserPoolId
     Policies:
       - AWSLambdaBasicExecutionRole
       - Statement:
@@ -137,9 +274,6 @@ Resources:
           Action:
             - cognito-idp:AdminUpdateUserAttributes
           Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
-    Environment:
-      Variables:
-        USER_POOL_ID: !Ref CognitoUserPoolId
 
   ##Auth##
   # Login Function
@@ -149,6 +283,21 @@ Resources:
       Handler: auth.login.lambda_handler
       Runtime: python3.12
       CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          COGNITO_USER_POOL_CLIENT_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolClientId-dev
+            - !ImportValue CognitoUserPoolClientId-prod
+          COGNITO_USER_POOL_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolId-dev
+            - !ImportValue CognitoUserPoolId-prod
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -157,15 +306,30 @@ Resources:
           Properties:
             Path: /auth/login
             Method: POST
-            RestApiId: !Ref ClaimVisionAPI # No Auth here!
+            RestApiId: !Ref ClaimVisionAPI
 
   # Register Function
   RegisterFunction:
     Type: AWS::Serverless::Function
     Properties:
+      CodeUri: src/
       Handler: auth.register.lambda_handler
       Runtime: python3.12
-      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          COGNITO_USER_POOL_CLIENT_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolClientId-dev
+            - !ImportValue CognitoUserPoolClientId-prod
+          COGNITO_USER_POOL_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolId-dev
+            - !ImportValue CognitoUserPoolId-prod
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -175,13 +339,29 @@ Resources:
             Path: /auth/register
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
+
   # Confirm Email
   ConfirmFunction:
     Type: AWS::Serverless::Function
     Properties:
+      CodeUri: src/
       Handler: auth.confirm.lambda_handler
       Runtime: python3.12
-      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          COGNITO_USER_POOL_CLIENT_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolClientId-dev
+            - !ImportValue CognitoUserPoolClientId-prod
+          COGNITO_USER_POOL_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolId-dev
+            - !ImportValue CognitoUserPoolId-prod
       Policies:
         - AWSLambdaBasicExecutionRole
       Events:
@@ -191,15 +371,39 @@ Resources:
             Path: /auth/confirm
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
+
   # Resend Email Verification
   ResendConfirmationFunction:
     Type: AWS::Serverless::Function
     Properties:
+      CodeUri: src/
       Handler: auth.resend_confirmation.lambda_handler
       Runtime: python3.12
-      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          COGNITO_USER_POOL_CLIENT_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolClientId-dev
+            - !ImportValue CognitoUserPoolClientId-prod
+          COGNITO_USER_POOL_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolId-dev
+            - !ImportValue CognitoUserPoolId-prod
       Policies:
         - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
       Events:
         ResendConfirmationAPI:
           Type: Api
@@ -207,37 +411,61 @@ Resources:
             Path: /auth/resend-confirmation
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
+
   # Dev bypass email verification
   PreSignUpFunction:
     Type: AWS::Serverless::Function
     Condition: IsDev
     Properties:
+      CodeUri: src/
       Handler: auth.pre_signup.lambda_handler
       Runtime: python3.12
-      CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-
-  # Get Claims Function
-  GetClaimsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: claims.get_claims.lambda_handler # ✅ Dedicated GET handler
-      Runtime: python3.12
-      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          COGNITO_USER_POOL_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolId-dev
+            - !ImportValue CognitoUserPoolId-prod
+          AUTO_CONFIRM_USER: !If [IsDev, "true", "false"]
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:Query # ✅ Fetch all claims for user
-              - dynamodb:GetItem # ✅ Fetch specific claims
+              - ssm:GetParameter
             Resource:
-              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}
-              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}/index/UserIdIndex
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+
+  # Get Claims Function
+  GetClaimsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: claims.get_claims.lambda_handler
+      Runtime: python3.12
+      Policies:
+        - Statement:
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+        - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
-          CLAIMS_TABLE: !Ref ClaimsTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
       Events:
         GetClaimsAPI:
           Type: Api
@@ -247,37 +475,20 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-        GetClaimAPI:
-          Type: Api
-          Properties:
-            Path: /claims/{id}
-            Method: GET
-            RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: CognitoAuthorizer
-
-  # Claims CRUD Function
-  ModifyClaimFunction:
+  # Create Claim Function
+  CreateClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: claims.modify_claims.lambda_handler # ✅ Dedicated CRUD handler
+      Handler: claims.create_claim.lambda_handler
       Runtime: python3.12
       CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - AWSLambdaDynamoDBExecutionRole # ✅ Full CRUD permissions for claims
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:PutItem # ✅ Create claims
-              - dynamodb:GetItem # ✅ Read claims
-              - dynamodb:UpdateItem # ✅ Modify claims
-              - dynamodb:DeleteItem # ✅ Remove claims
-            Resource:
-              - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/ClaimsTable-${Env}
+      Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          CLAIMS_TABLE: !Ref ClaimsTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
       Events:
         CreateClaimAPI:
           Type: Api
@@ -287,18 +498,435 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
+
+  # Get Claim Function
+  GetClaimFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: claims.get_claim.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        GetClaimAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Update Claim Function
+  UpdateClaimFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: claims.update_claim.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
         UpdateClaimAPI:
           Type: Api
           Properties:
-            Path: /claims/{id}
+            Path: /claims/{claim_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
+
+  # Delete Claim Function
+  DeleteClaimFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: claims.delete_claim.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
         DeleteClaimAPI:
           Type: Api
           Properties:
-            Path: /claims/{id}
+            Path: /claims/{claim_id}
+            Method: DELETE
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Create Item Function
+  CreateItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: items.create_item.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        CreateItemAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/items
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Get Items Function
+  GetItemsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: items.get_items.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        GetItemsAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/items
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Get Item Function
+  GetItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: items.get_item.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        GetItemAPI:
+          Type: Api
+          Properties:
+            Path: /items/{item_id}
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Update Item Function
+  UpdateItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: items.update_item.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        UpdateItemAPI:
+          Type: Api
+          Properties:
+            Path: /items/{item_id}
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Delete Item Function
+  DeleteItemFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: items.delete_item.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        DeleteItemAPI:
+          Type: Api
+          Properties:
+            Path: /items/{item_id}
+            Method: DELETE
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Create Label Function
+  CreateLabelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: labels.create_label.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        CreateLabelAPI:
+          Type: Api
+          Properties:
+            Path: /files/{file_id}/labels
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Get Labels Function
+  GetLabelsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: labels.get_labels.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        GetLabelsAPI:
+          Type: Api
+          Properties:
+            Path: /files/{file_id}/labels
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Delete Label Function
+  DeleteLabelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: labels.delete_label.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        DeleteLabelAPI:
+          Type: Api
+          Properties:
+            Path: /files/{file_id}/labels/{label_id}
+            Method: DELETE
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Remove Label Function
+  RemoveLabelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: labels.remove_label.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        RemoveLabelAPI:
+          Type: Api
+          Properties:
+            Path: /files/{file_id}/labels/{label_id}/remove
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Restore Label Function
+  RestoreLabelFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: labels.restore_label.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        RestoreLabelAPI:
+          Type: Api
+          Properties:
+            Path: /files/{file_id}/labels/{label_id}/restore
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Room Functions
+  # Create Room Function
+  CreateRoomFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rooms.create_room.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        CreateRoomAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/rooms
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Get Rooms Function
+  GetRoomsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rooms.get_rooms.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        GetRoomsAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/rooms
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Get Room Function
+  GetRoomFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rooms.get_room.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        GetRoomAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/rooms/{room_id}
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Update Room Function
+  UpdateRoomFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rooms.update_room.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        UpdateRoomAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/rooms/{room_id}
+            Method: PUT
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+
+  # Delete Room Function
+  DeleteRoomFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rooms.delete_room.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Events:
+        DeleteRoomAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/rooms/{room_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
             Auth:
@@ -312,17 +940,25 @@ Resources:
       Handler: admin.get_users.lambda_handler
       Runtime: python3.12
       CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
       Policies:
-        - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
-              - cognito-idp:ListUsers # ✅ Allow listing users in Cognito
+              - cognito-idp:ListUsers # Allow listing users in Cognito
             Resource:
               - !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+        - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
-          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId # ✅ Fix reference issue
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          COGNITO_USER_POOL_ID: !If
+            - IsDev
+            - !ImportValue CognitoUserPoolId-dev
+            - !ImportValue CognitoUserPoolId-prod
       Events:
         GetUsersAPI:
           Type: Api
@@ -332,23 +968,37 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-    # Update User Role Function      
+
+  # Update User Role Function
   UpdateUserRoleFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: admin.update_user_role.lambda_handler
       Runtime: python3.12
       CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
       Policies:
-        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - ssm:GetParameter
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
         - Statement:
             Effect: Allow
             Action:
               - cognito-idp:AdminAddUserToGroup
               - cognito-idp:AdminRemoveUserFromGroup
             Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+        - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
       Events:
         UpdateUserRoleAPI:
@@ -367,16 +1017,23 @@ Resources:
       Handler: files.get_files.lambda_handler
       Runtime: python3.12
       CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
       Policies:
-        - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:Query
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}/index/UserIdIndex
+              - ssm:GetParameter
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+        - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
-          FILES_TABLE: !Ref FilesTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
       Events:
         GetFilesAPI:
           Type: Api
@@ -394,21 +1051,31 @@ Resources:
       Handler: files.get_file.lambda_handler
       Runtime: python3.12
       CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - x86_64
       Policies:
-        - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
-              - dynamodb:GetItem
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
+              - ssm:GetParameter
+            Resource:
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+        - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
-          FILES_TABLE: !Ref FilesTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          S3_BUCKET_NAME: !Ref S3BucketName
       Events:
         GetFileAPI:
           Type: Api
           Properties:
-            Path: /files/{id}
+            Path: /files/{file_id}
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
             Auth:
@@ -421,22 +1088,18 @@ Resources:
       Handler: files.update_file_metadata.lambda_handler
       Runtime: python3.12
       CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:UpdateItem
-              - dynamodb:GetItem
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
+      Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          FILES_TABLE: !Ref FilesTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
       Events:
         UpdateFileMetadataAPI:
           Type: Api
           Properties:
-            Path: /files/{id}
+            Path: /files/{file_id}
             Method: PATCH
             RestApiId: !Ref ClaimVisionAPI
             Auth:
@@ -449,27 +1112,21 @@ Resources:
       Handler: files.replace_file.lambda_handler
       Runtime: python3.12
       CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - Statement:
-            Effect: Allow
-            Action:
-              - s3:PutObject
-            Resource: !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:UpdateItem
-              - dynamodb:GetItem
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - x86_64
       Environment:
         Variables:
-          FILES_TABLE: !Ref FilesTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          S3_BUCKET_NAME: !Ref S3BucketName
       Events:
         ReplaceFileAPI:
           Type: Api
           Properties:
-            Path: /files/{id}
+            Path: /files/{file_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
             Auth:
@@ -482,32 +1139,118 @@ Resources:
       Handler: files.delete_file.lambda_handler
       Runtime: python3.12
       CodeUri: src/
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - Statement:
-            Effect: Allow
-            Action:
-              - s3:GetObject
-              - s3:DeleteObject
-            Resource: !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
-        - Statement:
-            Effect: Allow
-            Action:
-              - dynamodb:GetItem
-              - dynamodb:DeleteItem
-            Resource: !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/FilesTable-${Env}
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - x86_64
       Environment:
         Variables:
-          FILES_TABLE: !Ref FilesTable
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+          S3_BUCKET_NAME: !Ref S3BucketName
       Events:
         DeleteFileAPI:
           Type: Api
           Properties:
-            Path: /files/{id}
+            Path: /files/{file_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
+
+    Policies:
+      - AWSLambdaBasicExecutionRole
+      - Statement:
+          Effect: Allow
+          Action:
+            - ssm:GetParameter
+          Resource:
+            - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
+            - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
+            - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+
+  UploadFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.upload_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - x86_64
+      Events:
+        UploadFileAPI:
+          Type: Api
+          Properties:
+            Path: /files/upload
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: CognitoAuthorizer
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          SQS_UPLOAD_QUEUE_URL: !Ref FileUploadQueueURL
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Sub claimvision-files-${AWS::AccountId}-${Env}
+        - SQSSendMessagePolicy:
+            QueueName: !Ref FileUploadQueueName
+
+  ProcessFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.process_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt ProcessFileLambdaRole.Arn
+      Architectures:
+        - x86_64
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref FileUploadQueueARN
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 30
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          SQS_ANALYSIS_QUEUE_URL: !Ref FileAnalysisQueueURL
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
+
+  AnalyzeFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.analyze_file.lambda_handler
+      Runtime: python3.12
+      CodeUri: src/
+      Role: !GetAtt AnalyzeFileLambdaRole.Arn
+      Architectures:
+        - x86_64
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref FileAnalysisQueueARN
+            BatchSize: 5
+            MaximumBatchingWindowInSeconds: 60
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
+          MIN_CONFIDENCE: "70.0"
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: "claimvision"
 
 Outputs:
   #  Print API Gateway URL After Deployment

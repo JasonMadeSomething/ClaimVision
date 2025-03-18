@@ -44,7 +44,7 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
 
     Args:
         event (dict): API Gateway event containing request data
-                  - pathParameters.id: UUID of the file to replace
+                  - pathParameters.file_id: UUID of the file to replace
                   - body.file_name: New name for the file
                   - body.file_data: Base64-encoded file content
         context/_context (dict): Lambda execution context (unused)
@@ -56,7 +56,7 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         dict: API response with updated file details or error
     """
     # Extract and validate file ID
-    success, result = extract_uuid_param(event, "id")
+    success, result = extract_uuid_param(event, "file_id")
     if not success:
         return result  # Return error response
         
