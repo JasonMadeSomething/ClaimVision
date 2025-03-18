@@ -9,8 +9,10 @@ module "rds" {
   db_password            = var.db_password
 }
 
-
-
+module "sqs" {
+  source = "./sqs"
+  env    = var.env
+}
 
 module "s3" {
   source         = "./s3"
