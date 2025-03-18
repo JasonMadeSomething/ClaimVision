@@ -23,3 +23,16 @@ output "rds_endpoint" {
 output "s3_bucket_name" {
   value = module.application.s3_bucket_name
 }
+
+# ✅ SSM Parameter Paths
+output "db_username_ssm_path" {
+  value = module.application.db_username_ssm_path
+}
+
+output "db_password_ssm_path" {
+  value = module.application.db_password_ssm_path
+}
+
+output "rds_endpoint_ssm_path" {
+  value = module.application.rds_endpoint_ssm_path
+}

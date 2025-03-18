@@ -11,7 +11,7 @@ variable "db_username" {
 variable "db_password" {
   type        = string
   description = "Database password"
-  sensitive   = true  # ✅ Hides value in Terraform output
+  sensitive   = true  # Hides value in Terraform output
 }
 variable "public_subnet_1" {
   type = string
@@ -23,4 +23,14 @@ variable "public_subnet_2" {
 
 variable "rds_security_group_id" {
   type = string
+}
+
+variable "rds_endpoint" {
+  type        = string
+  description = "RDS endpoint"
+}
+
+variable "s3_bucket_name" {
+  type        = string
+  description = "S3 bucket name for file storage"
 }
