@@ -7,13 +7,10 @@ import pytest
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from testcontainers.postgres import (
-    PostgresContainer,  # Optional if using Testcontainers
-)
 from sqlalchemy.orm import Session
 from models.file_labels import FileLabel
 from sqlalchemy import text
-from models import Base, File, Household, User, Claim, Label
+from models import Base, File, Household, User, Label
 from models.file import FileStatus
 from models.item_files import ItemFile
 from models.item_labels import ItemLabel
@@ -27,16 +24,29 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../s
 # -----------------
 # ENVIRONMENT MOCKS
 # -----------------
-@pytest.fixture(autouse=True)
+@pytest.fixture(scope="session", autouse=True)
 def mock_env():
     """Set required environment variables for testing."""
+    # Save original environment variables
+    original_env = os.environ.copy()
+    
+    # Set test environment variables
     os.environ["DATABASE_URL"] = "postgresql://testuser:testpassword@localhost:5432/testdb"
     os.environ["S3_BUCKET_NAME"] = "test-bucket"
     os.environ["COGNITO_USER_POOL_ID"] = "us-east-1_testpool"
     os.environ["COGNITO_USER_POOL_CLIENT_ID"] = "1234567890abcdef1234567890"
     os.environ["AWS_REGION"] = "us-east-1"
     os.environ["COGNITO_USER_POOL_CLIENT_SECRET"] = "test-user-pool-client-secret"
+    os.environ["SQS_UPLOAD_QUEUE_URL"] = "https://sqs.us-east-1.amazonaws.com/123456789012/test-upload-queue"
+    os.environ["SQS_ANALYSIS_QUEUE_URL"] = "https://sqs.us-east-1.amazonaws.com/123456789012/test-analysis-queue"
+    os.environ["MIN_CONFIDENCE"] = "70"
     
+    yield
+    
+    # Restore original environment variables
+    os.environ.clear()
+    os.environ.update(original_env)
+
 # -----------------
 # DATABASE FIXTURE
 # -----------------
@@ -103,6 +113,31 @@ def mock_s3():
         yield mock_s3
 
 # -----------------
+# MOCK SQS
+# -----------------
+@pytest.fixture(autouse=True)
+def mock_sqs():
+    """Mock SQS client for testing"""
+    with patch("boto3.client") as mock_boto3_client:
+        mock_sqs = MagicMock()
+        
+        # Configure the mock to return our mock_sqs when boto3.client('sqs') is called
+        def side_effect(service_name, *args, **kwargs):
+            if service_name == 'sqs':
+                return mock_sqs
+            # For other services like s3, create a new mock
+            return MagicMock()
+            
+        mock_boto3_client.side_effect = side_effect
+        
+        # Configure the mock SQS client's send_message method
+        mock_sqs.send_message.return_value = {"MessageId": "test-message-id"}
+        
+        # Ensure the SQS_ANALYSIS_QUEUE_URL is set
+        with patch.dict("os.environ", {"SQS_ANALYSIS_QUEUE_URL": "https://sqs.us-east-1.amazonaws.com/123456789012/test-analysis-queue"}, clear=False):
+            yield mock_sqs
+
+# -----------------
 # AUTH MOCKS
 # -----------------
 @pytest.fixture
@@ -114,7 +149,7 @@ def auth_event():
         }
     }
 
-@pytest.fixture(scope="function", autouse=True)
+@pytest.fixture(scope="function")
 def mock_cognito():
     """Fully mock Cognito interactions for all tests."""
     with patch("boto3.client") as mock_boto_client:
@@ -137,24 +172,22 @@ def mock_cognito():
         mock_cognito_client.exceptions.TooManyRequestsException = type("TooManyRequestsException", (Exception,), {})
         mock_cognito_client.exceptions.UserNotConfirmedException = type("UserNotConfirmedException", (Exception,), {})
         mock_cognito_client.exceptions.PasswordResetRequiredException = type("PasswordResetRequiredException", (Exception,), {})
-        mock_cognito_client.exceptions.CodeMismatchException = type("CodeMismatchException", (Exception,), {})  # Assign properly
-        mock_cognito_client.exceptions.LimitExceededException = type("LimitExceededException", (Exception,), {})  # Assign properly
+        mock_cognito_client.exceptions.CodeMismatchException = type("CodeMismatchException", (Exception,), {})
+        mock_cognito_client.exceptions.LimitExceededException = type("LimitExceededException", (Exception,), {})
 
         # Mock Attribute Updates (e.g., Household ID)
         mock_cognito_client.admin_update_user_attributes.return_value = {}
 
-        # Mock Cognito Login
+        # Mock Cognito Login - make sure this is a valid format for JWT decoding
         mock_cognito_client.initiate_auth.return_value = {
             "AuthenticationResult": {
-                "AccessToken": "mock-access-token",
-                "IdToken": "mock-id-token",
+                "AccessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
+                "IdToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c",
                 "RefreshToken": "mock-refresh-token"
             }
         }
 
         yield mock_cognito_client  # Provide mock to all tests
-
-        mock_cognito_client.reset_mock()
 
 @pytest.fixture
 def seed_file(test_db):
@@ -181,8 +214,7 @@ def seed_file(test_db):
         s3_key="original-key",
         status=FileStatus.UPLOADED,
         file_metadata={"mime_type": "image/jpeg", "size": 12345},
-        file_hash="test_hash",
-        claim_id=claim_id
+        file_hash="test_hash"
     )
 
     test_db.add_all([test_household, test_user, test_claim, test_file])
@@ -317,7 +349,7 @@ def seed_claim(test_db: Session):
     household_id = uuid.uuid4()
     file_id = uuid.uuid4()
     
-    test_household = Household(id=household_id, name="Test Household")  
+    test_household = Household(id=household_id, name="Test Household")
     test_user = User(id=user_id, email=f"{user_id}@example.com", first_name="Test", last_name="User", household_id=household_id)
     test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
     test_file = File(

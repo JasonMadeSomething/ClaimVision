@@ -140,7 +140,7 @@ def lambda_handler(event: dict, _context: dict) -> dict:
             cognito_client.admin_update_user_attributes(
                 UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
                 Username=user_id,
-                UserAttributes=[{"Name": "custom:household_id", "Value": household.id}]
+                UserAttributes=[{"Name": "custom:household_id", "Value": str(household.id)}]
             )
         except Exception as e:
             logger.error("Failed to update Cognito attributes: %s", str(e))

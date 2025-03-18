@@ -500,7 +500,7 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
     mock_cognito.admin_update_user_attributes.return_value = {}
 
     # Ensure `register.py` uses `test_db`
-    mocker.patch("auth.register.get_db_session", return_value=test_db)
+    mocker.patch("database.database.get_db_session", return_value=test_db)
 
     first_name = "John"
     last_name = "Doe"
@@ -554,13 +554,12 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
     mock_cognito.admin_update_user_attributes.assert_called_once_with(
         UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
         Username=generated_user_sub,
-        UserAttributes=[{"Name": "custom:household_id", "Value": user.household_id}]
+        UserAttributes=[{"Name": "custom:household_id", "Value": str(user.household_id)}]
     )
 
     print("Household ID successfully synced with Cognito!")
 
 
-# FAILURE: Cognito rejects email already in use
 def test_register_email_already_used(mock_cognito, test_db, mocker):
     """Ensure registration fails if the email is already linked to another Cognito user."""
 
@@ -570,7 +569,7 @@ def test_register_email_already_used(mock_cognito, test_db, mocker):
     mock_cognito.sign_up.side_effect = mock_cognito.exceptions.UsernameExistsException
 
     # Ensure `register.py` uses `test_db`
-    mocker.patch("auth.register.get_db_session", return_value=test_db)
+    mocker.patch("database.database.get_db_session", return_value=test_db)
 
     first_name = "John"
     last_name = "Doe"
