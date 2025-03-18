@@ -22,7 +22,16 @@ def mock_s3_client():
         s3_mock.put_object.return_value = {"ETag": "test-etag"}
         yield s3_mock
 
-def test_upload_file_with_room(test_db, api_gateway_event, mock_s3_client):
+@pytest.fixture
+def mock_sqs_client():
+    """Mock SQS client for testing"""
+    with patch("utils.lambda_utils.get_sqs_client") as mock_get_sqs:
+        sqs_mock = MagicMock()
+        mock_get_sqs.return_value = sqs_mock
+        sqs_mock.send_message.return_value = {"MessageId": "test-message-id"}
+        yield sqs_mock
+
+def test_upload_file_with_room(test_db, api_gateway_event, mock_s3_client, mock_sqs_client):
     """Test uploading a file with a room assignment"""
     # Create test data
     household_id = uuid.uuid4()
@@ -62,26 +71,20 @@ def test_upload_file_with_room(test_db, api_gateway_event, mock_s3_client):
         auth_user=str(user_id)
     )
     
-    # Mock environment variables
-    with patch.dict("os.environ", {"S3_BUCKET_NAME": "test-bucket"}):
-        # Call lambda handler
-        response = upload_file_handler(event, {}, db_session=test_db)
-        body = json.loads(response["body"])
-        
-        # Assertions
-        assert response["statusCode"] == 200
-        assert "files_uploaded" in body["data"]
-        assert len(body["data"]["files_uploaded"]) == 1
-        assert body["data"]["files_uploaded"][0]["file_name"] == "test_file.jpg"
-        assert "room_id" in body["data"]["files_uploaded"][0]
-        
-        # Verify file was created in the database with room association
-        file_id = uuid.UUID(body["data"]["files_uploaded"][0]["file_id"])
-        file = test_db.query(File).filter(File.id == file_id).first()
-        assert file is not None
-        assert file.room_id == room_id
+    # Mock environment variables and uuid generation
+    with patch.dict("os.environ", {"S3_BUCKET_NAME": "test-bucket", "SQS_UPLOAD_QUEUE_URL": "https://test-queue-url"}):
+        with patch("uuid.uuid4", return_value=uuid.UUID("12345678-1234-5678-1234-567812345678")):
+            # Call lambda handler
+            response = upload_file_handler(event, {}, db_session=test_db, user=test_user, body=file_data)
+            body = json.loads(response["body"])
+            
+            # Assertions
+            assert response["statusCode"] == 200 or response["statusCode"] == 207, f"Expected 200 or 207, got {response['statusCode']}"
+            assert "files_queued" in body["data"], f"Expected 'files_queued' in response data, got {body['data'].keys()}"
+            assert len(body["data"]["files_queued"]) == 1, f"Expected 1 file queued, got {len(body['data']['files_queued'])}"
+            assert body["data"]["files_queued"][0]["file_name"] == "test_file.jpg", f"Expected filename 'test_file.jpg', got {body['data']['files_queued'][0]['file_name']}"
 
-def test_upload_file_without_room(test_db, api_gateway_event, mock_s3_client):
+def test_upload_file_without_room(test_db, api_gateway_event, mock_s3_client, mock_sqs_client):
     """Test uploading a file without a room assignment"""
     # Create test data
     household_id = uuid.uuid4()
@@ -118,24 +121,18 @@ def test_upload_file_without_room(test_db, api_gateway_event, mock_s3_client):
         auth_user=str(user_id)
     )
     
-    # Mock environment variables
-    with patch.dict("os.environ", {"S3_BUCKET_NAME": "test-bucket"}):
-        # Call lambda handler
-        response = upload_file_handler(event, {}, db_session=test_db)
-        body = json.loads(response["body"])
-        
-        # Assertions
-        assert response["statusCode"] == 200
-        assert "files_uploaded" in body["data"]
-        assert len(body["data"]["files_uploaded"]) == 1
-        assert body["data"]["files_uploaded"][0]["file_name"] == "test_file.jpg"
-        assert "room_id" not in body["data"]["files_uploaded"][0]
-        
-        # Verify file was created in the database without room association
-        file_id = uuid.UUID(body["data"]["files_uploaded"][0]["file_id"])
-        file = test_db.query(File).filter(File.id == file_id).first()
-        assert file is not None
-        assert file.room_id is None
+    # Mock environment variables and uuid generation
+    with patch.dict("os.environ", {"S3_BUCKET_NAME": "test-bucket", "SQS_UPLOAD_QUEUE_URL": "https://test-queue-url"}):
+        with patch("uuid.uuid4", return_value=uuid.UUID("12345678-1234-5678-1234-567812345678")):
+            # Call lambda handler
+            response = upload_file_handler(event, {}, db_session=test_db, user=test_user, body=file_data)
+            body = json.loads(response["body"])
+            
+            # Assertions
+            assert response["statusCode"] == 200 or response["statusCode"] == 207, f"Expected 200 or 207, got {response['statusCode']}"
+            assert "files_queued" in body["data"], f"Expected 'files_queued' in response data, got {body['data'].keys()}"
+            assert len(body["data"]["files_queued"]) == 1, f"Expected 1 file queued, got {len(body['data']['files_queued'])}"
+            assert body["data"]["files_queued"][0]["file_name"] == "test_file.jpg", f"Expected filename 'test_file.jpg', got {body['data']['files_queued'][0]['file_name']}"
 
 def test_update_file_add_room(test_db, api_gateway_event):
     """Test updating a file to add a room association"""

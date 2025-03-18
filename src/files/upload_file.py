@@ -1,20 +1,23 @@
 """
 Lambda handler for file uploads to the ClaimVision system.
 
-This module handles the uploading of files to S3 and stores their metadata
-in PostgreSQL, ensuring proper authorization and data validation.
+This module handles the initial receipt of file uploads and sends them to an SQS queue
+for asynchronous processing. This makes the upload process non-blocking for users.
 """
 import os
 from utils.logging_utils import get_logger
 import uuid
 import base64
+import json
 from datetime import datetime, timezone
 from hashlib import sha256
-from utils import response
-from utils.lambda_utils import standard_lambda_handler, get_s3_client
-from models.file import FileStatus, File
+from utils import response as api_response
+from utils.lambda_utils import standard_lambda_handler, get_sqs_client
+from models.file import File
 from models.room import Room
+from models.claim import Claim
 from database.database import get_db_session as db_get_session
+from sqlalchemy.exc import SQLAlchemyError
 
 
 logger = get_logger(__name__)
@@ -32,182 +35,221 @@ def get_db_session():
     """
     return db_get_session()
 
-def upload_to_s3(file_name: str, file_data: bytes) -> str:
+def queue_file_for_processing(file_name, file_data, claim_id, room_id=None, household_id=None):
     """
-    Uploads file to S3 and returns the S3 URL.
+    Queue a file for asynchronous processing via SQS.
     
     Args:
-        file_name (str): The name of the file to upload (used as S3 key)
-        file_data (bytes): The binary data of the file
+        file_name (str): Name of the file to process
+        file_data (str): Base64-encoded file data
+        claim_id (str): UUID of the claim this file belongs to
+        room_id (str, optional): UUID of the room this file belongs to
+        household_id (str, optional): UUID of the household this file belongs to
         
     Returns:
-        str: The S3 URL of the uploaded file or None if upload failed
-    """
-    s3 = get_s3_client()
-    if not S3_BUCKET_NAME:
-        raise ValueError("S3_BUCKET_NAME environment variable is not set")
+        str: Message ID from SQS if successful
         
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=file_name, Body=file_data)
-    return f"s3://{S3_BUCKET_NAME}/{file_name}"
+    Raises:
+        ValueError: If SQS queue URL is not set
+        ConnectionError: If SQS message sending fails
+    """
+    # Prepare message payload
+    message_body = {
+        "file_name": file_name,
+        "file_data": file_data,
+        "claim_id": claim_id,
+        "upload_time": datetime.now(timezone.utc).isoformat(),
+        "file_hash": sha256(base64.b64decode(file_data)).hexdigest()
+    }
+    
+    if room_id:
+        message_body["room_id"] = room_id
+        
+    if household_id:
+        message_body["household_id"] = household_id
+    
+    # Get SQS client
+    sqs = get_sqs_client()
+    sqs_upload_queue_url = os.getenv("SQS_UPLOAD_QUEUE_URL")
+    
+    if not sqs_upload_queue_url:
+        raise ValueError("SQS_UPLOAD_QUEUE_URL environment variable is not set")
+    
+    sqs_response = sqs.send_message(
+        QueueUrl=sqs_upload_queue_url,
+        MessageBody=json.dumps(message_body)
+    )
+    return sqs_response["MessageId"]
 
 @standard_lambda_handler(requires_auth=True, requires_body=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
     """
-    Handles uploading files and storing metadata in PostgreSQL.
+    Handles receiving file uploads and sending them to SQS for processing.
     
     Args:
-        event (dict): API Gateway event containing authentication details and file data
+        event (dict): API Gateway event containing authentication details and file data (unused)
         _context (dict): Lambda execution context (unused)
         db_session (Session, optional): SQLAlchemy session for testing
         user (User): Authenticated user object (provided by decorator)
         body (dict): Parsed request body (provided by decorator)
         
     Returns:
-        dict: API response containing uploaded file details or error messages
+        dict: API response containing upload request status
     """
-    # Always call get_db_session for backward compatibility with tests
-    # even if we don't use the result
-    get_db_session()
-    
-    # For backward compatibility with tests that patch get_db_session
-    if db_session is None:
-        # This line is critical for the test_upload_database_failure test
-        db_session = get_db_session()
-        
     # Extract household ID from authenticated user
     household_id = user.household_id
     
-    # Validate request body
+    # Get required parameters from the request body
     files = body.get("files", [])
-    if not files:
-        return response.api_response(400, error_details='No files provided in request.'
-        )
-      
     claim_id = body.get("claim_id")
+    room_id = body.get("room_id")
+    
+    # Validate required parameters
+    if not files:
+        return api_response.api_response(400, error_details='No files provided.')
+    
     if not claim_id:
-        return response.api_response(400, error_details='Claim ID is required.'
-        )
+        return api_response.api_response(400, error_details='Claim ID is required.')
         
-    # Validate claim ID format
+    # Check for the claim
     try:
         claim_uuid = uuid.UUID(claim_id)
-    except ValueError:
-        return response.api_response(400, error_details='Invalid claim ID format. Expected UUID.'
-        )
-        
-    # Check for room_id and validate if present
-    room_id = body.get("room_id")
-    room_uuid = None
+        claim = db_session.query(Claim).filter_by(id=claim_uuid, household_id=household_id).first()
+        if not claim:
+            return api_response.api_response(404, error_details='Claim not found.')
+    except (ValueError, SQLAlchemyError) as e:
+        if isinstance(e, ValueError):
+            return api_response.api_response(400, error_details='Invalid claim ID format. Expected UUID.')
+        else:
+            logger.error("Database error when checking claim: %s", str(e))
+            return api_response.api_response(500, error_details=f'Database Error: {str(e)}')
+    
+    # Check for the room if provided
     if room_id:
         try:
             room_uuid = uuid.UUID(room_id)
-            # Verify room exists and belongs to the claim
-            room = db_session.query(Room).filter_by(id=room_uuid, claim_id=claim_uuid, household_id=household_id).first()
+            room = db_session.query(Room).filter_by(id=room_uuid, claim_id=claim_uuid).first()
             if not room:
-                return response.api_response(404, error_details='Room not found or not associated with this claim.')
-        except ValueError:
-            return response.api_response(400, error_details='Invalid room ID format. Expected UUID.')
-        
-    allowed_extensions = {"jpg", "jpeg", "png", "gif", "pdf"}
+                return api_response.api_response(404, error_details='Room not found.')
+        except (ValueError, SQLAlchemyError) as e:
+            if isinstance(e, ValueError):
+                return api_response.api_response(400, error_details='Invalid room ID format. Expected UUID.')
+            else:
+                logger.error("Database error when checking room: %s", str(e))
+                return api_response.api_response(500, error_details=f'Database Error: {str(e)}')
+    
+    # Check for duplicate content
     uploaded_files = []
     failed_files = []
-    seen_files = set()
-    seen_contents = set()
-
-    for file in files:
-        file_name = file.get("file_name")
-        file_data = file.get("file_data")
+    
+    # Process each file in the request
+    for file_obj in files:
+        file_name = file_obj.get("file_name", "")
+        file_data = file_obj.get("file_data", "")
         
-        if not file_data or not file_data.strip():  # Check if the base64 string is empty
-            failed_files.append(
-                {"file_name": file_name, "reason": "File data is empty."}
-            )
+        # Validate file name
+        if not file_name:
+            failed_files.append({"file_name": "unknown", "reason": "Missing file name."})
             continue
-
-        if not file_name or not file_data:
-            failed_files.append(
-                {"file_name": file_name, "reason": "Missing file name or data."}
-            )
+        
+        # Validate file data
+        if not file_data:
+            failed_files.append({"file_name": file_name, "reason": "Missing file data."})
             continue
-
+            
+        # Check file extension
         file_extension = file_name.split(".")[-1].lower() if "." in file_name else ""
-        if file_extension not in allowed_extensions or not file_extension:
-            failed_files.append(
-                {"file_name": file_name, "reason": "Unsupported file format."}
-            )
+        if not file_extension:
+            failed_files.append({"file_name": file_name, "reason": "Missing file extension."})
             continue
-
-        try:
-            decoded_data = base64.b64decode(file_data, validate=True)
-        except (ValueError, base64.binascii.Error):
-            failed_files.append({"file_name": file_name, "reason": "Invalid base64 encoding."})
+            
+        # Validate file type (basic check)
+        allowed_extensions = ["jpg", "jpeg", "png", "pdf"]
+        if file_extension not in allowed_extensions:
+            failed_files.append({
+                "file_name": file_name, 
+                "reason": f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}"
+            })
             continue
-
-        if len(decoded_data) > MAX_FILE_SIZE:
-            failed_files.append({"file_name": file_name, "reason": "File exceeds size limit."})
-            continue
-
-        file_hash = sha256(decoded_data).hexdigest()
-        if file_hash in seen_contents:
-            failed_files.append({"file_name": file_name, "reason": "Duplicate file."})
-            continue
-        seen_contents.add(file_hash)
-
-        existing_file = db_session.query(File).filter_by(file_hash=file_hash).first()
-        if existing_file:
-            failed_files.append({"file_name": file_name, "reason": "Duplicate file."})
-            continue
-
-        seen_files.add((file_name, file_extension))
-        file_id = uuid.uuid4()
-        s3_key = f"files/{file_id}.{file_extension}"
-
-        new_file = File(
-            id=file_id,
-            uploaded_by=user.id,
-            household_id=household_id,
-            file_name=file_name,
-            s3_key=s3_key,
-            claim_id=claim_uuid,
-            room_id=room_uuid,  # Add room_id if provided
-            status=FileStatus.UPLOADED,
-            file_hash=file_hash,
-            created_at=datetime.now(timezone.utc),
-            updated_at=datetime.now(timezone.utc),
-        )
-        db_session.add(new_file)
-        db_session.commit()
         
-        # Upload file to S3 after DB commit
+        # Validate base64 data
         try:
-            s3_url = upload_to_s3(s3_key, decoded_data)
+            decoded_data = base64.b64decode(file_data)
+            if not decoded_data:
+                failed_files.append({"file_name": file_name, "reason": "Empty file content."})
+                continue
+                
+            # Check file size
+            if len(decoded_data) > MAX_FILE_SIZE:
+                failed_files.append({
+                    "file_name": file_name, 
+                    "reason": f"File exceeds maximum size of {MAX_FILE_SIZE/1024/1024}MB."
+                })
+                continue
+                
+            # Generate content hash for duplicate detection
+            file_hash = sha256(decoded_data).hexdigest()
             
+            # Check for duplicate content in this batch
+            if any(f.get("file_hash") == file_hash for f in uploaded_files):
+                failed_files.append({"file_name": file_name, "reason": "Duplicate content detected."})
+                continue
+                
+            # Check for existing files with the same content
+            existing_file = db_session.query(File).filter_by(
+                file_hash=file_hash, 
+                claim_id=claim_uuid
+            ).first()
+            
+            if existing_file:
+                failed_files.append({"file_name": file_name, "reason": "Duplicate content detected."})
+                continue
+                
+        except (ValueError, TypeError, base64.binascii.Error) as e:
+            logger.error("Error processing file %s: %s", file_name, str(e))
+            failed_files.append({"file_name": file_name, "reason": "Invalid file data format."})
+            continue
+            
+        # Queue the file for processing
+        try:
+            # Generate a unique ID for this file
+            file_id = str(uuid.uuid4())
+            
+            # Queue the file for processing via SQS
+            message_id = queue_file_for_processing(
+                file_name=file_name,
+                file_data=file_data,
+                claim_id=claim_id,
+                room_id=room_id,
+                household_id=str(household_id)
+            )
+            
+            logger.info("File %s queued for processing with message ID %s", file_name, message_id)
+            
+            # Create a response object for this file
             file_response = {
-                "file_id": str(new_file.id),
+                "file_id": file_id,
                 "file_name": file_name,
-                "s3_url": s3_url
+                "status": "QUEUED",
+                "file_hash": file_hash
             }
-            
-            if room_uuid:
-                file_response["room_id"] = str(room_uuid)
                 
             uploaded_files.append(file_response)
-        except Exception:
-            logger.error("S3 upload failed for file: %s", file_name)
-            db_session.rollback()  # Rollback DB entry if S3 upload fails
-            failed_files.append({"file_name": file_name, "reason": "Failed to upload to S3."})
+        except (ValueError, ConnectionError) as e:
+            logger.error("Failed to queue file %s for processing: %s", file_name, str(e))
+            failed_files.append({"file_name": file_name, "reason": "Failed to queue for processing."})
         
     if not uploaded_files and failed_files:
-        # Return 500 if S3 failures caused all uploads to fail
-        if any(f["reason"] == "Failed to upload to S3." for f in failed_files):
-            return response.api_response(500, error_details='Internal Server Error', data={"files_failed": failed_files})
-        elif any(f["reason"] == "Duplicate file." for f in failed_files):
-            return response.api_response(409, error_details='Duplicate file detected', data={"files_failed": failed_files})
+        # Return 500 if SQS failures caused all uploads to fail
+        if any(f["reason"] == "Failed to queue for processing." for f in failed_files):
+            return api_response.api_response(500, error_details='Internal Server Error', data={"files_failed": failed_files})
+        elif any(f["reason"] == "Duplicate content detected." for f in failed_files):
+            return api_response.api_response(409, error_details='Duplicate content detected', data={"files_failed": failed_files})
         primary_reason = failed_files[0]["reason"] if failed_files else "All file uploads failed."
-        return response.api_response(400, message=primary_reason, data={"files_failed": failed_files})
+        return api_response.api_response(400, error_details=primary_reason, data={"files_failed": failed_files})
     
-    return response.api_response(
+    return api_response.api_response(
         207 if failed_files else 200, 
-        message="Files uploaded successfully" if not failed_files else "Some files failed to upload", 
-        data={"files_uploaded": uploaded_files, "files_failed": failed_files}
+        success_message="Files queued for processing successfully" if not failed_files else "Some files queued for processing", 
+        data={"files_queued": uploaded_files, "files_failed": failed_files} if failed_files else {"files_queued": uploaded_files}
     )

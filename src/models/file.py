@@ -13,6 +13,9 @@ class FileStatus(PyEnum):
     UPLOADED = "uploaded"
     PROCESSED = "processed"
     FAILED = "failed"
+    ANALYZED = "analyzed"
+    SKIPPED_ANALYSIS = "skipped_analysis"
+    ERROR = "error"
 
 class File(Base):
     """

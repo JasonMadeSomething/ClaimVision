@@ -45,8 +45,12 @@ def test_upload_file_with_hash(api_gateway_event, test_db, seed_household_user):
     response = upload_handler(event, {}, db_session=test_db)
 
     assert response["statusCode"] == 200
-    uploaded_file = test_db.query(File).first()
-    assert uploaded_file.file_hash == file_hash  # ✅ Ensures correct hashing
+    response_body = json.loads(response["body"])
+    assert "data" in response_body
+    assert "files_queued" in response_body["data"]
+    assert len(response_body["data"]["files_queued"]) == 1
+    assert "file_hash" in response_body["data"]["files_queued"][0]
+    assert response_body["data"]["files_queued"][0]["file_hash"] == file_hash
 
 def test_prevent_duplicate_upload(api_gateway_event, test_db, seed_household_user):
     """❌ Prevent duplicate file uploads (same hash)."""
@@ -54,20 +58,29 @@ def test_prevent_duplicate_upload(api_gateway_event, test_db, seed_household_use
     file_data = b"duplicatefiledata"
     file_hash = sha256(file_data).hexdigest()
 
-    # Upload the first file
+    # Create a file record in the database to simulate a previously uploaded file
+    test_file = File(
+        id=uuid.uuid4(),
+        uploaded_by=user_id,
+        household_id=household_id,
+        claim_id=claim_id,
+        file_name="existing.jpg",
+        s3_key="test-key",
+        file_hash=file_hash
+    )
+    test_db.add(test_file)
+    test_db.commit()
+
+    # Attempt to upload a file with the same content
     payload = {"files": [{"file_name": "dup1.jpg", "file_data": base64.b64encode(file_data).decode("utf-8")}],
                "claim_id": str(claim_id)}
     event = api_gateway_event(http_method="POST", body=json.dumps(payload), auth_user=str(user_id))
     response = upload_handler(event, {}, db_session=test_db)
 
-    assert response["statusCode"] == 200
-
-    # Attempt to upload the same file again
-    event = api_gateway_event(http_method="POST", body=json.dumps(payload), auth_user=str(user_id))
-    response = upload_handler(event, {}, db_session=test_db)
-
-    assert response["statusCode"] == 409  # ✅ Conflict due to duplicate hash
-    assert "Duplicate file detected" in response["body"]
+    # Should return 409 Conflict due to duplicate content
+    assert response["statusCode"] == 409
+    response_body = json.loads(response["body"])
+    assert "Duplicate content detected" in response_body["error_details"]
 
 def test_replace_file_updates_hash(api_gateway_event, test_db, seed_household_user):
     """✅ Ensure replacing a file updates its hash."""
@@ -78,16 +91,19 @@ def test_replace_file_updates_hash(api_gateway_event, test_db, seed_household_us
     old_file_hash = sha256(old_file_data).hexdigest()
     new_file_hash = sha256(new_file_data).hexdigest()
 
-    # Upload initial file
-    upload_payload = {"files": [{"file_name": "replace.jpg", "file_data": base64.b64encode(old_file_data).decode("utf-8")}],
-                      "claim_id": str(claim_id)}
-    event = api_gateway_event(http_method="POST", body=json.dumps(upload_payload), auth_user=str(user_id))
-    response = upload_handler(event, {}, db_session=test_db)
-
-    assert response["statusCode"] == 200
-    file = test_db.query(File).first()
-    file_id = file.id
-    assert file.file_hash == old_file_hash
+    # Create a file record in the database to simulate a previously uploaded file
+    file_id = uuid.uuid4()
+    test_file = File(
+        id=file_id,
+        uploaded_by=user_id,
+        household_id=household_id,
+        claim_id=claim_id,
+        file_name="replace.jpg",
+        s3_key="test-key",
+        file_hash=old_file_hash
+    )
+    test_db.add(test_file)
+    test_db.commit()
 
     # Replace the file with new data
     replace_payload = {"file_name": "replace.jpg", "file_data": base64.b64encode(new_file_data).decode("utf-8")}
@@ -99,5 +115,7 @@ def test_replace_file_updates_hash(api_gateway_event, test_db, seed_household_us
         response = replace_handler(event, {}, db_session=test_db)
 
     assert response["statusCode"] == 200
+    
+    # Verify the file hash was updated in the database
     updated_file = test_db.query(File).filter_by(id=file_id).first()
-    assert updated_file.file_hash == new_file_hash  # ✅ Ensures hash is updated
+    assert updated_file.file_hash == new_file_hash

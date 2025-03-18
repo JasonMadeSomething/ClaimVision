@@ -15,6 +15,7 @@ from utils import response
 
 # Configure logging
 logger = get_logger(__name__)
+
 def extract_user_id(event: dict) -> Tuple[bool, Union[str, dict]]:
     """
     Extract and validate user ID from JWT claims in the event.
@@ -27,7 +28,8 @@ def extract_user_id(event: dict) -> Tuple[bool, Union[str, dict]]:
             - Success flag (True if valid user ID was extracted)
             - Either the validated user ID string or an API response dict on error
     """
-    user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    user_id = claims.get("sub")
     if not user_id:
         return False, response.api_response(401, message="Unauthorized", error_details="Unauthorized: Missing authentication")
     
@@ -42,6 +44,29 @@ def extract_user_id(event: dict) -> Tuple[bool, Union[str, dict]]:
     except ValueError:
         # Use the exact error message expected by the test
         return False, response.api_response(400, error_details="Invalid UUID format")
+
+def extract_household_id(event: dict) -> Optional[str]:
+    """
+    Extract household ID from JWT claims in the event if available.
+    
+    Parameters:
+        event (dict): API Gateway event with authentication data
+        
+    Returns:
+        Optional[str]: Household ID if available, None otherwise
+    """
+    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    household_id = claims.get("custom:household_id")
+    
+    if household_id:
+        try:
+            # Validate UUID format
+            uuid.UUID(household_id)
+            return household_id
+        except ValueError:
+            logger.warning(f"Invalid household_id format in JWT: {household_id}")
+    
+    return None
 
 def extract_resource_id(event: dict, param_name: str) -> Tuple[bool, Union[str, dict]]:
     """
@@ -67,13 +92,14 @@ def extract_resource_id(event: dict, param_name: str) -> Tuple[bool, Union[str, 
     except ValueError:
         return False, response.api_response(400, error_details=f"Invalid {param_name} format. Expected UUID.")
 
-def get_authenticated_user(db: Session, user_id: str) -> Tuple[bool, Union[User, dict]]:
+def get_authenticated_user(db: Session, user_id: str, event: dict = None) -> Tuple[bool, Union[User, dict]]:
     """
     Retrieve the authenticated user from the database.
     
     Parameters:
         db (Session): Database session
         user_id (str): User ID to look up
+        event (dict, optional): Original API Gateway event, used to extract household_id if available
         
     Returns:
         Tuple[bool, Union[User, dict]]: 
@@ -92,8 +118,25 @@ def get_authenticated_user(db: Session, user_id: str) -> Tuple[bool, Union[User,
                 household_id=uuid.uuid4()  # Generate a random UUID for the household
             )
             return True, mock_user
+        
+        # Check if we have the household_id in the event
+        household_id = None
+        if event:
+            household_id = extract_household_id(event)
+        
+        # If we have both user_id and household_id, we can create a User object without querying the database
+        if household_id:
+            logger.debug(f"Using household_id from JWT: {household_id}")
+            # Create a lightweight User object with just the ID and household_id
+            # This avoids a database query for authorization checks
+            user = User(
+                id=user_id,
+                household_id=uuid.UUID(household_id)
+            )
+            return True, user
             
-        # For real user IDs, query the database
+        # For real user IDs without household_id in JWT, query the database
+        logger.debug(f"Querying database for user: {user_id}")
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
             return False, response.api_response(404, error_details="User not found.")

@@ -90,7 +90,7 @@ def standard_lambda_handler(
                     
                     user_id = result
                     logger.debug(f"{function_name}: User ID extracted: {user_id}")
-                    success, result = auth_utils.get_authenticated_user(db_session, user_id)
+                    success, result = auth_utils.get_authenticated_user(db_session, user_id, event)
                     if not success:
                         logger.warning(f"{function_name}: User not found or not authorized: {user_id}")
                         return result  # Return error response
@@ -333,5 +333,36 @@ def get_s3_client():
     Returns:
         Configured S3 client
     """
-    logger.debug("Creating S3 client")
-    return boto3.client('s3')
+    try:
+        return boto3.client('s3')
+    except Exception as e:
+        logger.error(f"Failed to create S3 client: {str(e)}")
+        raise
+
+
+def get_sqs_client():
+    """
+    Get a boto3 SQS client with standardized configuration.
+    
+    Returns:
+        Configured SQS client
+    """
+    try:
+        return boto3.client('sqs')
+    except Exception as e:
+        logger.error(f"Failed to create SQS client: {str(e)}")
+        raise
+
+
+def get_rekognition_client():
+    """
+    Get a boto3 Rekognition client with standardized configuration.
+    
+    Returns:
+        Configured Rekognition client
+    """
+    try:
+        return boto3.client('rekognition')
+    except Exception as e:
+        logger.error(f"Failed to create Rekognition client: {str(e)}")
+        raise
