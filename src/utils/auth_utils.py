@@ -56,7 +56,7 @@ def extract_household_id(event: dict) -> Optional[str]:
         Optional[str]: Household ID if available, None otherwise
     """
     claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
-    household_id = claims.get("custom:household_id")
+    household_id = claims.get("household_id")
     
     if household_id:
         try:

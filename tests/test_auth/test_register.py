@@ -554,7 +554,7 @@ def test_register_syncs_household_id(mock_cognito, test_db, mocker):
     mock_cognito.admin_update_user_attributes.assert_called_once_with(
         UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
         Username=generated_user_sub,
-        UserAttributes=[{"Name": "custom:household_id", "Value": str(user.household_id)}]
+        UserAttributes=[{"Name": "household_id", "Value": str(user.household_id)}]
     )
 
     print("Household ID successfully synced with Cognito!")

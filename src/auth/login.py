@@ -82,7 +82,7 @@ def lambda_handler(event: dict, _context: dict) -> dict:
                 
                 # Extract household_id from user attributes
                 for attr in user_attributes.get("UserAttributes", []):
-                    if attr["Name"] == "custom:household_id":
+                    if attr["Name"] == "household_id":
                         household_id = attr["Value"]
                         break
         except (jwt.PyJWTError, ClientError) as e:
