@@ -60,3 +60,36 @@ resource "aws_sqs_queue_redrive_policy" "file_analysis_redrive" {
     maxReceiveCount     = 5
   })
 }
+
+# User Registration Queue
+resource "aws_sqs_queue" "user_registration_queue" {
+  name                      = "claimvision-user-registration-queue-${var.env}"
+  delay_seconds             = 0
+  max_message_size          = 262144  # 256 KB
+  message_retention_seconds = 86400   # 1 day
+  receive_wait_time_seconds = 10
+  visibility_timeout_seconds = 300    # 5 minutes
+
+  tags = {
+    Name = "ClaimVision-UserRegistrationQueue-${var.env}"
+  }
+}
+
+# Dead Letter Queue for user registration
+resource "aws_sqs_queue" "user_registration_dlq" {
+  name                      = "claimvision-user-registration-dlq-${var.env}"
+  message_retention_seconds = 1209600  # 14 days
+
+  tags = {
+    Name = "ClaimVision-UserRegistrationDLQ-${var.env}"
+  }
+}
+
+# Update the user registration queue to use the DLQ
+resource "aws_sqs_queue_redrive_policy" "user_registration_redrive" {
+  queue_url = aws_sqs_queue.user_registration_queue.id
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.user_registration_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
