@@ -55,11 +55,32 @@ Parameters:
   FileAnalysisQueueName:
     Type: String
     Description: Name of the file analysis SQS queue
+  UserRegistrationQueueURL:
+    Type: String
+    Description: URL of the user registration SQS queue
+  UserRegistrationQueueARN:
+    Type: String
+    Description: ARN of the user registration SQS queue
+  UserRegistrationQueueName:
+    Type: String
+    Description: Name of the user registration SQS queue
+  VpcId:
+    Type: String
+    Default: ""
+    Description: VPC ID for Lambda functions
+  SubnetIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Subnet IDs for Lambda functions (comma-delimited)
+  SecurityGroupIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Security Group IDs for Lambda functions (comma-delimited)
 
 Conditions:
-  IsDev: !Equals
-    - !Ref Env
-    - dev
+  IsDev: !Equals [!Ref Env, "dev"]
+  IsProd: !Equals [!Ref Env, "prod"]
+  HasVpc: !Not [!Equals [!Ref VpcId, ""]]
 
 Mappings:
   CognitoExports:
@@ -70,7 +91,7 @@ Mappings:
 
 Globals:
   Function:
-    Timeout: 10
+    Timeout: 30
     MemorySize: 128
     Runtime: python3.12
     Environment:
@@ -78,7 +99,13 @@ Globals:
         DB_USERNAME: !Ref DBUsername
         DB_PASSWORD: !Ref DBPassword
         DB_HOST: !Ref DBEndpoint
-        DB_NAME: "claimvision"
+        DB_NAME: claimvision
+        USER_REGISTRATION_QUEUE_URL: !Ref UserRegistrationQueueURL
+    VpcConfig: !If 
+      - HasVpc
+      - SubnetIds: !Ref SubnetIds
+        SecurityGroupIds: !Ref SecurityGroupIds
+      - !Ref AWS::NoValue
 
 Resources:
   # IAM Role for Lambda functions
@@ -94,6 +121,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasVpc
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
       Policies:
         - PolicyName: SSMParameterAccess
           PolicyDocument:
@@ -103,11 +134,24 @@ Resources:
                 Action:
                   - ssm:GetParameter
                   - ssm:GetParameters
-                Resource: 
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBUsernameSSMPath}'
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBPasswordSSMPath}'
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RDSEndpointSSMPath}'
-                  - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${S3BucketNameSSMPath}'
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBUsernameSSMPath}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBPasswordSSMPath}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RDSEndpointSSMPath}
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${S3BucketNameSSMPath}
+        - PolicyName: CognitoAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:SignUp
+                  - cognito-idp:AdminUpdateUserAttributes
+                  - cognito-idp:AdminConfirmSignUp
+                  - cognito-idp:AdminInitiateAuth
+                  - cognito-idp:AdminRespondToAuthChallenge
+                  - cognito-idp:AdminGetUser
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
         - PolicyName: DBAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -115,7 +159,22 @@ Resources:
               - Effect: Allow
                 Action:
                   - rds-db:connect
-                Resource: "*"
+                Resource: '*'
+        - !If
+          - HasVpc
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: '*'
+          - !Ref AWS::NoValue
 
   # IAM Role for Process File Lambda
   ProcessFileLambdaRole:
@@ -130,6 +189,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasVpc
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
       Policies:
         - PolicyName: SQSAccess
           PolicyDocument:
@@ -167,7 +230,22 @@ Resources:
               - Effect: Allow
                 Action:
                   - rds-db:connect
-                Resource: "*"
+                Resource: '*'
+        - !If
+          - HasVpc
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: '*'
+          - !Ref AWS::NoValue
 
   # IAM Role for Analyze File Lambda
   AnalyzeFileLambdaRole:
@@ -182,6 +260,10 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasVpc
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
       Policies:
         - PolicyName: SQSAccess
           PolicyDocument:
@@ -212,7 +294,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - rds-db:connect
-                Resource: "*"
+                Resource: '*'
         - PolicyName: RekognitionAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -221,15 +303,30 @@ Resources:
                 Action:
                   - rekognition:DetectLabels
                   - rekognition:DetectText
-                Resource: "*"
+                Resource: '*'
+        - !If
+          - HasVpc
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: '*'
+          - !Ref AWS::NoValue
 
   S3BucketName:
     Type: AWS::SSM::Parameter
     Properties:
-      Name: !Sub "/claimvision/${Env}/s3-bucket-name"
+      Name: !Sub /claimvision/${Env}/s3-bucket-name
       Type: String
-      Value: !Sub "{{resolve:ssm:${S3BucketNameSSMPath}}}"
-      Description: "S3 bucket name for ClaimVision"
+      Value: !Sub '{{resolve:ssm:${S3BucketNameSSMPath}}}'
+      Description: S3 bucket name for ClaimVision
 
   ###API###
   # API Gateway
@@ -257,7 +354,7 @@ Resources:
       Runtime: python3.12
       Handler: auth.post_confirmation.lambda_handler
       CodeUri: src/
-      Timeout: 10
+      Timeout: 30
       MemorySize: 128
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -265,15 +362,20 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           USER_POOL_ID: !Ref CognitoUserPoolId
-    Policies:
-      - AWSLambdaBasicExecutionRole
-      - Statement:
-          Effect: Allow
-          Action:
-            - cognito-idp:AdminUpdateUserAttributes
-          Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      Policies:
+        - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:AdminUpdateUserAttributes
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
 
   ##Auth##
   # Login Function
@@ -289,7 +391,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -300,6 +402,12 @@ Resources:
             - !ImportValue CognitoUserPoolId-prod
       Policies:
         - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:InitiateAuth
+              - cognito-idp:AdminGetUser
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       Events:
         LoginAPI:
           Type: Api
@@ -315,13 +423,15 @@ Resources:
       CodeUri: src/
       Handler: auth.register.lambda_handler
       Runtime: python3.12
+      Timeout: 30
+      MemorySize: 128
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -330,8 +440,19 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:SignUp
+              - cognito-idp:AdminUpdateUserAttributes
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       Events:
         RegisterAPI:
           Type: Api
@@ -353,7 +474,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -362,8 +483,18 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
+        - Statement:
+            Effect: Allow
+            Action:
+              - cognito-idp:ConfirmSignUp
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       Events:
         ConfirmAPI:
           Type: Api
@@ -385,7 +516,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -394,16 +525,27 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
+              - cognito-idp:ResendConfirmationCode
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+        - Statement:
+            Effect: Allow
+            Action:
               - ssm:GetParameter
+              - ssm:GetParameters
             Resource:
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
       Events:
         ResendConfirmationAPI:
           Type: Api
@@ -426,22 +568,31 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
-          AUTO_CONFIRM_USER: !If [IsDev, "true", "false"]
+          AUTO_CONFIRM_USER: !If
+            - IsDev
+            - 'true'
+            - 'false'
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
               - ssm:GetParameter
+              - ssm:GetParameters
             Resource:
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
 
   # Get Claims Function
   GetClaimsFunction:
@@ -450,22 +601,28 @@ Resources:
       CodeUri: src/
       Handler: claims.get_claims.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       Policies:
         - Statement:
             Effect: Allow
             Action:
               - ssm:GetParameter
+              - ssm:GetParameters
             Resource:
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
         - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetClaimsAPI:
           Type: Api
@@ -481,6 +638,11 @@ Resources:
     Properties:
       Handler: claims.create_claim.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -488,7 +650,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         CreateClaimAPI:
           Type: Api
@@ -505,6 +667,11 @@ Resources:
     Properties:
       Handler: claims.get_claim.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -512,7 +679,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetClaimAPI:
           Type: Api
@@ -529,6 +696,11 @@ Resources:
     Properties:
       Handler: claims.update_claim.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -536,7 +708,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         UpdateClaimAPI:
           Type: Api
@@ -553,6 +725,11 @@ Resources:
     Properties:
       Handler: claims.delete_claim.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -560,7 +737,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         DeleteClaimAPI:
           Type: Api
@@ -577,6 +754,11 @@ Resources:
     Properties:
       Handler: items.create_item.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -584,7 +766,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         CreateItemAPI:
           Type: Api
@@ -601,6 +783,11 @@ Resources:
     Properties:
       Handler: items.get_items.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -608,7 +795,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetItemsAPI:
           Type: Api
@@ -625,6 +812,11 @@ Resources:
     Properties:
       Handler: items.get_item.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -632,7 +824,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetItemAPI:
           Type: Api
@@ -649,6 +841,11 @@ Resources:
     Properties:
       Handler: items.update_item.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -656,7 +853,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         UpdateItemAPI:
           Type: Api
@@ -673,6 +870,11 @@ Resources:
     Properties:
       Handler: items.delete_item.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -680,7 +882,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         DeleteItemAPI:
           Type: Api
@@ -697,6 +899,11 @@ Resources:
     Properties:
       Handler: labels.create_label.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -704,7 +911,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         CreateLabelAPI:
           Type: Api
@@ -721,6 +928,11 @@ Resources:
     Properties:
       Handler: labels.get_labels.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -728,7 +940,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetLabelsAPI:
           Type: Api
@@ -745,6 +957,11 @@ Resources:
     Properties:
       Handler: labels.delete_label.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -752,7 +969,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         DeleteLabelAPI:
           Type: Api
@@ -769,6 +986,11 @@ Resources:
     Properties:
       Handler: labels.remove_label.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -776,7 +998,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         RemoveLabelAPI:
           Type: Api
@@ -793,6 +1015,11 @@ Resources:
     Properties:
       Handler: labels.restore_label.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -800,7 +1027,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         RestoreLabelAPI:
           Type: Api
@@ -818,6 +1045,11 @@ Resources:
     Properties:
       Handler: rooms.create_room.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -825,7 +1057,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         CreateRoomAPI:
           Type: Api
@@ -842,6 +1074,11 @@ Resources:
     Properties:
       Handler: rooms.get_rooms.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -849,7 +1086,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetRoomsAPI:
           Type: Api
@@ -866,6 +1103,11 @@ Resources:
     Properties:
       Handler: rooms.get_room.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -873,7 +1115,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetRoomAPI:
           Type: Api
@@ -890,6 +1132,11 @@ Resources:
     Properties:
       Handler: rooms.update_room.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -897,7 +1144,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         UpdateRoomAPI:
           Type: Api
@@ -914,6 +1161,11 @@ Resources:
     Properties:
       Handler: rooms.delete_room.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -921,7 +1173,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         DeleteRoomAPI:
           Type: Api
@@ -939,6 +1191,11 @@ Resources:
     Properties:
       Handler: admin.get_users.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Policies:
@@ -954,7 +1211,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
@@ -975,6 +1232,11 @@ Resources:
     Properties:
       Handler: admin.update_user_role.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Policies:
@@ -982,10 +1244,11 @@ Resources:
             Effect: Allow
             Action:
               - ssm:GetParameter
+              - ssm:GetParameters
             Resource:
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
         - Statement:
             Effect: Allow
             Action:
@@ -998,7 +1261,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
       Events:
         UpdateUserRoleAPI:
@@ -1016,6 +1279,11 @@ Resources:
     Properties:
       Handler: files.get_files.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Policies:
@@ -1023,17 +1291,18 @@ Resources:
             Effect: Allow
             Action:
               - ssm:GetParameter
+              - ssm:GetParameters
             Resource:
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
         - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         GetFilesAPI:
           Type: Api
@@ -1050,6 +1319,11 @@ Resources:
     Properties:
       Handler: files.get_file.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Architectures:
@@ -1059,17 +1333,18 @@ Resources:
             Effect: Allow
             Action:
               - ssm:GetParameter
+              - ssm:GetParameters
             Resource:
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-              - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
         - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           S3_BUCKET_NAME: !Ref S3BucketName
       Events:
         GetFileAPI:
@@ -1087,6 +1362,11 @@ Resources:
     Properties:
       Handler: files.update_file_metadata.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
@@ -1094,7 +1374,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Events:
         UpdateFileMetadataAPI:
           Type: Api
@@ -1111,6 +1391,11 @@ Resources:
     Properties:
       Handler: files.replace_file.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Architectures:
@@ -1120,8 +1405,9 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           S3_BUCKET_NAME: !Ref S3BucketName
+
       Events:
         ReplaceFileAPI:
           Type: Api
@@ -1138,6 +1424,11 @@ Resources:
     Properties:
       Handler: files.delete_file.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Architectures:
@@ -1147,7 +1438,7 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
           S3_BUCKET_NAME: !Ref S3BucketName
       Events:
         DeleteFileAPI:
@@ -1158,23 +1449,28 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
             Auth:
               Authorizer: CognitoAuthorizer
-
     Policies:
       - AWSLambdaBasicExecutionRole
       - Statement:
           Effect: Allow
           Action:
             - ssm:GetParameter
+            - ssm:GetParameters
           Resource:
-            - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}'
-            - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}'
-            - !Sub 'arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}'
+            - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+            - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+            - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
 
   UploadFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: files.upload_file.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt LambdaExecutionRole.Arn
       Architectures:
@@ -1195,18 +1491,24 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
       Policies:
         - S3CrudPolicy:
             BucketName: !Sub claimvision-files-${AWS::AccountId}-${Env}
         - SQSSendMessagePolicy:
             QueueName: !Ref FileUploadQueueName
 
+
   ProcessFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: files.process_file.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt ProcessFileLambdaRole.Arn
       Architectures:
@@ -1225,13 +1527,18 @@ Resources:
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
 
   AnalyzeFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: files.analyze_file.lambda_handler
       Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
       CodeUri: src/
       Role: !GetAtt AnalyzeFileLambdaRole.Arn
       Architectures:
@@ -1246,11 +1553,11 @@ Resources:
       Environment:
         Variables:
           S3_BUCKET_NAME: !Ref S3BucketName
-          MIN_CONFIDENCE: "70.0"
+          MIN_CONFIDENCE: '70.0'
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
-          DB_NAME: "claimvision"
+          DB_NAME: claimvision
 
 Outputs:
   #  Print API Gateway URL After Deployment

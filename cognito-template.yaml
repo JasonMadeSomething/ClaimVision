@@ -27,7 +27,7 @@ Resources:
         - email
       Schema:
         - Name: household_id
-          AttributeDataType: String  # ✅ Store as a String
+          AttributeDataType: String  # Store as a String
           Mutable: true
           Required: false
           DeveloperOnlyAttribute: false
@@ -37,7 +37,7 @@ Resources:
 
 
 
-  # ✅ Cognito App Client
+  # Cognito App Client
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
     Properties:
@@ -60,10 +60,10 @@ Resources:
         - "http://localhost:3000"
       WriteAttributes:
         - email
-        - custom:household_id
+        - household_id
       ReadAttributes:
         - email
-        - custom:household_id
+        - household_id
 
 Outputs:
   CognitoUserPoolId:
