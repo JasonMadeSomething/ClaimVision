@@ -13,6 +13,10 @@ Parameters:
     Type: String
     Default: /terraform/s3/bucket_name
     Description: SSM Parameter Store path for S3 bucket name
+  S3BucketName:
+    Type: String
+    Default: claimvision-files-dev
+    Description: S3 bucket name for file storage
   CognitoUserPoolId:
     Type: String
     Description: The Cognito User Pool ID from the external stack
@@ -64,6 +68,15 @@ Parameters:
   UserRegistrationQueueName:
     Type: String
     Description: Name of the user registration SQS queue
+  CognitoUpdateQueueURL:
+    Type: String
+    Description: URL of the Cognito update SQS queue
+  CognitoUpdateQueueARN:
+    Type: String
+    Description: ARN of the Cognito update SQS queue
+  CognitoUpdateQueueName:
+    Type: String
+    Description: Name of the Cognito update SQS queue
   VpcId:
     Type: String
     Default: ""
@@ -76,18 +89,18 @@ Parameters:
     Type: CommaDelimitedList
     Default: ""
     Description: Security Group IDs for Lambda functions (comma-delimited)
+  RouteTableIds:
+    Type: String
+    Default: ""
+    Description: Route Table ID for Lambda functions
 
 Conditions:
   IsDev: !Equals [!Ref Env, "dev"]
-  IsProd: !Equals [!Ref Env, "prod"]
-  HasVpc: !Not [!Equals [!Ref VpcId, ""]]
-
-Mappings:
-  CognitoExports:
-    dev:
-      UserPoolId: CognitoUserPoolId-dev
-    prod:
-      UserPoolId: CognitoUserPoolId-prod
+  HasVpc: 
+    Fn::Not:
+      - Fn::Equals:
+          - !Ref VpcId
+          - ""
 
 Globals:
   Function:
@@ -101,6 +114,7 @@ Globals:
         DB_HOST: !Ref DBEndpoint
         DB_NAME: claimvision
         USER_REGISTRATION_QUEUE_URL: !Ref UserRegistrationQueueURL
+        COGNITO_UPDATE_QUEUE_URL: !Ref CognitoUpdateQueueURL
     VpcConfig: !If 
       - HasVpc
       - SubnetIds: !Ref SubnetIds
@@ -139,6 +153,20 @@ Resources:
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBPasswordSSMPath}
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RDSEndpointSSMPath}
                   - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${S3BucketNameSSMPath}
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:GetQueueUrl
+                Resource:
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${FileUploadQueueName}
+                  - !Sub arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:${FileAnalysisQueueName}
         - PolicyName: CognitoAccess
           PolicyDocument:
             Version: '2012-10-17'
@@ -320,13 +348,148 @@ Resources:
                   Resource: '*'
           - !Ref AWS::NoValue
 
-  S3BucketName:
-    Type: AWS::SSM::Parameter
+  # IAM Role for RegisterDb Lambda
+  RegisterDbLambdaRole:
+    Type: AWS::IAM::Role
     Properties:
-      Name: !Sub /claimvision/${Env}/s3-bucket-name
-      Type: String
-      Value: !Sub '{{resolve:ssm:${S3BucketNameSSMPath}}}'
-      Description: S3 bucket name for ClaimVision
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasVpc
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource:
+                  - !Ref UserRegistrationQueueARN
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !Ref CognitoUpdateQueueARN
+        - PolicyName: DBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - rds-db:connect
+                Resource: '*'
+        - !If
+          - HasVpc
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: '*'
+          - !Ref AWS::NoValue
+
+  # IAM Role for UpdateCognitoAttributes Lambda
+  UpdateCognitoAttributesLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasVpc
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                  - sqs:ChangeMessageVisibility
+                Resource:
+                  - !Ref CognitoUpdateQueueARN
+        - PolicyName: CognitoAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:AdminUpdateUserAttributes
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+        - !If
+          - HasVpc
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: '*'
+          - !Ref AWS::NoValue
+
+  # IAM Role for RegisterCognito Lambda
+  RegisterCognitoLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: CognitoAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - cognito-idp:SignUp
+                Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
+        - PolicyName: SQSAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                Resource: !Ref UserRegistrationQueueARN
 
   ###API###
   # API Gateway
@@ -347,35 +510,6 @@ Resources:
             IdentitySource: method.request.header.Authorization
 
   ###Lambdas###
-  PostConfirmationLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: !Sub ClaimVisionPostConfirmation-${Env}
-      Runtime: python3.12
-      Handler: auth.post_confirmation.lambda_handler
-      CodeUri: src/
-      Timeout: 30
-      MemorySize: 128
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
-          USER_POOL_ID: !Ref CognitoUserPoolId
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
-      Policies:
-        - AWSLambdaBasicExecutionRole
-        - Statement:
-            Effect: Allow
-            Action:
-              - cognito-idp:AdminUpdateUserAttributes
-            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
 
   ##Auth##
   # Login Function
@@ -388,10 +522,6 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -400,6 +530,7 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
+      VpcConfig: !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
@@ -416,22 +547,16 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
-  # Register Function
-  RegisterFunction:
+  # User Registration with Cognito
+  RegisterCognitoFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: src/
-      Handler: auth.register.lambda_handler
+      Handler: auth.register_cognito.lambda_handler
       Runtime: python3.12
-      Timeout: 30
-      MemorySize: 128
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !GetAtt RegisterCognitoLambdaRole.Arn
       Environment:
         Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -440,18 +565,14 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
+          USER_REGISTRATION_QUEUE_URL: !Ref UserRegistrationQueueURL
+      VpcConfig: !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
               - cognito-idp:SignUp
-              - cognito-idp:AdminUpdateUserAttributes
             Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
       Events:
         RegisterAPI:
@@ -460,6 +581,29 @@ Resources:
             Path: /auth/register
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
+
+  # User Registration with Database
+  RegisterDbFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: auth.register_db.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt RegisterDbLambdaRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: claimvision
+          COGNITO_UPDATE_QUEUE_URL: !Ref CognitoUpdateQueueURL
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref UserRegistrationQueueARN
+            BatchSize: 10
+            Enabled: true
 
   # Confirm Email
   ConfirmFunction:
@@ -471,10 +615,6 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -483,11 +623,7 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
+      VpcConfig: !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
@@ -513,10 +649,6 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
           COGNITO_USER_POOL_CLIENT_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolClientId-dev
@@ -525,11 +657,6 @@ Resources:
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
             - !ImportValue CognitoUserPoolId-prod
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
@@ -537,15 +664,6 @@ Resources:
             Action:
               - cognito-idp:ResendConfirmationCode
             Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
-        - Statement:
-            Effect: Allow
-            Action:
-              - ssm:GetParameter
-              - ssm:GetParameters
-            Resource:
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
       Events:
         ResendConfirmationAPI:
           Type: Api
@@ -565,10 +683,6 @@ Resources:
       Role: !GetAtt LambdaExecutionRole.Arn
       Environment:
         Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
           COGNITO_USER_POOL_ID: !If
             - IsDev
             - !ImportValue CognitoUserPoolId-dev
@@ -577,22 +691,13 @@ Resources:
             - IsDev
             - 'true'
             - 'false'
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
       Policies:
         - AWSLambdaBasicExecutionRole
         - Statement:
             Effect: Allow
             Action:
-              - ssm:GetParameter
-              - ssm:GetParameters
-            Resource:
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
+              - cognito-idp:AdminUpdateUserAttributes
+            Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
 
   # Get Claims Function
   GetClaimsFunction:
@@ -613,9 +718,9 @@ Resources:
               - ssm:GetParameter
               - ssm:GetParameters
             Resource:
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter${DBPasswordSSMPath}
         - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
@@ -1497,7 +1602,12 @@ Resources:
             BucketName: !Sub claimvision-files-${AWS::AccountId}-${Env}
         - SQSSendMessagePolicy:
             QueueName: !Ref FileUploadQueueName
-
+        - Statement:
+            Effect: Allow
+            Action:
+              - sqs:SendMessage
+              - sqs:GetQueueUrl
+            Resource: !Ref FileUploadQueueARN
 
   ProcessFileFunction:
     Type: AWS::Serverless::Function
@@ -1564,8 +1674,3 @@ Outputs:
   ApiGatewayInvokeURL:
     Description: API Gateway Invoke URL
     Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
-  PostConfirmationLambdaArn:
-    Description: ARN of the Post Confirmation Lambda
-    Value: !GetAtt PostConfirmationLambda.Arn
-    Export:
-      Name: !Sub ClaimVision-PostConfirmationLambdaArn-${Env}

@@ -31,15 +31,13 @@ Resources:
           Mutable: true
           Required: false
           DeveloperOnlyAttribute: false
-      LambdaConfig:
-        PostConfirmation: !ImportValue
-          Fn::Sub: "ClaimVision-PostConfirmationLambdaArn-${Env}"
-
-
+      # Removing the Lambda configuration to eliminate circular dependency
+      # and rely on the update_cognito_attributes function instead
 
   # Cognito App Client
   CognitoUserPoolClient:
     Type: AWS::Cognito::UserPoolClient
+    DependsOn: CognitoUserPool
     Properties:
       ClientName: !Sub "ClaimVisionClient-${Env}"
       UserPoolId: !Ref CognitoUserPool
@@ -60,11 +58,10 @@ Resources:
         - "http://localhost:3000"
       WriteAttributes:
         - email
-        - household_id
+        - custom:household_id
       ReadAttributes:
         - email
-        - household_id
-
+        - custom:household_id
 Outputs:
   CognitoUserPoolId:
     Description: "Cognito User Pool ID"
