@@ -74,8 +74,7 @@ def standard_lambda_handler(
                         logger.debug(f"{function_name}: Created new database session")
                     except SQLAlchemyError as db_error:
                         logger.error(f"{function_name}: Failed to get database session: {str(db_error)}")
-                        return response.api_response(500, message="Database connection error", 
-                                                   error_details="Failed to establish database connection")
+                        return response.api_response(500, error_details="Failed to establish database connection")
                 
                 user = None
                 
@@ -86,10 +85,21 @@ def standard_lambda_handler(
                     success, result = auth_utils.extract_user_id(event)
                     if not success:
                         logger.warning(f"{function_name}: Authentication failed - Missing or invalid token")
-                        return response.api_response(401, message="Unauthorized", error_details="Unauthorized: Missing authentication")
+                        return result  # Return error response
                     
                     user_id = result
                     logger.debug(f"{function_name}: User ID extracted: {user_id}")
+                    
+                    # Extract household ID from JWT claims
+                    success, result = auth_utils.extract_household_id(event)
+                    if not success:
+                        logger.warning(f"{function_name}: Authentication failed - Missing or invalid household ID")
+                        return result  # Return error response
+                    
+                    household_id = result
+                    logger.debug(f"{function_name}: Household ID extracted: {household_id}")
+                    
+                    # Get authenticated user
                     success, result = auth_utils.get_authenticated_user(db_session, user_id, event)
                     if not success:
                         logger.warning(f"{function_name}: User not found or not authorized: {user_id}")
@@ -141,8 +151,14 @@ def standard_lambda_handler(
                     # Filter the parameters to only include those accepted by the handler
                     filtered_params = {}
                     for param_name, param in sig.parameters.items():
+                        # Handle parameters with underscores (e.g., _event, _context)
+                        # This allows handlers to use _event, _context to indicate they're not using these parameters
                         if param_name in handler_params:
                             filtered_params[param_name] = handler_params[param_name]
+                        elif param_name == '_event' and 'event' in handler_params:
+                            filtered_params[param_name] = handler_params['event']
+                        elif param_name == '_context' and 'context' in handler_params:
+                            filtered_params[param_name] = handler_params['context']
                         elif param.kind == inspect.Parameter.VAR_KEYWORD:  # **kwargs
                             # Include all remaining parameters if the handler accepts **kwargs
                             for k, v in handler_params.items():
@@ -150,6 +166,7 @@ def standard_lambda_handler(
                                     filtered_params[k] = v
                     
                     # Call the handler with the appropriate parameters
+                    logger.debug(f"{function_name}: Calling handler with parameters: {filtered_params.keys()}")
                     result = handler_func(**filtered_params)
                     
                     # Log response status code
@@ -159,9 +176,20 @@ def standard_lambda_handler(
                     return result
                     
                 except Exception as e:
-                    logger.exception(f"{function_name}: Error calling handler function: {str(e)}")
-                    return response.api_response(500, message="Internal Server Error", 
-                                               error_details=str(e))
+                    logger.error(f"{function_name}: Error calling handler function: {str(e)}")
+                    
+                    # Add more detailed error information for debugging
+                    if "missing 1 required positional argument" in str(e):
+                        # Extract the missing parameter name from the error message
+                        import re
+                        match = re.search(r"missing 1 required positional argument: '([^']+)'", str(e))
+                        if match:
+                            missing_param = match.group(1)
+                            available_params = list(handler_params.keys())
+                            logger.error(f"{function_name}: Missing parameter '{missing_param}'. Available parameters: {available_params}")
+                            logger.error(f"{function_name}: Handler signature: {sig}")
+                    
+                    return response.api_response(500, error_details=f"Internal server error: {str(e)}")
                 
             except SQLAlchemyError as db_error:
                 logger.error(f"{function_name}: Database error: {str(db_error)}")
@@ -348,7 +376,13 @@ def get_sqs_client():
         Configured SQS client
     """
     try:
-        return boto3.client('sqs')
+        # Set a timeout for SQS operations to avoid hanging
+        from botocore.config import Config
+        return boto3.client('sqs', config=Config(
+            connect_timeout=5,
+            read_timeout=5,
+            retries={'max_attempts': 2}
+        ))
     except Exception as e:
         logger.error(f"Failed to create SQS client: {str(e)}")
         raise
