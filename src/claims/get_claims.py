@@ -3,22 +3,18 @@ from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler
 from models import Claim
-from utils.logging_utils import get_logger
 
 
 logger = get_logger(__name__)
 
-
-# Configure logging
-logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context: dict = None, db_session=None, user=None) -> dict:
+def lambda_handler(_event: dict, _context: dict = None, db_session=None, user=None) -> dict:
     """
     Handles retrieving all claims for the authenticated user's household.
 
     Args:
-        event (dict): API Gateway event containing authentication details.
-        context (dict): Lambda execution context (unused).
+        _event (dict): API Gateway event containing authentication details (unused).
+        _context (dict): Lambda execution context (unused).
         db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
         user (User): Authenticated user object (provided by decorator).
 
@@ -26,8 +22,11 @@ def lambda_handler(event: dict, context: dict = None, db_session=None, user=None
         dict: API response containing the list of claims or an error message.
     """
     try:
-        # Get all claims for the user's household
-        claims = db_session.query(Claim).filter_by(household_id=user.household_id).all()
+        # Get all claims for the user's household, excluding soft-deleted claims
+        claims = db_session.query(Claim).filter_by(
+            household_id=user.household_id,
+            deleted=False
+        ).all()
         
         # Format claims for response
         claims_data = []
@@ -49,4 +48,4 @@ def lambda_handler(event: dict, context: dict = None, db_session=None, user=None
         return response.api_response(500, error_details=f"Database error: {str(e)}")
     except Exception as e:
         logger.error("Error retrieving claims: %s", str(e))
-        return response.api_response(500, error_details=f"Error retrieving claims: {str(e)}")
+        return response.api_response(500, error_details=f"Internal server error: {str(e)}")

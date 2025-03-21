@@ -1,7 +1,7 @@
 """
 Lambda handler for deleting a claim and its associated items and files.
 
-This module handles the deletion of claims from the ClaimVision system,
+This module handles the soft deletion of claims from the ClaimVision system,
 ensuring proper authorization and data integrity.
 """
 from utils.logging_utils import get_logger
@@ -10,6 +10,7 @@ from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
 from database.database import get_db_session
+from datetime import datetime, timezone
 
 
 logger = get_logger(__name__)
@@ -17,7 +18,7 @@ logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
-    Handles deleting a claim for the authenticated user's household.
+    Handles soft deleting a claim for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
@@ -51,12 +52,34 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             # Return 404 for security reasons (don't reveal that the claim exists)
             return response.api_response(404, error_details="Claim not found")
 
-        # Delete the claim
-        db_session.query(Claim).filter(Claim.id == claim_id).delete()
-        db_session.commit()
-        
-        logger.info(f"Claim {claim_id} deleted successfully")
-        return response.api_response(200, success_message="Claim deleted successfully")
+        # Perform soft delete
+        try:
+            # Check for an existing deleted claim with the same title in this household
+            existing_deleted_claim = db_session.query(Claim).filter(
+                Claim.title == claim.title,
+                Claim.household_id == claim.household_id,
+                Claim.deleted,  
+                Claim.id != claim.id
+            ).first()
+            
+            if existing_deleted_claim:
+                # If there's already a deleted claim with the same title, hard delete it
+                logger.info(f"Found existing deleted claim with same title. Hard deleting claim: {existing_deleted_claim.id}")
+                db_session.delete(existing_deleted_claim)
+            
+            # Soft delete the current claim - only set these values if it's not already deleted
+            if not claim.deleted:
+                claim.deleted = True
+                claim.deleted_at = datetime.now(timezone.utc)
+                claim.updated_at = datetime.now(timezone.utc)
+            db_session.commit()
+            
+            logger.info(f"Claim {claim_id} soft deleted successfully")
+            return response.api_response(200, success_message="Claim deleted successfully")
+        except SQLAlchemyError as e:
+            logger.error(f"Database error soft deleting claim: {str(e)}")
+            db_session.rollback()
+            return response.api_response(500, error_details="Failed to delete claim")
         
     except IntegrityError as e:
         db_session.rollback()

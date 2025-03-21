@@ -5,7 +5,7 @@ This module handles the retrieval of claim details from the ClaimVision system,
 ensuring proper authorization and data access.
 """
 from utils.logging_utils import get_logger
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
@@ -42,6 +42,10 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if not claim:
             return response.api_response(404, error_details="Claim not found")
         
+        # Check if claim is soft-deleted
+        if claim.deleted:
+            return response.api_response(404, error_details="Claim not found")
+        
         # Check if user has access to the claim (belongs to their household)
         if str(claim.household_id) != str(user.household_id):
             # Return 404 for security reasons (don't reveal that the claim exists)
@@ -65,12 +69,15 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         
         return response.api_response(200, data=claim_data)
         
-    except SQLAlchemyError as e:
-        logger.error(f"Database error when retrieving claim {claim_id}: {str(e)}")
-        return response.api_response(500, error_details="Database error when retrieving claim")
+    except IntegrityError as e:
+        logger.error("Database integrity error when retrieving claim %s: %s", str(claim_id), str(e))
+        return response.api_response(500, error_details="Database integrity error when retrieving claim")
+    except OperationalError as e:
+        logger.error("Database operational error when retrieving claim %s: %s", str(claim_id), str(e))
+        return response.api_response(500, error_details="Database operational error when retrieving claim")
     except Exception as e:
         logger.error("Error retrieving claim: %s", str(e))
-        return response.api_response(500, error_details=f"Error retrieving claim: {str(e)}")
+        return response.api_response(500, error_details="Internal server error")
 
     if db_session is None and 'db_session' in locals():
         db_session.close()
