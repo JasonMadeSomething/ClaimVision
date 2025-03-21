@@ -75,5 +75,22 @@ resource "aws_security_group" "rds_sg" {
     to_port     = 5432
     protocol    = "tcp"
     cidr_blocks = [var.public_ip]
+    description = "Allow PostgreSQL access from specified public IP"
+  }
+  
+  ingress {
+    from_port   = 5432
+    to_port     = 5432
+    protocol    = "tcp"
+    cidr_blocks = [var.vpc_cidr]
+    description = "Allow PostgreSQL access from within the VPC"
+  }
+  
+  ingress {
+    from_port       = 5432
+    to_port         = 5432
+    protocol        = "tcp"
+    self            = true
+    description     = "Allow PostgreSQL access from resources using this security group"
   }
 }

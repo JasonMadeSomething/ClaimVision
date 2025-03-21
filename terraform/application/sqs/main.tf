@@ -63,33 +63,58 @@ resource "aws_sqs_queue_redrive_policy" "file_analysis_redrive" {
 
 # User Registration Queue
 resource "aws_sqs_queue" "user_registration_queue" {
-  name                      = "claimvision-user-registration-queue-${var.env}"
-  delay_seconds             = 0
-  max_message_size          = 262144  # 256 KB
-  message_retention_seconds = 86400   # 1 day
-  receive_wait_time_seconds = 10
-  visibility_timeout_seconds = 300    # 5 minutes
-
-  tags = {
-    Name = "ClaimVision-UserRegistrationQueue-${var.env}"
-  }
-}
-
-# Dead Letter Queue for user registration
-resource "aws_sqs_queue" "user_registration_dlq" {
-  name                      = "claimvision-user-registration-dlq-${var.env}"
-  message_retention_seconds = 1209600  # 14 days
-
-  tags = {
-    Name = "ClaimVision-UserRegistrationDLQ-${var.env}"
-  }
-}
-
-# Update the user registration queue to use the DLQ
-resource "aws_sqs_queue_redrive_policy" "user_registration_redrive" {
-  queue_url = aws_sqs_queue.user_registration_queue.id
+  name                       = "claimvision-user-registration-queue"
+  delay_seconds              = 0
+  max_message_size           = 262144
+  message_retention_seconds  = 345600 # 4 days
+  visibility_timeout_seconds = 60
+  receive_wait_time_seconds  = 10
   redrive_policy = jsonencode({
     deadLetterTargetArn = aws_sqs_queue.user_registration_dlq.arn
     maxReceiveCount     = 5
   })
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_sqs_queue" "user_registration_dlq" {
+  name                       = "claimvision-user-registration-dlq"
+  delay_seconds              = 0
+  max_message_size           = 262144
+  message_retention_seconds  = 1209600 # 14 days
+  visibility_timeout_seconds = 60
+  receive_wait_time_seconds  = 10
+  tags = {
+    Environment = var.environment
+  }
+}
+
+# Cognito Update Queue
+resource "aws_sqs_queue" "cognito_update_queue" {
+  name                       = "claimvision-cognito-update-queue"
+  delay_seconds              = 0
+  max_message_size           = 262144
+  message_retention_seconds  = 345600 # 4 days
+  visibility_timeout_seconds = 60
+  receive_wait_time_seconds  = 10
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.cognito_update_dlq.arn
+    maxReceiveCount     = 5
+  })
+  tags = {
+    Environment = var.environment
+  }
+}
+
+resource "aws_sqs_queue" "cognito_update_dlq" {
+  name                       = "claimvision-cognito-update-dlq"
+  delay_seconds              = 0
+  max_message_size           = 262144
+  message_retention_seconds  = 1209600 # 14 days
+  visibility_timeout_seconds = 60
+  receive_wait_time_seconds  = 10
+  tags = {
+    Environment = var.environment
+  }
 }

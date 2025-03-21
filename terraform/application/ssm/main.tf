@@ -29,10 +29,14 @@ resource "aws_ssm_parameter" "rds_security_group_id" {
 }
 
 resource "aws_secretsmanager_secret" "db_secret" {
-  name        = "ClaimVisionDBPassword"
+  name        = "ClaimVisionDBPassword-${var.env}"
   description = "Stores database credentials for ClaimVision"
   force_overwrite_replica_secret = true
   recovery_window_in_days = 0  # Allows immediate deletion and recreation
+  
+  lifecycle {
+    ignore_changes = [name]
+  }
 }
 
 resource "aws_secretsmanager_secret_version" "db_secret_version" {

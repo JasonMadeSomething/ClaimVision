@@ -13,30 +13,11 @@ output "rds_endpoint_ssm_path" {
   value       = module.ssm.rds_endpoint_ssm_path
 }
 
-output "file_upload_queue_url" {
-  value = module.sqs.file_upload_queue_url
-}
-
-output "file_upload_queue_arn" {
-  value = module.sqs.file_upload_queue_arn
-}
-
-output "file_analysis_queue_url" {
-  value = module.sqs.file_analysis_queue_url
-}
-
-output "file_analysis_queue_arn" {
-  value = module.sqs.file_analysis_queue_arn
-}
-
 output "user_registration_queue_url" {
   value = module.sqs.user_registration_queue_url
 }
 
-output "user_registration_queue_arn" {
-  value = module.sqs.user_registration_queue_arn
-}
-
-output "user_registration_queue_name" {
-  value = module.sqs.user_registration_queue_name
+output "cognito_update_queue_url" {
+  description = "The URL of the Cognito update queue"
+  value       = module.sqs.cognito_update_queue_url
 }

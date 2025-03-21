@@ -58,10 +58,7 @@ output "user_registration_queue_url" {
   value = module.application.user_registration_queue_url
 }
 
-output "user_registration_queue_arn" {
-  value = module.application.user_registration_queue_arn
-}
-
-output "user_registration_queue_name" {
-  value = module.application.user_registration_queue_name
+output "cognito_update_queue_url" {
+  description = "The URL of the Cognito update queue"
+  value       = module.application.cognito_update_queue_url
 }

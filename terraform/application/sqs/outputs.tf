@@ -23,5 +23,21 @@ output "user_registration_queue_arn" {
 }
 
 output "user_registration_queue_name" {
-  value = aws_sqs_queue.user_registration_queue.name
+  description = "The name of the user registration queue"
+  value       = aws_sqs_queue.user_registration_queue.name
+}
+
+output "cognito_update_queue_url" {
+  description = "The URL of the Cognito update queue"
+  value       = aws_sqs_queue.cognito_update_queue.url
+}
+
+output "cognito_update_queue_arn" {
+  description = "The ARN of the Cognito update queue"
+  value       = aws_sqs_queue.cognito_update_queue.arn
+}
+
+output "cognito_update_queue_name" {
+  description = "The name of the Cognito update queue"
+  value       = aws_sqs_queue.cognito_update_queue.name
 }
