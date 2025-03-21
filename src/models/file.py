@@ -1,13 +1,9 @@
-from sqlalchemy import Column, String, ForeignKey, UUID, JSON, Enum, Boolean, DateTime
+from sqlalchemy import String, ForeignKey, UUID, JSON, Enum, Boolean, DateTime, UniqueConstraint
 from sqlalchemy.orm import Mapped, relationship, mapped_column
 import uuid
 from datetime import datetime, timezone
 from enum import Enum as PyEnum
-from models.item import Item
 from models.base import Base 
-from models.label import Label
-from models.file_labels import FileLabel
-from models.item_files import ItemFile
 
 class FileStatus(PyEnum):
     UPLOADED = "uploaded"
@@ -38,7 +34,7 @@ class File(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    file_hash: Mapped[str] = mapped_column(String, nullable=False, unique=True, default="")
+    file_hash: Mapped[str] = mapped_column(String, nullable=False, default="")
     room_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("rooms.id"), nullable=True)
     household = relationship("Household")
     user = relationship("User")
@@ -46,6 +42,12 @@ class File(Base):
     items = relationship("Item", secondary="item_files", back_populates="files")
     room = relationship("Room", back_populates="files")
     labels = relationship("Label", secondary="file_labels", back_populates="files")
+
+    __table_args__ = (
+        # Create a composite unique constraint on file_hash and deleted
+        # This allows the same file_hash to exist if one is deleted and one is not
+        UniqueConstraint('file_hash', 'deleted', name='uq_file_hash_deleted'),
+    )
 
     def to_dict(self):
         return {
