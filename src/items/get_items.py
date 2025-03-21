@@ -2,6 +2,7 @@ from utils.logging_utils import get_logger
 from sqlalchemy import desc
 
 from models.item import Item
+from models.claim import Claim
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 
@@ -27,6 +28,15 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         return result  # Return error response
         
     claim_uuid = result
+    
+    # Verify the claim exists and belongs to the user's household
+    claim = db_session.query(Claim).filter(
+        Claim.id == claim_uuid,
+        Claim.household_id == user.household_id
+    ).first()
+    
+    if not claim:
+        return response.api_response(404, error_details='Claim not found.')
 
     # Get pagination parameters from query string
     query_params = event.get("queryStringParameters") or {}

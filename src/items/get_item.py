@@ -2,6 +2,7 @@ from utils.logging_utils import get_logger
 from models.item import Item
 from models.item_labels import ItemLabel
 from models.label import Label
+from models.claim import Claim
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 
@@ -28,8 +29,12 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         
     item_uuid = result
     
-    # Fetch the item
-    item = db_session.query(Item).filter(Item.id == item_uuid).first()
+    # Fetch the item and join with claim to verify household ownership
+    item = db_session.query(Item).join(Claim, Item.claim_id == Claim.id).filter(
+        Item.id == item_uuid,
+        Claim.household_id == user.household_id
+    ).first()
+    
     if not item:
         return response.api_response(404, error_details='Item not found.')
 
