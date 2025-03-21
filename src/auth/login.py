@@ -60,21 +60,25 @@ def lambda_handler(event: dict, _context: dict) -> dict:
             }
         )
         
-        # Get the user's attributes including household_id
+        # Try to extract user_id and household_id from the token
         user_id = None
         household_id = None
-        
         try:
-            # Extract user ID from the ID token
+            # Decode the ID token to extract user_id and household_id
             id_token = cognito_response["AuthenticationResult"]["IdToken"]
-            # Convert string token to bytes if needed
             if isinstance(id_token, str):
                 id_token = id_token.encode('utf-8')
             decoded_token = jwt.decode(id_token, options={"verify_signature": False})
+            
+            # Extract user_id (sub) from the token
             user_id = decoded_token.get("sub")
             
-            # Get user attributes from Cognito
-            if user_id:
+            # Extract household_id from the ID token
+            # In ID tokens, custom attributes are in the format "custom:attribute_name"
+            household_id = decoded_token.get("custom:household_id")
+            
+            # If household_id is not in the token, get it from Cognito user attributes
+            if not household_id and user_id:
                 user_attributes = cognito_client.admin_get_user(
                     UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
                     Username=user_id
@@ -82,7 +86,7 @@ def lambda_handler(event: dict, _context: dict) -> dict:
                 
                 # Extract household_id from user attributes
                 for attr in user_attributes.get("UserAttributes", []):
-                    if attr["Name"] == "household_id":
+                    if attr["Name"] == "custom:household_id":
                         household_id = attr["Value"]
                         break
         except (jwt.PyJWTError, ClientError) as e:

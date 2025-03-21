@@ -46,6 +46,7 @@ def lambda_handler(event, _context):
 
     except Exception as e:
         logger.error(f"Unexpected error: {str(e)}")
-        return response.api_response(500, error_details='An error occurred',
+        return response.api_response(
+            500,
             error_details=str(e)
         )
