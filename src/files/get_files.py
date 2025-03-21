@@ -5,24 +5,21 @@ This module handles the retrieval of file metadata and generates
 presigned URLs for file access when needed.
 """
 import os
+import json
 from utils.logging_utils import get_logger
-from models.file import File
+from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_url
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, generate_presigned_url, get_s3_client
-from database.database import get_db_session as db_get_session
-
-# For backward compatibility with tests
-def get_db_session():
-    """
-    Wrapper function for database session creation to maintain backward compatibility with tests.
-    
-    Returns:
-        Session: SQLAlchemy database session
-    """
-    return db_get_session()
+from models.file import File
+from database.database import get_db_session
 
 logger = get_logger(__name__)
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
+
+# Get the actual bucket name, not the SSM parameter path
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
+    # If it looks like an SSM parameter path, use a default for local testing
+    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    S3_BUCKET_NAME = "claimvision-dev-bucket"
 
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
@@ -38,10 +35,6 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     Returns:
         dict: API response with files or error
     """
-    # For backward compatibility with tests that patch get_db_session
-    if db_session is None:
-        db_session = get_db_session()
-        
     # Validate query parameters
     query_params = event.get("queryStringParameters") or {}
     limit = query_params.get("limit", "10")

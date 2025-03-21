@@ -53,9 +53,23 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
     
     # Perform soft delete
     try:
-        file_data.deleted = True
-        file_data.deleted_at = datetime.now(timezone.utc)
-        file_data.updated_at = datetime.now(timezone.utc)
+        # Check for an existing deleted file with the same hash
+        existing_deleted_file = db_session.query(File).filter(
+            File.file_hash == file_data.file_hash,
+            File.deleted,
+            File.id != file_data.id
+        ).first()
+        
+        if existing_deleted_file:
+            # If there's already a deleted file with the same hash, hard delete it
+            logger.info(f"Found existing deleted file with same hash. Hard deleting file: {existing_deleted_file.id}")
+            db_session.delete(existing_deleted_file)
+            
+        # Soft delete the current file - only set these values if it's not already deleted
+        if not file_data.deleted:
+            file_data.deleted = True
+            file_data.deleted_at = datetime.now(timezone.utc)
+            file_data.updated_at = datetime.now(timezone.utc)
         db_session.commit()
         
         # Return a 204 No Content response for successful deletion

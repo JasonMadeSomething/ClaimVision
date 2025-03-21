@@ -2,47 +2,53 @@
 Lambda handler for processing files from the SQS queue.
 
 This module is triggered by the SQS queue and handles:
-1. Decoding the base64 file data
-2. Uploading the file to S3
-3. Storing file metadata in the database
-4. Sending a message to the analysis queue
+1. Moving the file from the 'pending' location to the final location in S3
+2. Storing file metadata in the database
+3. Sending a message to the analysis queue
 """
 import os
 import json
 import uuid
-import base64
 from datetime import datetime, timezone
+from hashlib import sha256
 from utils.logging_utils import get_logger
 from utils.lambda_utils import get_s3_client, get_sqs_client
 from models.file import FileStatus, File
 from database.database import get_db_session
-import sys
 
 logger = get_logger(__name__)
 
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
+# Get the actual bucket name, not the SSM parameter path
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
+    # If it looks like an SSM parameter path, use a default for local testing
+    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    S3_BUCKET_NAME = "claimvision-dev-bucket"
+
 SQS_ANALYSIS_QUEUE_URL = os.getenv("SQS_ANALYSIS_QUEUE_URL", "")
 
-def upload_to_s3(s3_key: str, file_data: bytes) -> str:
+def compute_file_hash(s3_bucket, s3_key):
     """
-    Uploads file to S3 and returns the S3 URL.
+    Compute the SHA-256 hash of a file stored in S3.
     
     Args:
-        s3_key (str): The S3 key for the file
-        file_data (bytes): The binary data of the file
+        s3_bucket (str): S3 bucket name
+        s3_key (str): S3 object key
         
     Returns:
-        str: The S3 URL of the uploaded file
-        
-    Raises:
-        ValueError: If S3_BUCKET_NAME is not set
+        str: SHA-256 hash of the file
     """
-    if not S3_BUCKET_NAME:
-        raise ValueError("S3_BUCKET_NAME environment variable is not set")
-        
-    s3 = get_s3_client()
-    s3.put_object(Bucket=S3_BUCKET_NAME, Key=s3_key, Body=file_data)
-    return f"s3://{S3_BUCKET_NAME}/{s3_key}"
+    try:
+        logger.info(f"Computing hash for file in S3: {s3_bucket}/{s3_key}")
+        s3 = get_s3_client()
+        response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+        file_data = response['Body'].read()
+        file_hash = sha256(file_data).hexdigest()
+        logger.info(f"Computed file hash: {file_hash}")
+        return file_hash
+    except Exception as e:
+        logger.error(f"Error computing file hash: {str(e)}")
+        raise
 
 def send_to_analysis_queue(file_id, s3_key, file_name, household_id, claim_id) -> str:
     """
@@ -108,37 +114,48 @@ def lambda_handler(event, context):
                 user_id = uuid.UUID(message_body['user_id'])
                 household_id = uuid.UUID(message_body['household_id'])
                 file_name = message_body['file_name']
-                s3_key = message_body['s3_key']
                 claim_id = uuid.UUID(message_body['claim_id'])
                 room_id = uuid.UUID(message_body['room_id']) if message_body.get('room_id') else None
-                file_hash = message_body['file_hash']
-                file_data_base64 = message_body['file_data']
                 
-                # Decode base64 data
+                # Get S3 information
+                source_s3_key = message_body['s3_key']
+                source_s3_bucket = message_body['s3_bucket']
+                
+                # Construct final S3 key
+                target_s3_key = f"ClaimVision/{claim_id}/{file_id}/{file_name}"
+                logger.info(f"Moving file from {source_s3_key} to {target_s3_key}")
+                
+                # Move file from pending location to final location
                 try:
-                    file_data = base64.b64decode(file_data_base64)
-                except Exception as e:
-                    logger.error(f"Failed to decode base64 data for file {file_id}: {str(e)}")
-                    return {
-                        "statusCode": 400,
-                        "body": json.dumps({
-                            "error": f"Invalid base64 data: {str(e)}"
-                        })
-                    }
+                    s3 = get_s3_client()
                     
-                # Upload to S3
-                try:
-                    s3_url = upload_to_s3(s3_key, file_data)
-                    logger.info(f"File {file_id} uploaded to S3: {s3_url}")
+                    # Copy the object to the new location
+                    s3.copy_object(
+                        CopySource={'Bucket': source_s3_bucket, 'Key': source_s3_key},
+                        Bucket=S3_BUCKET_NAME,
+                        Key=target_s3_key
+                    )
+                    
+                    # Delete the original object (from pending location)
+                    s3.delete_object(
+                        Bucket=source_s3_bucket,
+                        Key=source_s3_key
+                    )
+                    
+                    s3_url = f"s3://{S3_BUCKET_NAME}/{target_s3_key}"
+                    logger.info(f"File {file_id} moved to final location: {s3_url}")
                 except Exception as e:
-                    logger.error(f"Failed to upload file {file_id} to S3: {str(e)}")
+                    logger.error(f"Failed to move file {file_id} in S3: {str(e)}")
                     return {
                         "statusCode": 500,
                         "body": json.dumps({
-                            "error": f"Error uploading file to S3: {str(e)}"
+                            "error": f"Error moving file in S3: {str(e)}"
                         })
                     }
                     
+                # Compute file hash
+                file_hash = compute_file_hash(S3_BUCKET_NAME, target_s3_key)
+                
                 # Store metadata in database
                 try:
                     new_file = File(
@@ -146,7 +163,7 @@ def lambda_handler(event, context):
                         uploaded_by=user_id,
                         household_id=household_id,
                         file_name=file_name,
-                        s3_key=s3_key,
+                        s3_key=target_s3_key,
                         claim_id=claim_id,
                         room_id=room_id,
                         status=FileStatus.UPLOADED,
@@ -169,7 +186,7 @@ def lambda_handler(event, context):
                 # Send to analysis queue
                 warnings = []
                 try:
-                    message_id = send_to_analysis_queue(file_id, s3_key, file_name, household_id, claim_id)
+                    message_id = send_to_analysis_queue(file_id, target_s3_key, file_name, household_id, claim_id)
                     logger.info(f"File {file_id} queued for analysis with message ID {message_id}")
                 except Exception as e:
                     warning_msg = f"Failed to queue file {file_id} for analysis: {str(e)}"

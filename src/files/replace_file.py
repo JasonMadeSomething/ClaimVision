@@ -1,6 +1,7 @@
 from utils.logging_utils import get_logger
 import base64
 import os
+import json
 from datetime import datetime, timezone
 from hashlib import sha256
 import boto3
@@ -9,11 +10,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from models.file import File
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from database.database import get_db_session
 
 logger = get_logger(__name__)
 
-# Get S3 bucket name from environment variable
-S3_BUCKET_NAME = os.environ.get("S3_BUCKET_NAME", "your-s3-bucket-name")
+# Get the actual bucket name, not the SSM parameter path
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
+    # If it looks like an SSM parameter path, use a default for local testing
+    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    S3_BUCKET_NAME = "claimvision-dev-bucket"
 
 def upload_to_s3(s3_key, file_data):
     """
@@ -99,9 +105,9 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         
     # Check for invalid file extensions
     file_extension = file_name.split(".")[-1].lower()
-    allowed_extensions = ["jpg", "jpeg", "png", "pdf", "doc", "docx"]
+    allowed_extensions = ["jpg", "jpeg", "png"]
     if file_extension not in allowed_extensions:
-        return response.api_response(400, error_details="Invalid file format. Allowed formats: jpg, jpeg, png, pdf, doc, docx")
+        return response.api_response(400, error_details="Invalid file format. Allowed formats: jpg, jpeg, png")
     
     # Retrieve the file, ensuring it belongs to user's household
     file_record = db_session.query(File).filter(

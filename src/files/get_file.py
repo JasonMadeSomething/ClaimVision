@@ -1,11 +1,19 @@
-from utils.logging_utils import get_logger
 import os
-from models.file import File
+import json
+import boto3
+from utils.logging_utils import get_logger
+from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_url
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, generate_presigned_url, get_s3_client
+from models.file import File
 
 logger = get_logger(__name__)
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "test-bucket")
+
+# Get the actual bucket name, not the SSM parameter path
+S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
+if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
+    # If it looks like an SSM parameter path, use a default for local testing
+    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    S3_BUCKET_NAME = "claimvision-dev-bucket"
 
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None) -> dict:
