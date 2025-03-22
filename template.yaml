@@ -93,6 +93,19 @@ Parameters:
     Type: String
     Default: ""
     Description: Route Table ID for Lambda functions
+  EnableDNS:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    Description: "Enable Route53 + API Gateway domain setup"
+  HostedZoneId:
+    Type: String
+    Description: "Route 53 Hosted Zone ID"
+  ApiDomainName:
+    Type: String
+    Description: "Fully qualified domain name for the API"
 
 Conditions:
   IsDev: !Equals [!Ref Env, "dev"]
@@ -101,6 +114,7 @@ Conditions:
       - Fn::Equals:
           - !Ref VpcId
           - ""
+  CreateDNS: !Equals [ !Ref EnableDNS, true ]
 
 Globals:
   Function:
@@ -1351,6 +1365,7 @@ Resources:
         - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
+          S3_BUCKET_NAME: !Ref S3BucketName
           DB_USERNAME: !Ref DBUsername
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
@@ -1616,8 +1631,52 @@ Resources:
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
 
+  APICertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: CreateDNS
+    Properties:
+      DomainName: !Ref ApiDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref ApiDomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  APIDomainName:
+    Type: AWS::ApiGateway::DomainName
+    Condition: CreateDNS
+    Properties:
+      DomainName: !Ref ApiDomainName
+      RegionalCertificateArn: !Ref APICertificate
+      EndpointConfiguration:
+        Types:
+          - REGIONAL
+
+  APIBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Condition: CreateDNS
+    Properties:
+      DomainName: !Ref APIDomainName
+      RestApiId: !Ref ClaimVisionAPI
+      Stage: dev
+
+  APIDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDNS
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref ApiDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt APIDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt APIDomainName.RegionalHostedZoneId
+        EvaluateTargetHealth: false
+
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
     Description: API Gateway Invoke URL
     Value: !Sub https://${ClaimVisionAPI}.execute-api.${AWS::Region}.amazonaws.com/dev
+  CustomDomainURL:
+    Condition: CreateDNS
+    Description: Custom Domain URL
+    Value: !Sub https://${ApiDomainName}
