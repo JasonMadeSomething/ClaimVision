@@ -168,6 +168,7 @@ def lambda_handler(event, context):
                         room_id=room_id,
                         status=FileStatus.UPLOADED,
                         file_hash=file_hash,
+                        file_metadata={},  # Initialize with empty metadata
                         created_at=datetime.now(timezone.utc),
                         updated_at=datetime.now(timezone.utc),
                     )

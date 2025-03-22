@@ -77,10 +77,15 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         
         # Generate pre-signed URL
         if file.s3_key:
-            signed_url = generate_presigned_url(s3_client, S3_BUCKET_NAME, file.s3_key)
-            if signed_url is None:
+            if S3_BUCKET_NAME:
+                signed_url = generate_presigned_url(s3_client, S3_BUCKET_NAME, file.s3_key)
+                if signed_url is None:
+                    s3_failure = True
+                file_info["signed_url"] = signed_url
+            else:
+                logger.warning("S3_BUCKET_NAME is not set, cannot generate presigned URL")
                 s3_failure = True
-            file_info["signed_url"] = signed_url
+                file_info["signed_url"] = None
         else:
             file_info["signed_url"] = None
             
