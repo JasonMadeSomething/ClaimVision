@@ -175,19 +175,19 @@ def lambda_handler(event, context):
         # Generate a household ID upfront
         household_id = str(uuid.uuid4())
         logger.info(f"Generated household ID: {household_id}")
-        
+        user_attributes = [
+            {'Name': 'email', 'Value': email},
+            {'Name': 'custom:household_id', 'Value': household_id}
+        ]
+        logger.info("User attributes: %s", user_attributes)
         # Register user with Cognito
         cognito_client = get_cognito_client()
-        
         try:
             cognito_response = cognito_client.sign_up(
                 ClientId=os.environ.get('COGNITO_USER_POOL_CLIENT_ID'),
                 Username=email,
                 Password=password,
-                UserAttributes=[
-                    {'Name': 'email', 'Value': email},
-                    {'Name': 'custom:household_id', 'Value': household_id}
-                ]
+                UserAttributes=user_attributes
             )
             
             user_sub = cognito_response.get('UserSub')
