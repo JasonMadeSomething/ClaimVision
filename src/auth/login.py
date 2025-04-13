@@ -81,7 +81,7 @@ def lambda_handler(event: dict, _context: dict) -> dict:
             if not household_id and user_id:
                 user_attributes = cognito_client.admin_get_user(
                     UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
-                    Username=user_id
+                    Username=username
                 )
                 
                 # Extract household_id from user attributes
