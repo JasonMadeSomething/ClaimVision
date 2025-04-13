@@ -34,7 +34,7 @@ def lambda_handler(event, _context):
             if not username:
                 missing_fields.append("username")
             if not confirmation_code:
-                missing_fields.append("confirmation_code")
+                missing_fields.append("code")
             return response.api_response(400, error_details="Missing required fields", missing_fields=missing_fields)
 
         # Confirm the user's email
