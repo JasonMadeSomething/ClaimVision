@@ -80,31 +80,23 @@ def standard_lambda_handler(
                 
                 # Authenticate user if required
                 if requires_auth:
-                    # Extract user ID from JWT claims
-                    logger.debug(f"{function_name}: Authenticating user")
-                    success, result = auth_utils.extract_user_id(event)
-                    if not success:
-                        logger.warning(f"{function_name}: Authentication failed - Missing or invalid token")
-                        return result  # Return error response
-                    
-                    user_id = result
-                    logger.debug(f"{function_name}: User ID extracted: {user_id}")
-                    
-                    # Extract household ID from JWT claims
-                    success, result = auth_utils.extract_household_id(event)
-                    if not success:
-                        logger.warning(f"{function_name}: Authentication failed - Missing or invalid household ID")
-                        return result  # Return error response
-                    
-                    household_id = result
-                    logger.debug(f"{function_name}: Household ID extracted: {household_id}")
-                    
-                    # Get authenticated user
+                    logger.debug(f"{function_name}: Extracting user from Lambda Authorizer context")
+
+                    auth_ctx = event.get("requestContext", {}).get("authorizer", {})
+                    user_id = auth_ctx.get("user_id")
+                    household_id = auth_ctx.get("household_id")
+                    email = auth_ctx.get("email")
+
+                    if not all([user_id, household_id]):
+                        logger.warning(f"{function_name}: Missing required auth context fields")
+                        return response.api_response(401, error_details="Unauthorized: Invalid token context")
+
+                    # Load the user from the DB if needed
                     success, result = auth_utils.get_authenticated_user(db_session, user_id, event)
                     if not success:
-                        logger.warning(f"{function_name}: User not found or not authorized: {user_id}")
-                        return result  # Return error response
-                    
+                        logger.warning(f"{function_name}: User not found or unauthorized: {user_id}")
+                        return result
+
                     user = result
                     logger.debug(f"{function_name}: User authenticated: {user.id}")
                 
