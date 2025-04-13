@@ -11,11 +11,12 @@ import base64
 from datetime import datetime, timezone
 from hashlib import sha256
 import time
+import re
 
 from botocore.exceptions import ClientError
 
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, get_sqs_client, get_s3_client
+from utils.lambda_utils import standard_lambda_handler, get_sqs_client, get_s3_client, extract_uuid_param
 from utils.response import api_response
 from models.file import File
 from models.claim import Claim
@@ -172,17 +173,114 @@ def queue_file_for_processing(file_name, claim_id, s3_key, room_id=None, househo
         logger.error(f"Error sending message to SQS: {str(e)}")
         raise ConnectionError(f"Failed to send message to SQS: {str(e)}")
 
-@standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
+def parse_multipart_form_data(event):
     """
-    Handles receiving file uploads and sending them to SQS for processing.
+    Parse multipart form data from API Gateway event.
     
     Args:
-        event (dict): API Gateway event containing authentication details and file data (unused)
+        event (dict): API Gateway event
+        
+    Returns:
+        dict: Parsed form data with files and fields
+    """
+    try:
+        logger.info("Parsing multipart form data")
+        
+        # Get content type and boundary
+        content_type = event.get('headers', {}).get('content-type', '')
+        if not content_type or 'multipart/form-data' not in content_type:
+            logger.warning(f"Invalid content type for multipart: {content_type}")
+            return None
+            
+        # Extract boundary
+        boundary_match = re.search(r'boundary=([^;]+)', content_type)
+        if not boundary_match:
+            logger.warning("No boundary found in content type")
+            return None
+            
+        boundary = boundary_match.group(1)
+        logger.info(f"Multipart boundary: {boundary}")
+        
+        # Get request body
+        body = event.get('body', '')
+        if event.get('isBase64Encoded', False):
+            logger.info("Decoding base64 encoded body")
+            body = base64.b64decode(body).decode('utf-8')
+        
+        # Split body by boundary
+        boundary = f'--{boundary}'
+        parts = body.split(boundary)
+        
+        # Remove first and last parts (they are empty or contain closing boundary)
+        parts = [p for p in parts if p and p.strip() and p.strip() != '--']
+        
+        # Parse each part
+        form_data = {'files': [], 'fields': {}}
+        
+        for part in parts:
+            # Split headers and content
+            headers_content = part.strip().split('\r\n\r\n', 1)
+            if len(headers_content) != 2:
+                continue
+                
+            headers, content = headers_content
+            
+            # Parse headers
+            header_lines = headers.split('\r\n')
+            header_dict = {}
+            
+            for line in header_lines:
+                if ': ' in line:
+                    key, value = line.split(': ', 1)
+                    header_dict[key.lower()] = value
+            
+            # Check if this is a file or a field
+            content_disposition = header_dict.get('content-disposition', '')
+            name_match = re.search(r'name="([^"]+)"', content_disposition)
+            
+            if not name_match:
+                continue
+                
+            field_name = name_match.group(1)
+            
+            # Check if this is a file
+            filename_match = re.search(r'filename="([^"]+)"', content_disposition)
+            
+            if filename_match:
+                # This is a file
+                filename = filename_match.group(1)
+                content_type = header_dict.get('content-type', 'application/octet-stream')
+                
+                # Base64 encode the file content for consistent handling
+                file_data = base64.b64encode(content.encode('latin1')).decode('ascii')
+                
+                form_data['files'].append({
+                    'file_name': filename,
+                    'file_data': file_data,
+                    'content_type': content_type
+                })
+                logger.info(f"Parsed file: {filename} ({content_type})")
+            else:
+                # This is a form field
+                form_data['fields'][field_name] = content
+                logger.info(f"Parsed field: {field_name}")
+        
+        return form_data
+    except Exception as e:
+        logger.error(f"Error parsing multipart form data: {str(e)}")
+        return None
+
+@standard_lambda_handler(requires_auth=True)
+def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+    """
+    Handles receiving file uploads and sending them to SQS for processing.
+    Supports both JSON with base64-encoded files and multipart form data.
+    
+    Args:
+        event (dict): API Gateway event containing authentication details and file data
         _context (dict): Lambda execution context (unused)
         db_session (Session, optional): SQLAlchemy session for testing
         user (User): Authenticated user object (provided by decorator)
-        body (dict): Parsed request body (provided by decorator)
         
     Returns:
         dict: API response containing upload request status
@@ -191,6 +289,58 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
     
     # Enhanced logging for debugging
     logger.info(f"Lambda handler called with user: {user}")
+    
+    # Check if this is a multipart form data request
+    content_type = event.get('headers', {}).get('content-type', '')
+    logger.info(f"Content-Type: {content_type}")
+    
+    body = None
+    
+    # Extract claim_id from path parameters (required)
+    success, claim_id_or_error = extract_uuid_param(event, 'claim_id')
+    if not success:
+        logger.warning("Missing or invalid claim_id in path parameters")
+        return claim_id_or_error  # This will be the error response from extract_uuid_param
+    
+    claim_id = claim_id_or_error
+    logger.info(f"Found claim_id in path parameters: {claim_id}")
+    
+    if content_type and 'multipart/form-data' in content_type:
+        logger.info("Processing multipart form data request")
+        form_data = parse_multipart_form_data(event)
+        
+        if not form_data:
+            logger.error("Failed to parse multipart form data")
+            return api_response(400, error_details='Failed to parse multipart form data')
+            
+        # Extract form fields and files
+        files = form_data.get('files', [])
+        fields = form_data.get('fields', {})
+        
+        # Create body structure similar to JSON request
+        body = {
+            'files': files,
+            'room_id': fields.get('room_id')
+        }
+        
+        logger.info(f"Parsed {len(files)} files from multipart form data")
+    else:
+        # Process as JSON request with base64-encoded files
+        logger.info("Processing JSON request with base64-encoded files")
+        
+        # Parse the body from the event
+        if 'body' in event:
+            try:
+                if isinstance(event['body'], str):
+                    body = json.loads(event['body'])
+                else:
+                    body = event['body']
+            except json.JSONDecodeError:
+                logger.error("Failed to parse JSON body")
+                return api_response(400, error_details='Invalid JSON body')
+        else:
+            logger.error("No body in request")
+            return api_response(400, error_details='Request body is required')
     
     # Log only the structure of the request body, not the actual file data
     body_structure = {}
@@ -202,16 +352,11 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
     household_id = user.household_id
     logger.info(f"User household ID: {household_id}")
     
-    # Extract parameters from the request
-    claim_id = body.get("claim_id")
-    room_id = body.get("room_id")
-    files = body.get("files", [])
+    # Extract room_id and files from the request body
+    room_id = body.get("room_id") if body else None
+    files = body.get("files", []) if body else []
     
     # Validate required parameters
-    if not claim_id:
-        logger.warning("Missing claim_id in request")
-        return api_response(400, error_details='Claim ID is required.')
-        
     if not files or not isinstance(files, list):
         logger.warning("Missing or invalid files in request")
         return api_response(400, error_details='Files are required and must be a list.')
