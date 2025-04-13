@@ -28,7 +28,7 @@ def extract_user_id(event: dict) -> Tuple[bool, Union[str, dict]]:
             - Success flag (True if valid user ID was extracted)
             - Either the validated user ID string or an API response dict on error
     """
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    claims = event.get("requestContext", {}).get("authorizer", {})
     user_id = claims.get("sub")
     if not user_id:
         return False, response.api_response(401, error_details="Unauthorized: Missing authentication")
@@ -57,7 +57,7 @@ def extract_household_id(event: dict) -> Tuple[bool, Union[str, dict]]:
             - Success flag (True if valid household ID was extracted)
             - Either the validated household ID string or an API response dict on error
     """
-    claims = event.get("requestContext", {}).get("authorizer", {}).get("claims", {})
+    claims = event.get("requestContext", {}).get("authorizer", {})
     
     # In JWT tokens, custom attributes are typically only present in ID tokens, not access tokens
     # The format in ID tokens is "custom:household_id"
