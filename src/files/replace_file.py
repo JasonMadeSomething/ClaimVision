@@ -18,7 +18,7 @@ logger = get_logger(__name__)
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
     # If it looks like an SSM parameter path, use a default for local testing
-    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    logger.warning("S3_BUCKET_NAME appears to be an SSM parameter path: %s. Using default bucket for local testing.", S3_BUCKET_NAME)
     S3_BUCKET_NAME = "claimvision-dev-bucket"
 
 def upload_to_s3(s3_key, file_data):
@@ -36,7 +36,7 @@ def upload_to_s3(s3_key, file_data):
     try:
         s3.put_object(Bucket=S3_BUCKET_NAME, Key=s3_key, Body=file_data)
     except (BotoCoreError, ClientError) as e:
-        logger.error(f"S3 upload failed: {str(e)}")
+        logger.error("S3 upload failed: %s", str(e))
         raise
 
 @standard_lambda_handler(requires_auth=True, requires_body=True)
@@ -149,10 +149,10 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         return response.api_response(200, data=file_response)
         
     except (BotoCoreError, ClientError) as s3_error:
-        logger.error(f"S3 error replacing file: {str(s3_error)}")
+        logger.error("S3 error replacing file: %s", str(s3_error))
         return response.api_response(500, error_details="Failed to upload file to storage")
         
     except SQLAlchemyError as db_error:
-        logger.error(f"Database error replacing file: {str(db_error)}")
+        logger.error("Database error replacing file: %s", str(db_error))
         db_session.rollback()
         return response.api_response(500, error_details="Database error occurred")
