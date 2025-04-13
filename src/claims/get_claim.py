@@ -78,6 +78,3 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     except Exception as e:
         logger.error("Error retrieving claim: %s", str(e))
         return response.api_response(500, error_details="Internal server error")
-
-    if db_session is None and 'db_session' in locals():
-        db_session.close()
