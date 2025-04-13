@@ -6,11 +6,13 @@ import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
 import { Photo, Item, Room, SearchMode } from "@/types/workbench";
 import { useSettingsStore } from "@/stores/settingsStore";
+import { useAuth } from '@/context/AuthContext';
 import WorkbenchHeader from "./WorkbenchHeader";
 import PhotoGrid from "./PhotoGrid";
 import ItemDetailsPanel from "./ItemDetailsPanel";
 import RoomSelector from "./RoomSelector";
 import SearchBar from "./SearchBar";
+import FileUploader from './FileUploader';
 
 export default function WorkbenchLayout() {
   const router = useRouter();
@@ -23,68 +25,99 @@ export default function WorkbenchLayout() {
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.Highlight);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [claimId, setClaimId] = useState<string | null>(null);
+  const [showUploadModal, setShowUploadModal] = useState(false);
+  const { user } = useAuth();
 
   const { autoOpenDetailPanel } = useSettingsStore();
 
+  // Get claim_id from URL if present
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const claimIdParam = urlParams.get('claim_id');
+    if (claimIdParam) {
+      setClaimId(claimIdParam);
+    }
+  }, []);
+
   // Fetch photos, items, and rooms on component mount
   useEffect(() => {
-    const fetchData = async () => {
+    if (!claimId || !user?.id_token) return;
+    const fetchData = async (token: string) => {
       try {
+        if (!user) {
+          router.push('/');
+          return;
+        }
+        
         setIsLoading(true);
+    
+        const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
         
-        // Create a simple mock API implementation directly in the component
-        // This will be replaced with actual API calls in the future
-        console.log("Creating mock data...");
-        
-        // Mock photos data
-        const mockPhotos: Photo[] = Array.from({ length: 20 }, (_, i) => ({
-          id: `photo-${i}`,
-          url: `https://source.unsplash.com/random/300x300?disaster&sig=${i}`,
-          fileName: `photo-${i}.jpg`,
-          labels: ["damage", i % 2 === 0 ? "water" : "fire", i % 3 === 0 ? "TV" : "furniture"],
-          itemId: i < 10 ? `item-${Math.floor(i / 2)}` : null,
-          position: { x: Math.random() * 800, y: Math.random() * 600 },
-          roomId: i < 5 ? "room-1" : (i < 10 ? "room-2" : null),
-          uploadedAt: new Date().toISOString(),
-        }));
-        
-        // Mock items data
-        const mockItems: Item[] = Array.from({ length: 5 }, (_, i) => ({
-          id: `item-${i}`,
-          name: `Item ${i + 1}`,
-          description: `Description for item ${i + 1}`,
-          thumbnailPhotoId: `photo-${i * 2}`,
-          photoIds: [`photo-${i * 2}`, `photo-${i * 2 + 1}`],
-          roomId: i < 2 ? "room-1" : (i < 4 ? "room-2" : null),
-          replacementValue: Math.floor(Math.random() * 1000) + 100,
-        }));
-        
-        // Mock rooms data
-        const mockRooms: Room[] = [
-          { id: "room-1", name: "Living Room", itemIds: ["item-0", "item-1"] },
-          { id: "room-2", name: "Kitchen", itemIds: ["item-2", "item-3"] },
-        ];
-        
-        console.log("Mock data created successfully");
+        // If we have a claim_id, fetch data for that specific claim
+        const roomsEndpoint = `${baseUrl}/claims/${claimId}/rooms`;
+        const itemsEndpoint = `${baseUrl}/claims/${claimId}/items`;
+        const filesEndpoint = `${baseUrl}/claims/${claimId}/files`;
 
-        // Set the state with the mock data
-        setPhotos(mockPhotos);
-        setItems(mockItems);
-        setRooms(mockRooms);
-      } catch (err) {
-        console.error("Error in fetchData:", err);
-        if (err instanceof Error) {
-          setError(`Failed to load workbench data: ${err.message}`);
-        } else {
-          setError("Failed to load workbench data");
+        try {
+          const [roomsRes, itemsRes, photosRes] = await Promise.all([
+            fetch(roomsEndpoint, { headers: { Authorization: `Bearer ${token}` } }),
+            fetch(itemsEndpoint, { headers: { Authorization: `Bearer ${token}` } }),
+            fetch(filesEndpoint, { headers: { Authorization: `Bearer ${token}` } }),
+          ]);
+
+          if (!roomsRes.ok || !itemsRes.ok || !photosRes.ok) {
+            throw new Error("Failed to fetch some resources");
+          }
+
+          const [roomsJson, itemsJson, photosJson] = await Promise.all([
+            roomsRes.json(),
+            itemsRes.json(),
+            photosRes.json(),
+          ]);
+
+          // Set rooms safely
+          const safeRooms = Array.isArray(roomsJson?.data?.rooms)
+            ? roomsJson.data.rooms
+            : [];
+          if (!Array.isArray(roomsJson?.data?.rooms)) {
+            console.warn("Malformed rooms response:", roomsJson);
+          }
+          setRooms(safeRooms);
+
+          // Set items safely
+          const safeItems = Array.isArray(itemsJson?.data?.items)
+            ? itemsJson.data.items
+            : [];
+          if (!Array.isArray(itemsJson?.data?.items)) {
+            console.warn("Malformed items response:", itemsJson);
+          }
+          setItems(safeItems);
+
+          // Set photos safely
+          const safePhotos = Array.isArray(photosJson?.data?.files)
+            ? photosJson.data.files
+            : Array.isArray(photosJson)
+            ? photosJson
+            : [];
+          if (!Array.isArray(photosJson?.data?.files) && !Array.isArray(photosJson)) {
+            console.warn("Malformed photos response:", photosJson);
+          }
+          setPhotos(safePhotos);
+        } catch (err) {
+          console.error("Error fetching claim data:", err);
+          // Optional: Show toast or UI fallback state
+          setRooms([]);
+          setItems([]);
+          setPhotos([]);
         }
       } finally {
         setIsLoading(false);
       }
     };
 
-    fetchData();
-  }, []);
+    fetchData(user.id_token);
+  }, [claimId, user?.id_token]);
 
   // Filter photos based on search query and mode
   const filteredPhotos = photos.filter(photo => {
@@ -113,14 +146,15 @@ export default function WorkbenchLayout() {
   });
 
   // Get items for current view (workbench or specific room)
-  const visibleItems = items.filter(item => {
-    if (selectedRoom) {
-      return item.roomId === selectedRoom.id;
-    } else {
-      // On main workbench, show items not assigned to any room
-      return item.roomId === null;
-    }
-  });
+  const visibleItems = Array.isArray(items)
+  ? items.filter(item => {
+      if (selectedRoom) {
+        return item.roomId === selectedRoom.id;
+      } else {
+        return item.roomId === null;
+      }
+    })
+  : [];
 
   // Create a new item with optional initial photo
   const handleCreateItem = (photoId?: string) => {
@@ -187,8 +221,9 @@ export default function WorkbenchLayout() {
     const updatedPhotoIds = selectedItem.photoIds.filter(id => id !== photoId);
     
     if (updatedPhotoIds.length === 0) {
-      // If no photos left, delete the item
-      const updatedItems = items.filter(item => item.id !== selectedItem.id);
+      const updatedItems = Array.isArray(items)
+        ? items.filter(item => item.id !== selectedItem?.id)
+        : [];
       setItems(updatedItems);
       setSelectedItem(null);
     } else {
@@ -352,6 +387,24 @@ export default function WorkbenchLayout() {
     setSearchQuery(searchQuery);
   };
 
+  // Handle file upload completion
+  const handleUploadComplete = (newFiles: any[]) => {
+    console.log('Upload complete, new files:', newFiles);
+    setShowUploadModal(false);
+    
+    // Add the new files to the photos state
+    if (Array.isArray(newFiles) && newFiles.length > 0) {
+      setPhotos(prevPhotos => {
+        return Array.isArray(prevPhotos) ? [...prevPhotos, ...newFiles] : newFiles;
+      });
+    }
+  };
+
+  // Toggle upload modal
+  const toggleUploadModal = () => {
+    setShowUploadModal(!showUploadModal);
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col h-screen">
@@ -382,21 +435,62 @@ export default function WorkbenchLayout() {
           </div>
           
           {/* Main content area */}
-          <div className="flex-1 overflow-auto">
+          <div className="flex-grow overflow-auto p-4">
+            {selectedRoom && (
+              <div className="mb-4 flex items-center">
+                <h2 className="text-xl font-semibold">{selectedRoom.name}</h2>
+                <button
+                  onClick={() => setSelectedRoom(null)}
+                  className="ml-4 text-blue-600 hover:text-blue-800"
+                >
+                  Back to All
+                </button>
+              </div>
+            )}
+
+            {/* Upload Button and Search */}
+            <div className="flex space-x-4 mb-4">
+              <button
+                onClick={toggleUploadModal}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                </svg>
+                Upload Files
+              </button>
+              <div className="flex-grow"></div>
+              <input
+                type="text"
+                placeholder="Search photos..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
             {isLoading ? (
-              <div className="flex items-center justify-center h-full">
-                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+              <div className="flex justify-center items-center h-64">
+                <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
               </div>
             ) : error ? (
               <div className="text-red-500 text-center p-4">{error}</div>
             ) : (
               <PhotoGrid
-                photos={selectedRoom 
-                  ? photos.filter(photo => photo.roomId === selectedRoom.id)
-                  : photos}
-                items={selectedRoom 
-                  ? items.filter(item => item.roomId === selectedRoom.id)
-                  : items}
+                photos={
+                  Array.isArray(photos)
+                    ? selectedRoom
+                      ? photos.filter(photo => photo.roomId === selectedRoom.id)
+                      : photos
+                    : []
+                }
+                items={
+                  Array.isArray(items)
+                    ? selectedRoom
+                      ? items.filter(item => item.roomId === selectedRoom.id)
+                      : items
+                    : []
+                }
                 searchQuery={searchQuery}
                 searchMode={searchMode}
                 onCreateItem={handleCreateItem}
@@ -423,6 +517,43 @@ export default function WorkbenchLayout() {
               onAddPhoto={handleAddPhotoToItem}
               rooms={rooms}
             />
+          </div>
+        )}
+        
+        {/* File Upload Modal */}
+        {showUploadModal && (
+          <div className="fixed inset-0 z-50 overflow-y-auto">
+            <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+              <div className="fixed inset-0 transition-opacity" aria-hidden="true">
+                <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
+              </div>
+              <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+              <div className="inline-block align-bottom bg-white rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full">
+                <div className="bg-white px-4 pt-5 pb-4 sm:p-6 sm:pb-4">
+                  <div className="sm:flex sm:items-start">
+                    <div className="mt-3 text-center sm:mt-0 sm:ml-4 sm:text-left w-full">
+                      <h3 className="text-lg leading-6 font-medium text-gray-900 mb-4">Upload Files</h3>
+                      <div className="mt-2">
+                        <FileUploader 
+                          claimId={claimId || ''} 
+                          onUploadComplete={handleUploadComplete}
+                          authToken={user?.id_token || ''}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div className="bg-gray-50 px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse">
+                  <button
+                    type="button"
+                    onClick={toggleUploadModal}
+                    className="mt-3 w-full inline-flex justify-center rounded-md border border-gray-300 shadow-sm px-4 py-2 bg-white text-base font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
           </div>
         )}
       </div>

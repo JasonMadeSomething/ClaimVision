@@ -1,43 +1,37 @@
 "use client";
 
-import { useEffect, useState, useRef } from 'react';
-import { getCurrentUser, signOut } from '@aws-amplify/auth';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, usePathname } from 'next/navigation';
 import { UserCircleIcon } from '@heroicons/react/24/solid';
 import { Menu, Transition } from '@headlessui/react';
 import { Fragment } from 'react';
 import SignInForm from './SignInForm';
 import SignUpForm from './SignUpForm';
+import { useAuth } from '@/context/AuthContext';
 
 export default function Navigation() {
-  // For development, set isAuthenticated to true by default
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
   const [showSignIn, setShowSignIn] = useState(false);
   const [showSignUp, setShowSignUp] = useState(false);
   const router = useRouter();
-
-  // Skip authentication check for development
+  const pathname = usePathname();
+  const { user, signOut, isLoading, refreshSession } = useAuth();
+  
+  // Debug log to see what's in the user object
   useEffect(() => {
-    // Development mode: Skip actual auth check
-    // checkAuthState();
-  }, []);
+    console.log('Navigation - Auth state:', { user, isLoading, pathname });
+  }, [user, isLoading, pathname]);
 
-  const checkAuthState = async () => {
-    try {
-      const user = await getCurrentUser();
-      setIsAuthenticated(!!user);
-    } catch (error) {
-      // For development, keep authenticated even if there's an error
-      // setIsAuthenticated(false);
-    }
-  };
+  // Only refresh session once on initial load, not on every route change
+  useEffect(() => {
+    console.log('Navigation - Initial load, refreshing session');
+    refreshSession();
+    // Empty dependency array means this only runs once on mount
+  }, []);
 
   const handleSignOut = async () => {
     try {
-      // For development, just set state without actual signout
-      // await signOut();
-      setIsAuthenticated(false);
+      await signOut();
       router.push('/');
     } catch (error) {
       console.error('Error signing out:', error);
@@ -52,7 +46,9 @@ export default function Navigation() {
         </Link>
         
         <div className="flex items-center space-x-4">
-          {isAuthenticated ? (
+          {isLoading ? (
+            <div className="text-white">Loading...</div>
+          ) : user ? (
             <>
               <Link href="/my-claims" className="text-white hover:text-gray-300">
                 My Claims
@@ -105,18 +101,46 @@ export default function Navigation() {
           ) : (
             <div className="space-x-4">
               <button
-                onClick={() => {
-                  // For development, just set authenticated to true
-                  setIsAuthenticated(true);
-                }}
+                id="signInButton"
+                onClick={() => setShowSignIn(true)}
                 className="px-4 py-2 bg-blue-500 rounded hover:bg-blue-600"
               >
-                Sign In (Dev Mode)
+                Sign In
+              </button>
+              <button
+                onClick={() => setShowSignUp(true)}
+                className="px-4 py-2 border border-white rounded hover:bg-gray-700"
+              >
+                Sign Up
               </button>
             </div>
           )}
         </div>
       </div>
+      
+      {/* Sign In Modal */}
+      {showSignIn && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+            <h2 className="text-2xl font-bold mb-4">Sign In</h2>
+            <SignInForm 
+              onClose={() => setShowSignIn(false)}
+            />
+          </div>
+        </div>
+      )}
+      
+      {/* Sign Up Modal */}
+      {showSignUp && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+            <h2 className="text-2xl font-bold mb-4">Sign Up</h2>
+            <SignUpForm 
+              onClose={() => setShowSignUp(false)}
+            />
+          </div>
+        </div>
+      )}
     </nav>
   );
 }
