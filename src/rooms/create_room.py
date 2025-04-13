@@ -7,10 +7,9 @@ ensuring proper authorization and data validation.
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models.room import Room
 from models import Claim
-from uuid import UUID
 
 logger = get_logger(__name__)
 
@@ -33,19 +32,21 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
         # Extract required fields from the request body
         name = body.get("name")
         description = body.get("description", "")
-        claim_id = body.get("claim_id")
+        
+        # Extract claim_id from path parameters
+        if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
+            return response.api_response(400, error_details="Claim ID is required in path parameters")
+            
+        # Extract and validate claim_id from path parameters
+        success, result = extract_uuid_param(event, "claim_id")
+        if not success:
+            return result  # Return error response
+            
+        claim_uuid = result
 
         # Validate required fields
         if not name:
             return response.api_response(400, error_details="Room name is required")
-        
-        if not claim_id:
-            return response.api_response(400, error_details="Claim ID is required")
-            
-        try:
-            claim_uuid = UUID(claim_id)
-        except ValueError:
-            return response.api_response(400, error_details="Invalid claim ID format")
             
         # Verify claim exists and belongs to user's household
         claim = db_session.query(Claim).filter(
