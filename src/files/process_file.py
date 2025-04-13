@@ -22,7 +22,7 @@ logger = get_logger(__name__)
 S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
     # If it looks like an SSM parameter path, use a default for local testing
-    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    logger.warning("S3_BUCKET_NAME appears to be an SSM parameter path: %s. Using default bucket for local testing.", S3_BUCKET_NAME)
     S3_BUCKET_NAME = "claimvision-dev-bucket"
 
 SQS_ANALYSIS_QUEUE_URL = os.getenv("SQS_ANALYSIS_QUEUE_URL", "")
@@ -39,15 +39,15 @@ def compute_file_hash(s3_bucket, s3_key):
         str: SHA-256 hash of the file
     """
     try:
-        logger.info(f"Computing hash for file in S3: {s3_bucket}/{s3_key}")
+        logger.info("Computing hash for file in S3: %s/%s", s3_bucket, s3_key)
         s3 = get_s3_client()
         response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
         file_data = response['Body'].read()
         file_hash = sha256(file_data).hexdigest()
-        logger.info(f"Computed file hash: {file_hash}")
+        logger.info("Computed file hash: %s", file_hash)
         return file_hash
     except Exception as e:
-        logger.error(f"Error computing file hash: {str(e)}")
+        logger.error("Error computing file hash: %s", str(e))
         raise
 
 def send_to_analysis_queue(file_id, s3_key, file_name, household_id, claim_id) -> str:
@@ -86,13 +86,13 @@ def send_to_analysis_queue(file_id, s3_key, file_name, household_id, claim_id) -
     )
     return response['MessageId']
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """
     Processes file uploads from the SQS queue.
     
     Args:
         event (dict): SQS event containing file data and metadata
-        context (dict): Lambda execution context
+        _context (dict): Lambda execution context
         
     Returns:
         dict: Processing status
@@ -123,7 +123,7 @@ def lambda_handler(event, context):
                 
                 # Construct final S3 key
                 target_s3_key = f"ClaimVision/{claim_id}/{file_id}/{file_name}"
-                logger.info(f"Moving file from {source_s3_key} to {target_s3_key}")
+                logger.info("Moving file from %s to %s", source_s3_key, target_s3_key)
                 
                 # Move file from pending location to final location
                 try:
@@ -143,9 +143,9 @@ def lambda_handler(event, context):
                     )
                     
                     s3_url = f"s3://{S3_BUCKET_NAME}/{target_s3_key}"
-                    logger.info(f"File {file_id} moved to final location: {s3_url}")
+                    logger.info("File %s moved to final location: %s", file_id, s3_url)
                 except Exception as e:
-                    logger.error(f"Failed to move file {file_id} in S3: {str(e)}")
+                    logger.error("Failed to move file %s in S3: %s", file_id, str(e))
                     return {
                         "statusCode": 500,
                         "body": json.dumps({
@@ -174,9 +174,9 @@ def lambda_handler(event, context):
                     )
                     db_session.add(new_file)
                     db_session.commit()
-                    logger.info(f"File {file_id} metadata stored in database")
+                    logger.info("File %s metadata stored in database", file_id)
                 except Exception as e:
-                    logger.error(f"Failed to store file {file_id} metadata in database: {str(e)}")
+                    logger.error("Failed to store file %s metadata in database: %s", file_id, str(e))
                     return {
                         "statusCode": 500,
                         "body": json.dumps({
@@ -188,7 +188,7 @@ def lambda_handler(event, context):
                 warnings = []
                 try:
                     message_id = send_to_analysis_queue(file_id, target_s3_key, file_name, household_id, claim_id)
-                    logger.info(f"File {file_id} queued for analysis with message ID {message_id}")
+                    logger.info("File %s queued for analysis with message ID %s", file_id, message_id)
                 except Exception as e:
                     warning_msg = f"Failed to queue file {file_id} for analysis: {str(e)}"
                     logger.error(warning_msg)
@@ -196,7 +196,7 @@ def lambda_handler(event, context):
                     # We don't return an error here because the file is already uploaded and stored
                 
             except Exception as e:
-                logger.error(f"Failed to process SQS message: {str(e)}")
+                logger.error("Failed to process SQS message: %s", str(e))
                 return {
                     "statusCode": 500,
                     "body": json.dumps({
