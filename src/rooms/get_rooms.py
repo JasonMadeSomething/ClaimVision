@@ -4,11 +4,10 @@ Lambda handler for retrieving all rooms for a claim.
 This module handles the retrieval of rooms from the ClaimVision system,
 ensuring proper authorization and data access.
 """
-import uuid
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models.room import Room
 from models.claim import Claim
 
@@ -29,18 +28,17 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         dict: API response containing list of rooms or error message
     """
     try:
-        # Extract claim ID from query parameters
-        try:
-            query_params = event.get("queryStringParameters", {}) or {}
-            claim_id_str = query_params.get("claim_id")
-            claim_id = uuid.UUID(claim_id_str) if claim_id_str else None
-        except (ValueError, TypeError):
-            logger.warning("Invalid claim ID format: %s", claim_id_str if 'claim_id_str' in locals() else "None")
-            return response.api_response(400, error_details="Invalid claim ID format")
+        # Extract claim ID from path parameters
+        if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
+            logger.warning("Missing claim ID in path parameters")
+            return response.api_response(400, error_details="Claim ID is required in path parameters")
             
-        if not claim_id:
-            logger.warning("Missing claim ID in request")
-            return response.api_response(400, error_details="Invalid or missing claim ID")
+        # Extract and validate claim_id from path parameters
+        success, result = extract_uuid_param(event, "claim_id")
+        if not success:
+            return result  # Return error response
+            
+        claim_id = result
             
         # Verify claim exists and belongs to user's household
         claim = db_session.query(Claim).filter(

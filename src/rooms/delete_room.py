@@ -2,14 +2,16 @@
 Lambda handler for deleting a room.
 
 This module handles the deletion of rooms in the ClaimVision system,
-ensuring proper authorization and data integrity.
+ensuring proper authorization and data validation.
 """
-import uuid
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler
-from models import Room, Item, File
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from models.room import Room
+from models.claim import Claim
+from models.item import Item
+from models.file import File
 from datetime import datetime, timezone
 
 logger = get_logger(__name__)
@@ -29,21 +31,44 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         dict: API response indicating success or error
     """
     try:
-        # Extract room ID from path parameters
-        try:
-            room_id_str = event.get("pathParameters", {}).get("room_id")
-            room_id = uuid.UUID(room_id_str) if room_id_str else None
-        except (ValueError, TypeError):
-            logger.warning("Invalid room ID format: %s", room_id_str if 'room_id_str' in locals() else "None")
-            return response.api_response(400, error_details="Invalid room ID format")
+        # Extract claim ID from path parameters
+        if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
+            logger.warning("Missing claim ID in path parameters")
+            return response.api_response(400, error_details="Claim ID is required in path parameters")
             
-        if not room_id:
-            logger.warning("Missing room ID in request")
-            return response.api_response(400, error_details="Invalid room ID format")
+        # Extract and validate claim_id from path parameters
+        success, result = extract_uuid_param(event, "claim_id")
+        if not success:
+            return result  # Return error response
+            
+        claim_id = result
+        
+        # Verify claim exists and belongs to user's household
+        claim = db_session.query(Claim).filter(
+            Claim.id == claim_id,
+            Claim.household_id == user.household_id
+        ).first()
+        
+        if not claim:
+            logger.info("Claim not found or access denied: %s", claim_id)
+            return response.api_response(404, error_details="Claim not found or access denied")
+            
+        # Extract room ID from path parameters
+        if not event.get("pathParameters") or "room_id" not in event.get("pathParameters", {}):
+            logger.warning("Missing room ID in path parameters")
+            return response.api_response(400, error_details="Room ID is required in path parameters")
+            
+        # Extract and validate room_id from path parameters
+        success, result = extract_uuid_param(event, "room_id")
+        if not success:
+            return result  # Return error response
+            
+        room_id = result
             
         # Query the room
         room = db_session.query(Room).filter(
             Room.id == room_id,
+            Room.claim_id == claim_id,
             Room.household_id == user.household_id,
             Room.deleted.is_(False)
         ).first()
@@ -56,14 +81,25 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         room.deleted = True
         room.updated_at = datetime.now(timezone.utc)
         
-        # Remove room associations from items and files
-        items = db_session.query(Item).filter(Item.room_id == room_id).all()
+        # Update associated items to remove room association
+        items = db_session.query(Item).filter(
+            Item.room_id == room_id,
+            Item.deleted.is_(False)
+        ).all()
+        
         for item in items:
             item.room_id = None
+            item.updated_at = datetime.now(timezone.utc)
             
-        files = db_session.query(File).filter(File.room_id == room_id).all()
+        # Update associated files to remove room association
+        files = db_session.query(File).filter(
+            File.room_id == room_id,
+            File.deleted.is_(False)
+        ).all()
+        
         for file in files:
             file.room_id = None
+            file.updated_at = datetime.now(timezone.utc)
             
         # Save changes
         db_session.commit()
