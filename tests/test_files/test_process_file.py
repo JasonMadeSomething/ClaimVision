@@ -13,8 +13,7 @@ import uuid
 import base64
 from unittest.mock import patch, MagicMock
 import pytest
-from datetime import datetime, timezone
-from files.process_file import lambda_handler, upload_to_s3, send_to_analysis_queue
+from files.process_file import lambda_handler, send_to_analysis_queue
 from models.file import File, FileStatus
 from models.user import User
 from models.household import Household

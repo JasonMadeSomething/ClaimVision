@@ -27,11 +27,12 @@ def test_get_room_success(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user, test_claim, test_room])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="GET",
-        path_params={"room_id": str(room_id)},
-        auth_user=str(user_id)
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
+        auth_user=str(user_id),
+        household_id=str(household_id)
     )
     
     # Call lambda handler
@@ -50,21 +51,24 @@ def test_get_room_not_found(test_db, api_gateway_event):
     """Test retrieving a non-existent room"""
     # Create test data
     household_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
     user_id = uuid.uuid4()
     non_existent_room_id = uuid.uuid4()
     
-    # Create household and user
+    # Create household, user, and claim
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim", date_of_loss=datetime(2024, 1, 10))
     
-    test_db.add_all([test_household, test_user])
+    test_db.add_all([test_household, test_user, test_claim])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="GET",
-        path_params={"room_id": str(non_existent_room_id)},
-        auth_user=str(user_id)
+        path_params={"claim_id": str(claim_id), "room_id": str(non_existent_room_id)},
+        auth_user=str(user_id),
+        household_id=str(household_id)
     )
     
     # Call lambda handler
@@ -94,11 +98,12 @@ def test_get_room_unauthorized(test_db, api_gateway_event):
     test_db.add_all([test_household1, test_household2, test_user, test_claim, test_room])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="GET",
-        path_params={"room_id": str(room_id)},
-        auth_user=str(user_id)
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
+        auth_user=str(user_id),
+        household_id=str(household1_id)
     )
     
     # Call lambda handler
@@ -107,26 +112,29 @@ def test_get_room_unauthorized(test_db, api_gateway_event):
     
     # Assertions
     assert response["statusCode"] == 404
-    assert "Room not found" in body["error_details"]
+    assert "Claim not found or access denied" in body["error_details"]
 
-def test_get_room_invalid_id(test_db, api_gateway_event):
-    """Test retrieving a room with invalid ID format"""
+def test_get_room_invalid_room_id(test_db, api_gateway_event):
+    """Test retrieving a room with invalid room ID format"""
     # Create test data
     household_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
     user_id = uuid.uuid4()
     
-    # Create household and user
+    # Create household, user, and claim
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim", date_of_loss=datetime(2024, 1, 10))
     
-    test_db.add_all([test_household, test_user])
+    test_db.add_all([test_household, test_user, test_claim])
     test_db.commit()
     
-    # Create event
+    # Create event with invalid room_id in path parameters
     event = api_gateway_event(
         http_method="GET",
-        path_params={"room_id": "invalid-uuid"},
-        auth_user=str(user_id)
+        path_params={"claim_id": str(claim_id), "room_id": "invalid-uuid"},
+        auth_user=str(user_id),
+        household_id=str(household_id)
     )
     
     # Call lambda handler
@@ -135,10 +143,10 @@ def test_get_room_invalid_id(test_db, api_gateway_event):
     
     # Assertions
     assert response["statusCode"] == 400
-    assert "Invalid room ID format" in body["error_details"]
+    assert "Invalid room_id format" in body["error_details"]
 
-def test_get_room_db_failure(test_db, api_gateway_event):
-    """Test database error when retrieving a room"""
+def test_get_room_invalid_claim_id(test_db, api_gateway_event):
+    """Test retrieving a room with invalid claim ID format"""
     # Create test data
     household_id = uuid.uuid4()
     user_id = uuid.uuid4()
@@ -151,11 +159,105 @@ def test_get_room_db_failure(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user])
     test_db.commit()
     
-    # Create event
+    # Create event with invalid claim_id in path parameters
+    event = api_gateway_event(
+        http_method="GET",
+        path_params={"claim_id": "invalid-uuid", "room_id": str(room_id)},
+        auth_user=str(user_id),
+        household_id=str(household_id)
+    )
+    
+    # Call lambda handler
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    
+    # Assertions
+    assert response["statusCode"] == 400
+    assert "Invalid claim_id format" in body["error_details"]
+
+def test_get_room_missing_claim_id(test_db, api_gateway_event):
+    """Test retrieving a room without providing a claim ID"""
+    # Create test data
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    room_id = uuid.uuid4()
+    
+    # Create household and user
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+    
+    # Create event with missing claim_id in path parameters
     event = api_gateway_event(
         http_method="GET",
         path_params={"room_id": str(room_id)},
-        auth_user=str(user_id)
+        auth_user=str(user_id),
+        household_id=str(household_id)
+    )
+    
+    # Call lambda handler
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    
+    # Assertions
+    assert response["statusCode"] == 400
+    assert "Claim ID is required" in body["error_details"]
+
+def test_get_room_missing_room_id(test_db, api_gateway_event):
+    """Test retrieving a room without providing a room ID"""
+    # Create test data
+    household_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    
+    # Create household, user, and claim
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim", date_of_loss=datetime(2024, 1, 10))
+    
+    test_db.add_all([test_household, test_user, test_claim])
+    test_db.commit()
+    
+    # Create event with missing room_id in path parameters
+    event = api_gateway_event(
+        http_method="GET",
+        path_params={"claim_id": str(claim_id)},
+        auth_user=str(user_id),
+        household_id=str(household_id)
+    )
+    
+    # Call lambda handler
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    
+    # Assertions
+    assert response["statusCode"] == 400
+    assert "Room ID is required" in body["error_details"]
+
+def test_get_room_db_failure(test_db, api_gateway_event):
+    """Test database error when retrieving a room"""
+    # Create test data
+    household_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    room_id = uuid.uuid4()
+    
+    # Create household, user, and claim
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim", date_of_loss=datetime(2024, 1, 10))
+    
+    test_db.add_all([test_household, test_user, test_claim])
+    test_db.commit()
+    
+    # Create event with both claim_id and room_id in path parameters
+    event = api_gateway_event(
+        http_method="GET",
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
+        auth_user=str(user_id),
+        household_id=str(household_id)
     )
     
     # Create a mock session with query method that raises an exception

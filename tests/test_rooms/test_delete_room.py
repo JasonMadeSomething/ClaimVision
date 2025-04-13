@@ -29,10 +29,10 @@ def test_delete_room_success(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user, test_claim, test_room])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="DELETE",
-        path_params={"room_id": str(room_id)},
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
         auth_user=str(user_id)
     )
     
@@ -69,10 +69,10 @@ def test_delete_room_with_items_and_files(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user, test_claim, test_room, test_item, test_file])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="DELETE",
-        path_params={"room_id": str(room_id)},
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
         auth_user=str(user_id)
     )
     
@@ -99,20 +99,22 @@ def test_delete_room_not_found(test_db, api_gateway_event):
     """Test deleting a non-existent room"""
     # Create test data
     household_id = uuid.uuid4()
+    claim_id = uuid.uuid4()
     user_id = uuid.uuid4()
     non_existent_room_id = uuid.uuid4()
     
-    # Create household and user
+    # Create household, user, and claim
     test_household = Household(id=household_id, name="Test Household")
     test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim", date_of_loss=datetime(2024, 1, 10))
     
-    test_db.add_all([test_household, test_user])
+    test_db.add_all([test_household, test_user, test_claim])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="DELETE",
-        path_params={"room_id": str(non_existent_room_id)},
+        path_params={"claim_id": str(claim_id), "room_id": str(non_existent_room_id)},
         auth_user=str(user_id)
     )
     
@@ -143,10 +145,10 @@ def test_delete_room_unauthorized(test_db, api_gateway_event):
     test_db.add_all([test_household1, test_household2, test_user, test_claim, test_room])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="DELETE",
-        path_params={"room_id": str(room_id)},
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
         auth_user=str(user_id)
     )
     
@@ -171,10 +173,10 @@ def test_delete_room_invalid_id(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user])
     test_db.commit()
     
-    # Create event
+    # Create event with invalid room_id in path parameters
     event = api_gateway_event(
         http_method="DELETE",
-        path_params={"room_id": "invalid-uuid"},
+        path_params={"claim_id": str(uuid.uuid4()), "room_id": "invalid-uuid"},
         auth_user=str(user_id)
     )
     
@@ -203,10 +205,10 @@ def test_delete_room_db_failure(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user, test_claim, test_room])
     test_db.commit()
     
-    # Create event
+    # Create event with both claim_id and room_id in path parameters
     event = api_gateway_event(
         http_method="DELETE",
-        path_params={"room_id": str(room_id)},
+        path_params={"claim_id": str(claim_id), "room_id": str(room_id)},
         auth_user=str(user_id)
     )
     

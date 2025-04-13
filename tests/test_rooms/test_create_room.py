@@ -24,16 +24,16 @@ def test_create_room_success(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user, test_claim])
     test_db.commit()
     
-    # Create request body
+    # Create request body - claim_id is now in path parameters
     room_data = {
         "name": "Living Room",
-        "description": "Main living area",
-        "claim_id": str(claim_id)
+        "description": "Main living area"
     }
     
-    # Create event
+    # Create event with claim_id in path parameters
     event = api_gateway_event(
         http_method="POST",
+        path_params={"claim_id": str(claim_id)},
         body=json.dumps(room_data),
         auth_user=str(user_id)
     )
@@ -73,13 +73,13 @@ def test_create_room_missing_name(test_db, api_gateway_event):
     
     # Create request body with missing name
     room_data = {
-        "description": "Main living area",
-        "claim_id": str(claim_id)
+        "description": "Main living area"
     }
     
-    # Create event
+    # Create event with claim_id in path parameters
     event = api_gateway_event(
         http_method="POST",
+        path_params={"claim_id": str(claim_id)},
         body=json.dumps(room_data),
         auth_user=str(user_id)
     )
@@ -105,16 +105,16 @@ def test_create_room_invalid_claim_id(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user])
     test_db.commit()
     
-    # Create request body with invalid claim ID
+    # Create request body
     room_data = {
         "name": "Living Room",
-        "description": "Main living area",
-        "claim_id": "invalid-uuid"
+        "description": "Main living area"
     }
     
-    # Create event
+    # Create event with invalid claim_id in path parameters
     event = api_gateway_event(
         http_method="POST",
+        path_params={"claim_id": "invalid-uuid"},
         body=json.dumps(room_data),
         auth_user=str(user_id)
     )
@@ -125,7 +125,7 @@ def test_create_room_invalid_claim_id(test_db, api_gateway_event):
     
     # Assertions
     assert response["statusCode"] == 400
-    assert "Invalid claim ID format" in body["error_details"]
+    assert "Invalid UUID format" in body["error_details"]
 
 def test_create_room_claim_not_found(test_db, api_gateway_event):
     """Test creating a room with non-existent claim"""
@@ -141,16 +141,16 @@ def test_create_room_claim_not_found(test_db, api_gateway_event):
     test_db.add_all([test_household, test_user])
     test_db.commit()
     
-    # Create request body with non-existent claim ID
+    # Create request body
     room_data = {
         "name": "Living Room",
-        "description": "Main living area",
-        "claim_id": str(non_existent_claim_id)
+        "description": "Main living area"
     }
     
-    # Create event
+    # Create event with non-existent claim_id in path parameters
     event = api_gateway_event(
         http_method="POST",
+        path_params={"claim_id": str(non_existent_claim_id)},
         body=json.dumps(room_data),
         auth_user=str(user_id)
     )
@@ -162,6 +162,41 @@ def test_create_room_claim_not_found(test_db, api_gateway_event):
     # Assertions
     assert response["statusCode"] == 404
     assert "Claim not found or access denied" in body["error_details"]
+
+def test_create_room_missing_claim_id(test_db, api_gateway_event):
+    """Test creating a room with missing claim ID"""
+    # Create test data
+    household_id = uuid.uuid4()
+    user_id = uuid.uuid4()
+    
+    # Create household and user
+    test_household = Household(id=household_id, name="Test Household")
+    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
+    
+    test_db.add_all([test_household, test_user])
+    test_db.commit()
+    
+    # Create request body
+    room_data = {
+        "name": "Living Room",
+        "description": "Main living area"
+    }
+    
+    # Create event with no claim_id in path parameters
+    event = api_gateway_event(
+        http_method="POST",
+        path_params={},
+        body=json.dumps(room_data),
+        auth_user=str(user_id)
+    )
+    
+    # Call lambda handler
+    response = lambda_handler(event, {}, db_session=test_db)
+    body = json.loads(response["body"])
+    
+    # Assertions
+    assert response["statusCode"] == 400
+    assert "Claim ID is required" in body["error_details"]
 
 def test_create_room_db_error(test_db, api_gateway_event):
     """Test database error when creating a room"""
@@ -181,13 +216,13 @@ def test_create_room_db_error(test_db, api_gateway_event):
     # Create request body
     room_data = {
         "name": "Living Room",
-        "description": "Main living area",
-        "claim_id": str(claim_id)
+        "description": "Main living area"
     }
     
-    # Create event
+    # Create event with claim_id in path parameters
     event = api_gateway_event(
         http_method="POST",
+        path_params={"claim_id": str(claim_id)},
         body=json.dumps(room_data),
         auth_user=str(user_id)
     )
@@ -203,4 +238,4 @@ def test_create_room_db_error(test_db, api_gateway_event):
     
     # Assertions
     assert response["statusCode"] == 500
-    assert "error_details" in body
+    assert "Database error" in body["error_details"]

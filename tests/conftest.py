@@ -84,15 +84,19 @@ def test_db():
 def api_gateway_event():
     """Creates a mock API Gateway event for testing"""
 
-    def _event(http_method="GET", path_params=None, query_params=None, body=None, auth_user="user-123"):
+    def _event(http_method="GET", path_params=None, query_params=None, body=None, auth_user="user-123", household_id=None):
         """Generate an API event, allowing optional auth_user=None for unauthenticated tests"""
+        # If household_id is not provided, generate a random one
+        if household_id is None and auth_user:
+            household_id = str(uuid.uuid4())
+            
         event = {
             "httpMethod": http_method,
             "pathParameters": path_params or {},
             "queryStringParameters": query_params or {},
             "headers": {"Authorization": "Bearer fake-jwt-token"} if auth_user else {},
             "requestContext": {
-                "authorizer": {"claims": {"sub": auth_user}} if auth_user else {}
+                "authorizer": {"claims": {"sub": auth_user, "household_id": household_id}} if auth_user else {}
             },
             "body": json.dumps(body) if isinstance(body, dict) else body,
         }
@@ -210,6 +214,7 @@ def seed_file(test_db):
         id=file_id,
         uploaded_by=user_id,
         household_id=household_id,
+        claim_id=claim_id,
         file_name="original.jpg",
         s3_key="original-key",
         status=FileStatus.UPLOADED,
@@ -243,13 +248,13 @@ def seed_files(test_db):
             id=uuid.uuid4(),
             uploaded_by=user_id,
             household_id=household_id,
+            claim_id=claim_id,
             file_name=f"file_{i}.jpg",
             s3_key=f"key_{i}",
             status=FileStatus.UPLOADED,
             labels=[],
             file_metadata={"mime_type": "image/jpeg", "size": 1234 + i},
             file_hash=f"test_hash_{i}",
-            claim_id=claim_id
         )
         for i in range(5)
     ]
