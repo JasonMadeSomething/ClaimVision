@@ -28,7 +28,9 @@ The `api_response` function should be used for all API responses to enforce a st
 
 from typing import Any, Dict, List, Optional, Union
 from .models import APIResponse
-
+import os
+import json
+import logging
 # Predefined status code mappings
 STATUS_MESSAGES: Dict[int, str] = {
     200: "OK",
@@ -108,7 +110,24 @@ def api_response(
         error_details=error_details or None,  # Ensures error_details is explicitly included
     )
 
+    try:
+        body = response.json()
+    except Exception as e:
+        print(f"[ERROR] Failed to serialize response: {e}")
+        body = json.dumps({"error": "Internal Server Error"})
+
+    env = os.getenv("ENV")
+    access_control_origin = os.getenv("FRONTEND_ORIGIN") if env == "prod" else os.getenv("FRONTEND_ORIGIN_DEV", "http://localhost:3000")
+
+    headers = {
+        "Content-Type": "application/json",
+        "Access-Control-Allow-Methods": "GET,OPTIONS,POST,PUT,DELETE,PATCH",
+        "Access-Control-Allow-Origin": access_control_origin,
+        "Access-Control-Allow-Credentials": True,
+    }
+    logging.info("[INFO] Returning response: %s, with headers: %s", body, headers)
     return {
         "statusCode": status_code,
-        "body": response.json(),
+        "headers": headers,
+        "body": body,
     }
