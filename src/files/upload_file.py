@@ -207,12 +207,17 @@ def parse_multipart_form_data(event):
             logger.info("Decoding base64 encoded body")
             body = base64.b64decode(body).decode('utf-8')
         
+        # Log a sample of the body for debugging
+        logger.info(f"Body sample (first 200 chars): {body[:200]}")
+        
         # Split body by boundary
         boundary = f'--{boundary}'
         parts = body.split(boundary)
         
         # Remove first and last parts (they are empty or contain closing boundary)
         parts = [p for p in parts if p and p.strip() and p.strip() != '--']
+        
+        logger.info(f"Found {len(parts)} parts in multipart form data")
         
         # Parse each part
         form_data = {'files': [], 'fields': {}}
@@ -221,6 +226,7 @@ def parse_multipart_form_data(event):
             # Split headers and content
             headers_content = part.strip().split('\r\n\r\n', 1)
             if len(headers_content) != 2:
+                logger.warning(f"Invalid part format: {part[:100]}")
                 continue
                 
             headers, content = headers_content
@@ -239,9 +245,11 @@ def parse_multipart_form_data(event):
             name_match = re.search(r'name="([^"]+)"', content_disposition)
             
             if not name_match:
+                logger.warning(f"No name found in content disposition: {content_disposition}")
                 continue
                 
             field_name = name_match.group(1)
+            logger.info(f"Found field name: {field_name}")
             
             # Check if this is a file
             filename_match = re.search(r'filename="([^"]+)"', content_disposition)
@@ -265,9 +273,11 @@ def parse_multipart_form_data(event):
                 form_data['fields'][field_name] = content
                 logger.info(f"Parsed field: {field_name}")
         
+        logger.info(f"Parsed {len(form_data['files'])} files and {len(form_data['fields'])} fields")
         return form_data
     except Exception as e:
         logger.error(f"Error parsing multipart form data: {str(e)}")
+        logger.exception("Full exception details:")
         return None
 
 @standard_lambda_handler(requires_auth=True)
@@ -324,6 +334,13 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         }
         
         logger.info(f"Parsed {len(files)} files from multipart form data")
+        
+        # If no files were found but we know this is a multipart request,
+        # it might be due to a change in how the frontend sends files
+        if len(files) == 0:
+            logger.warning("No files found in multipart form data, checking for alternative format")
+            # Log all field names to help debug
+            logger.info(f"Available fields: {list(fields.keys())}")
     else:
         # Process as JSON request with base64-encoded files
         logger.info("Processing JSON request with base64-encoded files")
