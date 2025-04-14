@@ -106,29 +106,44 @@ def lambda_handler(event, context):
                 try:
                     labels = detect_labels(s3_key)
                     logger.info(f"File {file_id} analyzed with {len(labels)} labels detected")
-                    
+                    seen_labels = set()
                     # Store labels in database
                     for label_data in labels:
-                        label_name = label_data['Name']
+                        label_name = label_data['Name'].strip().lower()
+                        print("label_name: %s" % label_name)
                         # We don't need confidence since the Label model doesn't store it
-                        
+                        if label_name in seen_labels:
+                            continue
+                        seen_labels.add(label_name)
                         # Check if label already exists
                         existing_label = db_session.query(Label).filter_by(
                             label_text=label_name,
                             is_ai_generated=True,
                             household_id=file.household_id
                         ).first()
-                        
+                        print("existing_label: %s" % existing_label)
                         if not existing_label:
-                            # Create new label
-                            existing_label = Label(
-                                id=uuid.uuid4(),
-                                label_text=label_name,
-                                is_ai_generated=True,
-                                household_id=file.household_id
-                            )
-                            db_session.add(existing_label)
-                            db_session.flush()  # Flush to get the ID
+                            try:
+                                existing_label = Label(
+                                    id=uuid.uuid4(),
+                                    label_text=label_name,
+                                    is_ai_generated=True,
+                                    household_id=file.household_id
+                                )
+                                db_session.add(existing_label)
+                                db_session.flush()  # Try to write it
+                            except Exception as label_err:
+                                logger.warning(f"Failed to create label '{label_name}': {label_err}")
+                                db_session.rollback()
+                                # Retry the SELECT in case another process added it concurrently
+                                existing_label = db_session.query(Label).filter_by(
+                                    label_text=label_name,
+                                    is_ai_generated=True,
+                                    household_id=file.household_id
+                                ).first()
+                                if not existing_label:
+                                    logger.error(f"Label {label_name} could not be recovered after rollback")
+                                    continue
                         
                         # Create file-label association
                         file_label = FileLabel(
