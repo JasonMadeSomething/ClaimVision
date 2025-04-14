@@ -70,7 +70,7 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
             "updated_at": file_data.updated_at.isoformat() if file_data.updated_at else None,
             "claim_id": str(file_data.claim_id) if file_data.claim_id else None,
             "metadata": file_data.file_metadata or {},
-            "signed_url": signed_url
+            "url": signed_url
         }
         
         return response.api_response(200, data=file_response)

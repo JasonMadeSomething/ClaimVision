@@ -112,6 +112,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 "updated_at": file.updated_at.isoformat() if file.updated_at else None,
                 "claim_id": str(file.claim_id) if file.claim_id else None,
                 "metadata": file.file_metadata or {},
+                "labels": [label.label_text for label in file.labels] if file.labels else [],
             }
             
             # Generate pre-signed URL
@@ -120,13 +121,13 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                     signed_url = generate_presigned_url(s3_client, S3_BUCKET_NAME, file.s3_key)
                     if signed_url is None:
                         s3_failure = True
-                    file_info["signed_url"] = signed_url
+                    file_info["url"] = signed_url
                 else:
                     logger.warning("S3_BUCKET_NAME is not set, cannot generate presigned URL")
                     s3_failure = True
-                    file_info["signed_url"] = None
+                    file_info["url"] = None
             else:
-                file_info["signed_url"] = None
+                file_info["url"] = None
                 
             file_data.append(file_info)
             
