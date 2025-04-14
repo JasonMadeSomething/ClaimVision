@@ -104,6 +104,7 @@ export default function WorkbenchLayout() {
             console.warn("Malformed photos response:", photosJson);
           }
           setPhotos(safePhotos);
+          console.log("Photos set:", safePhotos);
         } catch (err) {
           console.error("Error fetching claim data:", err);
           // Optional: Show toast or UI fallback state

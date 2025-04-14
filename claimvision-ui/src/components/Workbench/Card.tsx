@@ -164,28 +164,28 @@ const Card: React.FC<CardProps> = ({
         </div>
 
         {/* Labels */}
-        {labels.length > 0 && (
-          <div className="flex flex-wrap gap-1 mb-2">
-            {labels.slice(0, 3).map((label, idx) => (
-              <span
-                key={idx}
-                className={`
-                  inline-block px-2 py-1 text-xs rounded-full 
-                  ${isHighlighted && label.toLowerCase().includes((searchQuery || '').toLowerCase())
-                    ? 'bg-blue-100 text-blue-800' 
-                    : 'bg-gray-100 text-gray-700'}
-                `}
-              >
-                {label}
-              </span>
-            ))}
-            {labels.length > 3 && (
-              <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">
-                +{labels.length - 3}
-              </span>
-            )}
-          </div>
-        )}
+        {Array.isArray(labels) && labels.length > 0 && (
+        <div className="flex flex-wrap gap-1 mb-2">
+          {labels.slice(0, 3).map((label, idx) => (
+            <span
+              key={idx}
+              className={`
+                inline-block px-2 py-1 text-xs rounded-full 
+                ${isHighlighted && label.toLowerCase().includes((searchQuery || '').toLowerCase())
+                  ? 'bg-blue-100 text-blue-800' 
+                  : 'bg-gray-100 text-gray-700'}
+              `}
+            >
+              {label}
+            </span>
+          ))}
+          {labels.length > 3 && (
+            <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">
+              +{labels.length - 3}
+            </span>
+          )}
+        </div>
+      )}
 
         {/* Item-specific details */}
         {type === 'item' && isItem(data) && (

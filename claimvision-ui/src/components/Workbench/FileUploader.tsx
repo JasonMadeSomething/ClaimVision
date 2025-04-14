@@ -19,7 +19,8 @@ const MAX_BATCH_SIZE = 5 * 1024 * 1024;
 // Status for file processing
 type FileStatus = 'pending' | 'uploading' | 'uploaded' | 'processed' | 'failed' | 'analyzed' | 'skipped_analysis' | 'error';
 
-interface FileWithStatus extends File {
+interface FileWithStatus {
+  file: File;
   status: FileStatus;
   progress: number;
   id?: string;
@@ -66,9 +67,9 @@ export default function FileUploader({
 
     // Add status and progress to each file
     const filesWithStatus = acceptedFiles.map(file => ({
-      ...file,
+      file,
       status: 'pending' as FileStatus,
-      progress: 0
+      progress: 0,
     }));
 
     setFiles(prev => [...prev, ...filesWithStatus]);
@@ -107,9 +108,9 @@ export default function FileUploader({
     let currentBatch: FileWithStatus[] = [];
     let currentBatchSize = 0;
 
-    filesToUpload.forEach(file => {
+    filesToUpload.forEach(fileWithStatus => {
       // If adding this file would exceed the batch size limit, start a new batch
-      if (currentBatchSize + file.size > MAX_BATCH_SIZE) {
+      if (currentBatchSize + fileWithStatus.file.size > MAX_BATCH_SIZE) {
         if (currentBatch.length > 0) {
           batches.push(currentBatch);
           currentBatch = [];
@@ -118,11 +119,11 @@ export default function FileUploader({
       }
 
       // If the file is larger than the max batch size, it gets its own batch
-      if (file.size > MAX_BATCH_SIZE) {
-        batches.push([file]);
+      if (fileWithStatus.file.size > MAX_BATCH_SIZE) {
+        batches.push([fileWithStatus]);
       } else {
-        currentBatch.push(file);
-        currentBatchSize += file.size;
+        currentBatch.push(fileWithStatus);
+        currentBatchSize += fileWithStatus.file.size;
       }
     });
 
@@ -139,34 +140,61 @@ export default function FileUploader({
     const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
     const uploadEndpoint = `${apiUrl}/claims/${claimId}/files/upload`;
     
-    // Create FormData for multipart upload
-    const formData = new FormData();
+    // Instead of using FormData for files, we'll create a JSON structure with base64-encoded files
+    // This ensures compatibility with the backend's expected format
+    const filesData = await Promise.all(batch.map(async (fileWithStatus) => {
+      // Convert the file to base64 using the FileReader API
+      return {
+        file_name: fileWithStatus.file.name,
+        file_data: await readFileAsBase64(fileWithStatus.file)
+      };
+    }));
     
-    // Add each file to the form data
-    batch.forEach(file => {
-      formData.append('files', file);
-    });
+    // Create the request body
+    const requestBody = {
+      files: filesData,
+      room_id: roomId
+    };
     
-    // Add metadata
-    if (roomId) {
-      formData.append('room_id', roomId);
-    }
-
-    // Upload the files
+    console.log(`Uploading ${batch.length} files to ${uploadEndpoint}`);
+    console.log(`File names: ${filesData.map(f => f.file_name).join(', ')}`);
+    
+    // Upload the files as JSON instead of FormData
     const response = await fetch(uploadEndpoint, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${authToken}`
+        'Authorization': `Bearer ${authToken}`,
+        'Content-Type': 'application/json'
       },
-      body: formData
+      body: JSON.stringify(requestBody)
     });
-
+    
     if (!response.ok) {
       const errorData = await response.json();
       throw new Error(errorData.error_details || 'Failed to upload files');
     }
-
+    
     return await response.json();
+  };
+  
+  // Helper function to read a file as base64
+  const readFileAsBase64 = (file: File): Promise<string> => {
+    if (!(file instanceof Blob)) {
+      throw new Error('Invalid file type');
+    }
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        // Get the base64 string (remove the data URL prefix)
+        const result = reader.result as string;
+        const base64String = result.split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = () => reject(reader.error);
+      
+      // Read the file as a data URL
+      reader.readAsDataURL(file);
+    });
   };
 
   // Handle file upload with chunking
@@ -208,7 +236,7 @@ export default function FileUploader({
           setFiles(prev => 
             prev.map(file => {
               const matchedFile = result.data.files_queued.find((f: any) => 
-                f.file_name === file.name
+                f.file_name === file.file.name
               );
               if (matchedFile && file.status === 'uploading') {
                 return { 
@@ -425,9 +453,9 @@ export default function FileUploader({
               return (
                 <li key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
                   <div className="flex-1 flex items-center">
-                    <span className="text-sm truncate max-w-xs">{file.name}</span>
+                    <span className="text-sm truncate max-w-xs">{file.file.name}</span>
                     <span className="text-xs text-gray-500 ml-2">
-                      ({(file.size / 1024).toFixed(1)} KB)
+                      ({(file.file.size / 1024).toFixed(1)} KB)
                     </span>
                   </div>
                   <div className={`text-xs ${color} mx-2`}>{text}</div>
