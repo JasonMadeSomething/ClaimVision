@@ -33,11 +33,11 @@ Parameters:
     Default: /terraform/database/password
     Description: SSM Parameter Store path for database password
   DBUsername:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /terraform/database/username
+    Type: String
+    Description: Database username
   DBPassword:
-    Type: AWS::SSM::Parameter::Value<SecureString>
-    Default: /terraform/database/password
+    Type: String
+    Description: Database password
   DBEndpoint:
     Type: String
     Description: Database endpoint
@@ -85,18 +85,10 @@ Parameters:
     Type: CommaDelimitedList
     Default: ""
     Description: Subnet IDs for Lambda functions (comma-delimited)
-  PublicSubnet1:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /terraform/networking/public_subnet_1
-    Description: Public Subnet 1 from SSM
-  PublicSubnet2:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /terraform/networking/public_subnet_2
-    Description: Public Subnet 2 from SSM
   SecurityGroupIds:
-    Type: AWS::SSM::Parameter::Value<String>
-    Default: /terraform/networking/rds_sg_id
-    Description: Security Group ID for Lambda functions
+    Type: CommaDelimitedList
+    Default: ""
+    Description: Security Group IDs for Lambda functions (comma-delimited)
   RouteTableIds:
     Type: String
     Default: ""
@@ -142,9 +134,7 @@ Globals:
         FRONTEND_ORIGIN: !Ref FrontendOrigin
     VpcConfig: !If 
       - HasVpc
-      - SubnetIds:
-        - !Ref PublicSubnet1
-        - !Ref PublicSubnet2
+      - SubnetIds: !Ref SubnetIds
         SecurityGroupIds: !Ref SecurityGroupIds
       - !Ref AWS::NoValue
   Api:
@@ -1561,9 +1551,9 @@ Resources:
               - ssm:GetParameter
               - ssm:GetParameters
             Resource:
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/terraform/database/username
-              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/terraform/database/password
               - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${RDSEndpointSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBUsernameSSMPath}
+              - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${DBPasswordSSMPath}
         - AWSLambdaBasicExecutionRole
       Environment:
         Variables:
