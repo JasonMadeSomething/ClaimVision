@@ -21,6 +21,7 @@ interface PhotoGridProps {
   onRearrangeItems?: (targetIndex: number, draggedIndex: number) => void;
   onAddPhotoToItem?: (itemId: string, photoId: string) => void;
   onSelectItem?: (item: Item) => void;
+  onLabelClick?: (label: string) => void;
 }
 
 // Define grid column options
@@ -40,6 +41,7 @@ export default function PhotoGrid({
   onRearrangeItems,
   onAddPhotoToItem,
   onSelectItem,
+  onLabelClick,
 }: PhotoGridProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -52,7 +54,7 @@ export default function PhotoGrid({
   const [photosExpanded, setPhotosExpanded] = useState(true);
   const [comingleContent, setComingleContent] = useState(false);
   const [gridColumns, setGridColumns] = useState<GridColumns>(4);
-  const [showAllPhotos, setShowAllPhotos] = useState(false);
+  const [showAllPhotos, setShowAllPhotos] = useState(true);
   
   // Group photos by their associated item
   const photosByItem = new Map<string | null, Photo[]>();
@@ -85,6 +87,41 @@ export default function PhotoGrid({
     // Check if any of the item's photos have matching labels
     const itemPhotos = photos.filter(p => p.itemId === item.id);
     return itemPhotos.some(photo => isPhotoHighlighted(photo));
+  };
+
+  // Filter photos based on search mode and query
+  const getFilteredPhotos = () => {
+    if (!searchQuery) {
+      return showAllPhotos ? photos : photosByItem.get(null) || [];
+    }
+    
+    const photosToFilter = showAllPhotos ? photos : photosByItem.get(null) || [];
+    
+    if (searchMode === SearchMode.Find) {
+      // In Find mode, only show photos that match the search query
+      return photosToFilter.filter(photo => isPhotoHighlighted(photo));
+    } else {
+      // In Highlight mode, show all photos but they will be styled differently in the UI
+      return photosToFilter;
+    }
+  };
+
+  // Filter items based on search mode and query
+  const getFilteredItems = () => {
+    if (!searchQuery) {
+      return items;
+    }
+    
+    if (searchMode === SearchMode.Find) {
+      // In Find mode, only show items that match the search query
+      return items.filter(item => isItemHighlighted(item));
+    } else if (searchMode === SearchMode.Filter) {
+      // Filter mode is handled separately
+      return searchMode === SearchMode.Filter ? items.filter(item => isItemHighlighted(item)) : items;
+    } else {
+      // In Highlight mode, show all items but they will be styled differently in the UI
+      return items;
+    }
   };
 
   // Handle photo drop between photos
@@ -176,10 +213,18 @@ export default function PhotoGrid({
   // Get unassigned photos
   const unassignedPhotos = photosByItem.get(null) || [];
 
-  // Filter items based on search mode
-  const filteredItems = searchMode === SearchMode.Filter && searchQuery
-    ? items.filter(item => isItemHighlighted(item))
-    : items;
+  // Get the card class based on highlight status
+  const getCardClass = (isHighlighted: boolean) => {
+    if (!searchQuery) return '';
+    
+    if (searchMode === SearchMode.Highlight) {
+      return isHighlighted 
+        ? 'ring-2 ring-blue-500 z-10 scale-105 shadow-lg' 
+        : 'opacity-60 grayscale-[30%] scale-95';
+    }
+    
+    return isHighlighted ? 'ring-2 ring-blue-500' : '';
+  };
 
   // Get grid column class based on current setting
   const getGridColumnClass = () => {
@@ -196,10 +241,10 @@ export default function PhotoGrid({
   };
 
   // Combined content for co-mingled display
-  const combinedContent: ContentItem[] = [...filteredItems.map(item => ({ type: 'item' as const, data: item }))];
+  const combinedContent: ContentItem[] = [...getFilteredItems().map(item => ({ type: 'item' as const, data: item }))];
   
   if (comingleContent) {
-    unassignedPhotos.forEach(photo => {
+    getFilteredPhotos().forEach(photo => {
       combinedContent.push({ type: 'photo' as const, data: photo });
     });
   }
@@ -256,7 +301,7 @@ export default function PhotoGrid({
       {/* Co-mingled content */}
       {comingleContent && (
         <div className="mb-8">
-          <div className={getGridColumnClass()}>
+          <div className={`grid gap-6 ${getGridColumnClass()}`}>
             {combinedContent.map((content, index) => {
               const isBeforeActive = hoverIndex === index;
               const isAfterActive = hoverIndex === index + 1;
@@ -278,6 +323,7 @@ export default function PhotoGrid({
                   
                   {/* Card component */}
                   <Card
+                    key={content.data.id}
                     type={content.type}
                     data={content.data}
                     index={index}
@@ -291,6 +337,8 @@ export default function PhotoGrid({
                     searchQuery={searchQuery}
                     onAddPhotoToItem={onAddPhotoToItem}
                     onSelectItem={onSelectItem}
+                    onLabelClick={onLabelClick}
+                    className={getCardClass(isHighlighted)}
                   />
                   
                   {/* Drop zone after card (only for the last card in each row) */}
@@ -345,7 +393,7 @@ export default function PhotoGrid({
       {!comingleContent && (
         <>
           {/* Items section */}
-          {showItems && filteredItems.length > 0 && (
+          {showItems && getFilteredItems().length > 0 && (
             <div className="mb-8">
               <div 
                 className="flex items-center justify-between mb-4 cursor-pointer"
@@ -363,7 +411,7 @@ export default function PhotoGrid({
               
               {itemsExpanded && (
                 <div className={getGridColumnClass()}>
-                  {filteredItems.map((item, index) => {
+                  {getFilteredItems().map((item, index) => {
                     const isBeforeActive = hoverIndex === index;
                     const isAfterActive = hoverIndex === index + 1;
                     
@@ -381,18 +429,28 @@ export default function PhotoGrid({
                         
                         {/* Item card */}
                         <Card
+                          key={item.id}
                           type="item"
                           data={item}
                           index={index}
-                          isHighlighted={isItemHighlighted(item)}
-                          onDragStart={handleDragStart}
+                          onDragStart={(id) => handleDragStart(id)}
                           onDragEnd={handleDragEnd}
-                          onRearrange={handleItemBetweenDrop}
+                          onRearrange={(targetIndex, draggedId) => {
+                            if (onRearrangeItems) {
+                              const draggedIndex = getFilteredItems().findIndex(i => i.id === draggedId);
+                              if (draggedIndex !== -1) {
+                                onRearrangeItems(targetIndex, draggedIndex);
+                              }
+                            }
+                          }}
+                          onSelectItem={onSelectItem}
+                          onAddPhotoToItem={onAddPhotoToItem}
                           isDraggingAny={isDragging}
                           isBeingDragged={activeDragId === item.id}
                           searchQuery={searchQuery}
-                          onAddPhotoToItem={onAddPhotoToItem}
-                          onSelectItem={onSelectItem}
+                          isHighlighted={isItemHighlighted(item)}
+                          onLabelClick={onLabelClick}
+                          className={getCardClass(isItemHighlighted(item))}
                         />
                         
                         {/* Drop zone after item (only for the last item in each row) */}
@@ -408,7 +466,7 @@ export default function PhotoGrid({
                         )}
                         
                         {/* Vertical drop zones between items */}
-                        {index < filteredItems.length - 1 && (index + 1) % gridColumns !== 0 && (
+                        {index < getFilteredItems().length - 1 && (index + 1) % gridColumns !== 0 && (
                           <DropZone 
                             index={index + 0.5} 
                             acceptType="ITEM"
@@ -423,13 +481,13 @@ export default function PhotoGrid({
                   })}
                   
                   {/* Final drop zone at the end */}
-                  {filteredItems.length > 0 && (
+                  {getFilteredItems().length > 0 && (
                     <DropZone 
-                      index={filteredItems.length} 
+                      index={getFilteredItems().length} 
                       acceptType="ITEM"
                       onDrop={handleItemBetweenDrop}
                       onHover={handleDropZoneHover}
-                      isActive={hoverIndex === filteredItems.length}
+                      isActive={hoverIndex === getFilteredItems().length}
                       orientation="horizontal"
                     />
                   )}
@@ -459,7 +517,7 @@ export default function PhotoGrid({
                 <div className="relative">
                   {/* Grid of photos with drop zones */}
                   <div className={getGridColumnClass()}>
-                    {(showAllPhotos ? photos : unassignedPhotos).map((photo, index) => {
+                    {getFilteredPhotos().map((photo, index) => {
                       const isBeforeActive = hoverIndex === index;
                       const isAfterActive = hoverIndex === index + 1;
                       
@@ -477,18 +535,19 @@ export default function PhotoGrid({
                           
                           {/* Photo card */}
                           <Card
+                            key={photo.id}
                             type="photo"
                             data={photo}
                             index={index}
-                            isHighlighted={isPhotoHighlighted(photo)}
-                            onDragStart={handleDragStart}
+                            onDragStart={(id) => handleDragStart(id)}
                             onDragEnd={handleDragEnd}
-                            onCreateItem={handleCreateItemFromPhoto}
-                            onRearrange={handlePhotoBetweenDrop}
+                            onCreateItem={onCreateItem}
                             isDraggingAny={isDragging}
                             isBeingDragged={activeDragId === photo.id}
                             searchQuery={searchQuery}
-                            onAddPhotoToItem={onAddPhotoToItem}
+                            isHighlighted={isPhotoHighlighted(photo)}
+                            onLabelClick={onLabelClick}
+                            className={getCardClass(isPhotoHighlighted(photo))}
                           />
                           
                           {/* Drop zone after photo (only for the last photo in each row) */}
@@ -504,7 +563,7 @@ export default function PhotoGrid({
                           )}
                           
                           {/* Vertical drop zones between photos */}
-                          {index < (showAllPhotos ? photos : unassignedPhotos).length - 1 && (index + 1) % gridColumns !== 0 && (
+                          {index < getFilteredPhotos().length - 1 && (index + 1) % gridColumns !== 0 && (
                             <DropZone 
                               index={index + 0.5} 
                               acceptType="PHOTO"
@@ -519,18 +578,18 @@ export default function PhotoGrid({
                     })}
                     
                     {/* Final drop zone at the end */}
-                    {(showAllPhotos ? photos : unassignedPhotos).length > 0 && (
+                    {getFilteredPhotos().length > 0 && (
                       <DropZone 
-                        index={(showAllPhotos ? photos : unassignedPhotos).length} 
+                        index={getFilteredPhotos().length} 
                         acceptType="PHOTO"
                         onDrop={handlePhotoBetweenDrop}
                         onHover={handleDropZoneHover}
-                        isActive={hoverIndex === (showAllPhotos ? photos : unassignedPhotos).length}
+                        isActive={hoverIndex === getFilteredPhotos().length}
                         orientation="horizontal"
                       />
                     )}
                     
-                    {(showAllPhotos ? photos : unassignedPhotos).length === 0 && (
+                    {getFilteredPhotos().length === 0 && (
                       <div className="col-span-full text-gray-500 text-center py-8">
                         No {(showAllPhotos ? 'photos' : 'unassigned photos')}
                       </div>

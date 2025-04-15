@@ -142,37 +142,40 @@ export default function MyClaims() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {claims.map((claim) => (
-            <Link 
-              href={`/workbench?claim_id=${claim.id}`} 
+            <div 
               key={claim.id}
-              className="block"
+              className="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow cursor-pointer"
+              onClick={() => {
+                // Store the claim ID in localStorage
+                localStorage.setItem('current_claim_id', claim.id);
+                // Navigate to the workbench without query params
+                router.push('/workbench');
+              }}
             >
-              <div className="border rounded-lg overflow-hidden hover:shadow-lg transition-shadow">
-                <div className="p-4 border-b">
-                  <div className="flex justify-between items-start">
-                    <h3 className="text-lg font-semibold truncate">{claim.title}</h3>
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      claim.status === 'open' ? 'bg-green-100 text-green-800' :
-                      claim.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
-                      'bg-gray-100 text-gray-800'
-                    }`}>
-                      {claim.status}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-500 mt-1">
-                    Created: {formatDate(claim.created_at)}
-                  </p>
+              <div className="p-4 border-b">
+                <div className="flex justify-between items-start">
+                  <h3 className="text-lg font-semibold truncate">{claim.title}</h3>
+                  <span className={`px-2 py-1 text-xs rounded-full ${
+                    claim.status === 'open' ? 'bg-green-100 text-green-800' :
+                    claim.status === 'pending' ? 'bg-yellow-100 text-yellow-800' :
+                    'bg-gray-100 text-gray-800'
+                  }`}>
+                    {claim.status}
+                  </span>
                 </div>
-                <div className="p-4 bg-gray-50">
-                  <p className="text-sm text-gray-700 line-clamp-2">
-                    {claim.description || 'No description provided'}
-                  </p>
-                  <div className="mt-3 text-blue-600 text-sm font-medium">
-                    View Claim →
-                  </div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Created: {formatDate(claim.created_at)}
+                </p>
+              </div>
+              <div className="p-4 bg-gray-50">
+                <p className="text-sm text-gray-700 line-clamp-2">
+                  {claim.description || 'No description provided'}
+                </p>
+                <div className="mt-3 text-blue-600 text-sm font-medium">
+                  View Claim →
                 </div>
               </div>
-            </Link>
+            </div>
           ))}
         </div>
       )}

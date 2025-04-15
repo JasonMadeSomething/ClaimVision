@@ -53,9 +53,6 @@ export default function Navigation() {
               <Link href="/my-claims" className="text-white hover:text-gray-300">
                 My Claims
               </Link>
-              <Link href="/workbench" className="text-white hover:text-gray-300">
-                Workbench
-              </Link>
               <Menu as="div" className="relative">
                 <Menu.Button className="text-white hover:text-gray-300">
                   <UserCircleIcon className="h-8 w-8" />

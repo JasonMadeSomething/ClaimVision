@@ -22,6 +22,7 @@ export default function WorkbenchLayout() {
   const [selectedItem, setSelectedItem] = useState<Item | null>(null);
   const [selectedRoom, setSelectedRoom] = useState<Room | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [internalSearchTerm, setInternalSearchTerm] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.Highlight);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -31,12 +32,29 @@ export default function WorkbenchLayout() {
 
   const { autoOpenDetailPanel } = useSettingsStore();
 
-  // Get claim_id from URL if present
+  // Get claim_id from localStorage or URL if present
   useEffect(() => {
+    // First try to get claim_id from localStorage
+    const storedClaimId = typeof window !== 'undefined' ? localStorage.getItem('current_claim_id') : null;
+    
+    if (storedClaimId) {
+      setClaimId(storedClaimId);
+      // Clear from localStorage after retrieving to avoid stale data on future visits
+      localStorage.removeItem('current_claim_id');
+      return;
+    }
+    
+    // Fallback to URL query param for backward compatibility
     const urlParams = new URLSearchParams(window.location.search);
     const claimIdParam = urlParams.get('claim_id');
     if (claimIdParam) {
       setClaimId(claimIdParam);
+      
+      // Clean up the URL to remove the query parameter
+      if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+        const newUrl = window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+      }
     }
   }, []);
 
@@ -122,10 +140,10 @@ export default function WorkbenchLayout() {
 
   // Filter photos based on search query and mode
   const filteredPhotos = photos.filter(photo => {
-    if (!searchQuery) return true;
+    if (!internalSearchTerm) return true;
     
     const matchesSearch = photo.labels.some(label => 
-      label.toLowerCase().includes(searchQuery.toLowerCase())
+      label.toLowerCase().includes(internalSearchTerm.toLowerCase())
     );
     
     if (searchMode === SearchMode.Find) {
@@ -173,6 +191,87 @@ export default function WorkbenchLayout() {
     // Only set selected item if autoOpenDetailPanel is true
     if (autoOpenDetailPanel) {
       setSelectedItem(newItem);
+    }
+  };
+
+  // Handle creating a new room
+  const handleCreateRoom = async (roomName: string, roomType: string) => {
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot create room: missing claim ID or auth token");
+      return;
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      const response = await fetch(`${baseUrl}/claims/${claimId}/rooms`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.id_token}`
+        },
+        body: JSON.stringify({
+          name: roomName,
+          description: `${roomType} room` // API expects name and description, not type
+        })
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error_details || 'Failed to create room');
+      }
+
+      const roomData = await response.json();
+      console.log("Room created successfully:", roomData);
+      
+      // Add the new room to the rooms list
+      if (roomData.data) {
+        const newRoom = {
+          id: roomData.data.id,
+          name: roomData.data.name,
+          itemIds: roomData.data.item_ids || [],
+          fileIds: roomData.data.file_ids || []
+        };
+        setRooms([...rooms, newRoom]);
+      }
+    } catch (error) {
+      console.error("Error creating room:", error);
+      throw error;
+    }
+  };
+
+  // Handle deleting a room
+  const handleDeleteRoom = async (roomId: string) => {
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot delete room: missing claim ID or auth token");
+      return;
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      const response = await fetch(`${baseUrl}/claims/${claimId}/rooms/${roomId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${user.id_token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error_details || 'Failed to delete room');
+      }
+
+      console.log("Room deleted successfully");
+      
+      // Remove the room from the rooms list
+      setRooms(rooms.filter(room => room.id !== roomId));
+      
+      // If the deleted room was selected, go back to main workbench
+      if (selectedRoom?.id === roomId) {
+        setSelectedRoom(null);
+      }
+    } catch (error) {
+      console.error("Error deleting room:", error);
+      throw error;
     }
   };
 
@@ -249,20 +348,87 @@ export default function WorkbenchLayout() {
   };
 
   // Handle moving an item to a room
-  const handleMoveItemToRoom = (itemId: string, roomId: string | null) => {
+  const handleMoveItemToRoom = async (itemId: string, roomId: string | null) => {
     // Find the item
     const item = items.find(i => i.id === itemId);
     if (!item) return;
     
-    // Update the item's roomId
-    const updatedItem = { ...item, roomId };
+    // Get the previous room ID
+    const prevRoomId = item.roomId;
     
-    // Update the items state
+    // Update locally first for immediate feedback
+    const updatedItem = { ...item, roomId };
     setItems(items.map(i => i.id === itemId ? updatedItem : i));
     
     // If this was the selected item, update that too
     if (selectedItem?.id === itemId) {
       setSelectedItem(updatedItem);
+    }
+    
+    // Update the rooms' itemIds arrays
+    const updatedRooms = rooms.map(room => {
+      // Remove the item from its previous room
+      if (prevRoomId === room.id) {
+        return {
+          ...room,
+          itemIds: room.itemIds ? room.itemIds.filter((id: string) => id !== itemId) : []
+        };
+      }
+      
+      // Add the item to its new room
+      if (roomId === room.id) {
+        return {
+          ...room,
+          itemIds: room.itemIds ? [...room.itemIds, itemId] : [itemId]
+        };
+      }
+      
+      // Return unchanged room
+      return room;
+    });
+    
+    setRooms(updatedRooms);
+    
+    // Log the action
+    console.log(`Item ${itemId} moved to room ${roomId || 'Main Workbench'}`);
+    
+    // Update on the server
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot update room assignment: missing claim ID or auth token");
+      return;
+    }
+    
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      const response = await fetch(`${baseUrl}/items/${itemId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.id_token}`
+        },
+        body: JSON.stringify({
+          room_id: roomId // null will remove room association
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Error updating item room assignment:", errorData);
+        
+        // Revert the local change if the server update failed
+        const revertedItems = items.map(i => i.id === itemId ? item : i);
+        setItems(revertedItems);
+        
+        if (selectedItem?.id === itemId) {
+          setSelectedItem(item);
+        }
+        
+        throw new Error(errorData.error_details || 'Failed to update item room assignment');
+      }
+      
+      console.log("Item room assignment updated successfully on server");
+    } catch (error) {
+      console.error("Error updating item room assignment:", error);
     }
   };
 
@@ -294,7 +460,9 @@ export default function WorkbenchLayout() {
 
     // Update the item
     const updatedItem = { ...item, thumbnailPhotoId: newThumbnailId };
-    const updatedItems = items.map(i => i.id === itemId ? updatedItem : i);
+    const updatedItems = items.map(item => 
+      item.id === itemId ? updatedItem : item
+    );
     
     setItems(updatedItems);
     if (selectedItem?.id === itemId) {
@@ -303,44 +471,79 @@ export default function WorkbenchLayout() {
   };
 
   // Handle moving a photo to a room
-  const handleMovePhotoToRoom = (photoId: string, roomId: string | null) => {
+  const handleMovePhotoToRoom = async (photoId: string, roomId: string | null) => {
     // Find the photo
     const photo = photos.find(p => p.id === photoId);
     if (!photo) return;
     
-    // Update the photo's roomId
-    const updatedPhoto = { ...photo, roomId };
+    // Get the previous room ID
+    const prevRoomId = photo.roomId;
     
-    // Update the photos state
+    // Update locally first for immediate feedback
+    const updatedPhoto = { ...photo, roomId };
     setPhotos(photos.map(p => p.id === photoId ? updatedPhoto : p));
     
-    // If the photo is part of an item, we need to update that too
-    if (photo.itemId) {
-      const item = items.find(i => i.id === photo.itemId);
-      if (item) {
-        // If the item has multiple photos, just move this one
-        if (item.photoIds.length > 1) {
-          // Remove the photo from the item
-          const updatedItem = {
-            ...item,
-            photoIds: item.photoIds.filter(id => id !== photoId),
-            thumbnailPhotoId: item.thumbnailPhotoId === photoId 
-              ? item.photoIds.find(id => id !== photoId) || null 
-              : item.thumbnailPhotoId
-          };
-          
-          // Update the items state
-          setItems(items.map(i => i.id === item.id ? updatedItem : i));
-          
-          // Update the photo to no longer be part of the item
-          setPhotos(photos.map(p => p.id === photoId ? { ...updatedPhoto, itemId: null } : p));
-        } 
-        // If it's the only photo, move the entire item
-        else {
-          const updatedItem = { ...item, roomId };
-          setItems(items.map(i => i.id === item.id ? updatedItem : i));
-        }
+    // Update the rooms' fileIds arrays
+    const updatedRooms = rooms.map(room => {
+      // Remove the file from its previous room
+      if (prevRoomId === room.id) {
+        return {
+          ...room,
+          fileIds: room.fileIds ? room.fileIds.filter((id: string) => id !== photoId) : []
+        };
       }
+      
+      // Add the file to its new room
+      if (roomId === room.id) {
+        return {
+          ...room,
+          fileIds: room.fileIds ? [...room.fileIds, photoId] : [photoId]
+        };
+      }
+      
+      // Return unchanged room
+      return room;
+    });
+    
+    setRooms(updatedRooms);
+    
+    // Log the action
+    console.log(`Photo ${photoId} moved to room ${roomId || 'Main Workbench'}`);
+    
+    // Update on the server
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot update room assignment: missing claim ID or auth token");
+      return;
+    }
+    
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      
+      // For files, we use the files metadata endpoint
+      const response = await fetch(`${baseUrl}/files/${photoId}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.id_token}`
+        },
+        body: JSON.stringify({
+          room_id: roomId // null will remove room association
+        })
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error("Error updating file room assignment:", errorData);
+        
+        // Revert the local change if the server update failed
+        setPhotos(photos.map(p => p.id === photoId ? photo : p));
+        
+        throw new Error(errorData.error_details || 'Failed to update room assignment');
+      }
+      
+      console.log("File room assignment updated successfully on server");
+    } catch (error) {
+      console.error("Error updating file room assignment:", error);
     }
   };
 
@@ -386,6 +589,19 @@ export default function WorkbenchLayout() {
 
   const handleSearchChange = (searchQuery: string) => {
     setSearchQuery(searchQuery);
+    setInternalSearchTerm(searchQuery);
+  };
+
+  // Handle label click to search in find mode
+  const handleLabelClick = (label: string) => {
+    // Set search mode to Find
+    setSearchMode(SearchMode.Find);
+    
+    // Set internal search term without updating the input field
+    setInternalSearchTerm(label);
+    
+    // Don't update the visible search query in the input field
+    // This way the search works but doesn't populate the search box
   };
 
   // Handle file upload completion
@@ -412,18 +628,20 @@ export default function WorkbenchLayout() {
         <WorkbenchHeader 
           selectedRoom={selectedRoom}
           onBackToWorkbench={() => setSelectedRoom(null)}
-          onCreateEmptyItem={handleCreateEmptyItem}
         />
         
         <div className="flex flex-1 overflow-hidden">
           {/* Sidebar */}
-          <div className="w-64 bg-white border-r border-gray-200 p-4 overflow-y-auto">
+          <div className="w-64 min-w-64 flex-shrink-0 bg-white border-r border-gray-200 p-4 overflow-y-auto">
             <RoomSelector 
               rooms={rooms}
               selectedRoom={selectedRoom}
               onSelectRoom={setSelectedRoom}
               onMovePhotoToRoom={handleMovePhotoToRoom}
               onMoveItemToRoom={handleMoveItemToRoom}
+              onCreateRoom={handleCreateRoom}
+              onDeleteRoom={handleDeleteRoom}
+              claimId={claimId || undefined}
             />
             <div className="mt-6">
               <SearchBar 
@@ -450,7 +668,16 @@ export default function WorkbenchLayout() {
             )}
 
             {/* Upload Button and Search */}
-            <div className="flex space-x-4 mb-4">
+            <div className="flex justify-end space-x-4 mb-4">
+              <button
+                onClick={handleCreateEmptyItem}
+                className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                </svg>
+                New Item
+              </button>
               <button
                 onClick={toggleUploadModal}
                 className="flex items-center px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500"
@@ -460,14 +687,6 @@ export default function WorkbenchLayout() {
                 </svg>
                 Upload Files
               </button>
-              <div className="flex-grow"></div>
-              <input
-                type="text"
-                placeholder="Search photos..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="px-4 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
             </div>
 
             {isLoading ? (
@@ -492,13 +711,14 @@ export default function WorkbenchLayout() {
                       : items
                     : []
                 }
-                searchQuery={searchQuery}
+                searchQuery={internalSearchTerm}
                 searchMode={searchMode}
                 onCreateItem={handleCreateItem}
                 onRearrangePhotos={handleRearrangePhotos}
                 onRearrangeItems={handleRearrangeItems}
                 onAddPhotoToItem={handleAddPhotoToItem}
                 onSelectItem={handleSelectItem}
+                onLabelClick={handleLabelClick}
               />
             )}
           </div>

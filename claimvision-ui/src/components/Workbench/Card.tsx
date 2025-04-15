@@ -1,5 +1,5 @@
-import React, { useRef } from 'react';
-import { Photo, Item } from '@/types/workbench';
+import React, { useRef, useState } from 'react';
+import { Photo, Item, SearchMode } from '@/types/workbench';
 import { useDrag, useDrop } from 'react-dnd';
 import { Menu } from '@headlessui/react';
 import { EllipsisVerticalIcon } from '@heroicons/react/24/outline';
@@ -28,6 +28,8 @@ interface CardProps {
   isBeingDragged?: boolean;
   searchQuery?: string;
   isHighlighted?: boolean;
+  className?: string;
+  onLabelClick?: (label: string) => void;
 }
 
 const Card: React.FC<CardProps> = ({
@@ -45,6 +47,8 @@ const Card: React.FC<CardProps> = ({
   isBeingDragged = false,
   searchQuery = '',
   isHighlighted = false,
+  className = '',
+  onLabelClick,
 }) => {
   // Create refs
   const ref = useRef<HTMLDivElement>(null);
@@ -54,7 +58,13 @@ const Card: React.FC<CardProps> = ({
     type: type.toUpperCase(),
     item: () => {
       if (onDragStart) onDragStart(data.id);
-      return { id: data.id, index };
+      const dragItem = { 
+        id: data.id, 
+        index, 
+        type: type.toUpperCase() 
+      };
+      console.log("Dragging item with type:", dragItem.type);
+      return dragItem;
     },
     end: () => {
       if (onDragEnd) onDragEnd();
@@ -118,6 +128,9 @@ const Card: React.FC<CardProps> = ({
 
   // Get the labels
   const labels = isPhoto(data) ? data.labels : [];
+  
+  // State for tooltip visibility
+  const [showTooltip, setShowTooltip] = useState(false);
 
   // Get the description (items only)
   const description = isItem(data) ? data.description : '';
@@ -137,6 +150,7 @@ const Card: React.FC<CardProps> = ({
         ${isBeingDragged ? 'scale-105 z-20 shadow-xl rotate-1' : ''}
         ${isDraggingAny && !isBeingDragged ? 'scale-95 transition-transform duration-200' : ''}
         hover:shadow-lg
+        ${className}
       `}
       style={{ 
         touchAction: 'none',
@@ -170,23 +184,59 @@ const Card: React.FC<CardProps> = ({
             <span
               key={idx}
               className={`
-                inline-block px-2 py-1 text-xs rounded-full 
+                inline-block px-2 py-1 text-xs rounded-full cursor-pointer
                 ${isHighlighted && label.toLowerCase().includes((searchQuery || '').toLowerCase())
                   ? 'bg-blue-100 text-blue-800' 
-                  : 'bg-gray-100 text-gray-700'}
+                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
               `}
+              onClick={(e) => {
+                e.stopPropagation(); // Prevent card selection
+                if (onLabelClick) onLabelClick(label);
+              }}
             >
               {label}
             </span>
           ))}
           {labels.length > 3 && (
-            <span className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700">
-              +{labels.length - 3}
-            </span>
+            <div className="relative">
+              <span 
+                className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"
+                onMouseEnter={() => setShowTooltip(true)}
+                onMouseLeave={() => setShowTooltip(false)}
+                onClick={(e) => {
+                  e.stopPropagation(); // Prevent card selection
+                  // We don't do anything on click for the +n label itself
+                }}
+              >
+                +{labels.length - 3}
+              </span>
+              
+              {/* Tooltip for remaining labels */}
+              {showTooltip && (
+                <div className="absolute z-50 bottom-full left-0 mb-2 p-2 bg-white rounded-md shadow-lg border border-gray-200 min-w-48 max-w-xs">
+                  <div className="flex flex-wrap gap-1">
+                    {labels.slice(3).map((label, idx) => (
+                      <span
+                        key={idx}
+                        className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"
+                        onClick={(e) => {
+                          e.stopPropagation(); // Prevent card selection
+                          if (onLabelClick) onLabelClick(label);
+                          setShowTooltip(false);
+                        }}
+                      >
+                        {label}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="absolute bottom-0 left-4 transform translate-y-1/2 rotate-45 w-2 h-2 bg-white border-r border-b border-gray-200"></div>
+                </div>
+              )}
+            </div>
           )}
         </div>
       )}
-
+        
         {/* Item-specific details */}
         {type === 'item' && isItem(data) && (
           <>
