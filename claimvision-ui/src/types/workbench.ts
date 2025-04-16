@@ -5,6 +5,7 @@ export interface Photo {
   labels: string[];
   itemId: string | null;
   roomId: string | null;
+  isMainPhoto?: boolean;
   position: {
     x: number;
     y: number;

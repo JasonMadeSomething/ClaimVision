@@ -17,11 +17,14 @@ interface PhotoGridProps {
   searchQuery: string;
   searchMode: SearchMode;
   onCreateItem: (photoId?: string) => void;
-  onRearrangePhotos: (targetIndex: number, draggedIndex: number) => void;
-  onRearrangeItems?: (targetIndex: number, draggedIndex: number) => void;
+  onRearrangePhotos: (targetIndex: number, draggedId: string) => void;
+  onRearrangeItems?: (targetIndex: number, draggedId: string) => void;
   onAddPhotoToItem?: (itemId: string, photoId: string) => void;
   onSelectItem?: (item: Item) => void;
   onLabelClick?: (label: string) => void;
+  activeFilterLabel?: string;
+  onDeleteItem?: (itemId: string) => void;
+  onDeletePhoto?: (photoId: string) => void;
 }
 
 // Define grid column options
@@ -42,6 +45,9 @@ export default function PhotoGrid({
   onAddPhotoToItem,
   onSelectItem,
   onLabelClick,
+  activeFilterLabel = '',
+  onDeleteItem,
+  onDeletePhoto,
 }: PhotoGridProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
@@ -125,25 +131,18 @@ export default function PhotoGrid({
   };
 
   // Handle photo drop between photos
-  const handlePhotoBetweenDrop = (targetIndex: number, draggedPhotoId: string) => {
-    // Find the dragged photo without filtering for itemId
-    const draggedPhoto = photos.find(p => p.id === draggedPhotoId);
-    if (!draggedPhoto) return;
+  const handlePhotoBetweenDrop = (targetIndex: number, draggedId: string) => {
+    if (!onRearrangePhotos) return;
     
-    // Only allow rearranging unassigned photos
-    if (draggedPhoto.itemId !== null) return;
+    // Find the dragged photo's index in the original array
+    const draggedIndex = photos.findIndex(p => p.id === draggedId);
+    if (draggedIndex === -1) return;
     
-    // Get the index of the dragged photo in the photos array
-    const draggedIndex = photos.findIndex(p => p.id === draggedPhotoId);
-    
-    // Get all unassigned photos
+    // Convert the target index to the actual index in the photos array
+    // This is needed because we're only showing unassigned photos in this section
     const unassignedPhotos = photos.filter(p => p.itemId === null);
+    const effectiveTargetIndex = targetIndex;
     
-    // If we're dropping at a position beyond the unassigned photos count,
-    // set the target to the last position
-    const effectiveTargetIndex = Math.min(targetIndex, unassignedPhotos.length);
-    
-    // Calculate the actual target index in the full photos array
     let actualTargetIndex = 0;
     let unassignedCount = 0;
     
@@ -168,7 +167,7 @@ export default function PhotoGrid({
     }
     
     // Call the parent component's rearrange function with the correct indices
-    onRearrangePhotos(actualTargetIndex, draggedIndex);
+    onRearrangePhotos(actualTargetIndex, draggedId);
     setHoverIndex(null);
   };
 
@@ -179,7 +178,7 @@ export default function PhotoGrid({
     const draggedIndex = items.findIndex(i => i.id === draggedItemId);
     if (draggedIndex === -1) return;
     
-    onRearrangeItems(targetIndex, draggedIndex);
+    onRearrangeItems(targetIndex, draggedItemId);
     setHoverIndex(null);
   };
 
@@ -338,6 +337,10 @@ export default function PhotoGrid({
                     onAddPhotoToItem={onAddPhotoToItem}
                     onSelectItem={onSelectItem}
                     onLabelClick={onLabelClick}
+                    activeFilterLabel={activeFilterLabel}
+                    allPhotos={photos}
+                    onDeleteItem={onDeleteItem}
+                    onDeletePhoto={onDeletePhoto}
                     className={getCardClass(isHighlighted)}
                   />
                   
@@ -429,27 +432,21 @@ export default function PhotoGrid({
                         
                         {/* Item card */}
                         <Card
-                          key={item.id}
+                          key={`item-${item.id}`}
                           type="item"
                           data={item}
                           index={index}
+                          onSelectItem={onSelectItem}
                           onDragStart={(id) => handleDragStart(id)}
                           onDragEnd={handleDragEnd}
-                          onRearrange={(targetIndex, draggedId) => {
-                            if (onRearrangeItems) {
-                              const draggedIndex = getFilteredItems().findIndex(i => i.id === draggedId);
-                              if (draggedIndex !== -1) {
-                                onRearrangeItems(targetIndex, draggedIndex);
-                              }
-                            }
-                          }}
-                          onSelectItem={onSelectItem}
+                          onRearrange={onRearrangeItems ? (targetIndex, draggedId) => onRearrangeItems(targetIndex, draggedId) : undefined}
                           onAddPhotoToItem={onAddPhotoToItem}
                           isDraggingAny={isDragging}
                           isBeingDragged={activeDragId === item.id}
                           searchQuery={searchQuery}
                           isHighlighted={isItemHighlighted(item)}
-                          onLabelClick={onLabelClick}
+                          onDeleteItem={onDeleteItem}
+                          allPhotos={photos}
                           className={getCardClass(isItemHighlighted(item))}
                         />
                         
@@ -535,18 +532,23 @@ export default function PhotoGrid({
                           
                           {/* Photo card */}
                           <Card
-                            key={photo.id}
+                            key={`photo-${photo.id}`}
                             type="photo"
                             data={photo}
                             index={index}
+                            onSelect={() => {}}
                             onDragStart={(id) => handleDragStart(id)}
                             onDragEnd={handleDragEnd}
-                            onCreateItem={onCreateItem}
+                            onCreateItem={(photoId) => onCreateItem(photoId)}
+                            onRearrange={(targetIndex, draggedId) => onRearrangePhotos(targetIndex, draggedId)}
                             isDraggingAny={isDragging}
                             isBeingDragged={activeDragId === photo.id}
                             searchQuery={searchQuery}
                             isHighlighted={isPhotoHighlighted(photo)}
                             onLabelClick={onLabelClick}
+                            activeFilterLabel={activeFilterLabel}
+                            onDeletePhoto={onDeletePhoto}
+                            allPhotos={photos}
                             className={getCardClass(isPhotoHighlighted(photo))}
                           />
                           

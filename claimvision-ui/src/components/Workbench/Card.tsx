@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { Photo, Item, SearchMode } from '@/types/workbench';
 import { useDrag, useDrop } from 'react-dnd';
 import { Menu } from '@headlessui/react';
-import { EllipsisVerticalIcon } from '@heroicons/react/24/outline';
+import { EllipsisVerticalIcon, CubeIcon, TrashIcon } from '@heroicons/react/24/outline';
 
 // Type guards for Photo and Item
 const isPhoto = (data: Photo | Item): data is Photo => {
@@ -24,12 +24,16 @@ interface CardProps {
   onCreateItem?: (photoId: string) => void;
   onRearrange?: (targetIndex: number, draggedId: string) => void;
   onAddPhotoToItem?: (itemId: string, photoId: string) => void;
+  onDeleteItem?: (itemId: string) => void;
+  onDeletePhoto?: (photoId: string) => void;
   isDraggingAny?: boolean;
   isBeingDragged?: boolean;
   searchQuery?: string;
   isHighlighted?: boolean;
   className?: string;
   onLabelClick?: (label: string) => void;
+  activeFilterLabel?: string;
+  allPhotos?: Photo[];
 }
 
 const Card: React.FC<CardProps> = ({
@@ -43,12 +47,16 @@ const Card: React.FC<CardProps> = ({
   onCreateItem,
   onRearrange,
   onAddPhotoToItem,
+  onDeleteItem,
+  onDeletePhoto,
   isDraggingAny = false,
   isBeingDragged = false,
   searchQuery = '',
   isHighlighted = false,
   className = '',
   onLabelClick,
+  activeFilterLabel = '',
+  allPhotos = [],
 }) => {
   // Create refs
   const ref = useRef<HTMLDivElement>(null);
@@ -120,7 +128,11 @@ const Card: React.FC<CardProps> = ({
   const imageUrl = isPhoto(data) 
     ? data.url 
     : isItem(data) && data.thumbnailPhotoId 
-      ? `/api/photos/${data.thumbnailPhotoId}` 
+      ? (() => {
+          // Find the thumbnail photo in the allPhotos array
+          const thumbnailPhoto = allPhotos.find(p => p.id === data.thumbnailPhotoId);
+          return thumbnailPhoto?.url || '/placeholder-image.jpg';
+        })()
       : '/placeholder-image.jpg';
 
   // Get the title
@@ -149,6 +161,7 @@ const Card: React.FC<CardProps> = ({
         ${isHighlighted ? 'ring-2 ring-blue-500' : ''}
         ${isBeingDragged ? 'scale-105 z-20 shadow-xl rotate-1' : ''}
         ${isDraggingAny && !isBeingDragged ? 'scale-95 transition-transform duration-200' : ''}
+        ${isItem(data) ? 'border-2 border-indigo-200' : ''}
         hover:shadow-lg
         ${className}
       `}
@@ -162,19 +175,29 @@ const Card: React.FC<CardProps> = ({
       }}
     >
       {/* Image */}
-      <div className="aspect-square overflow-hidden">
+      <div className="aspect-square overflow-hidden relative">
         <img
           src={imageUrl}
           alt={title}
           className="w-full h-full object-cover"
         />
+        
+        {/* Item indicator overlay */}
+        {isItem(data) && (
+          <div className="absolute top-2 right-2 bg-indigo-100 rounded-full p-1.5 shadow-md">
+            <CubeIcon className="h-5 w-5 text-indigo-600" />
+          </div>
+        )}
       </div>
 
       {/* Content */}
-      <div className="p-3">
-        {/* Title */}
+      <div className={`p-3 ${isItem(data) ? 'bg-indigo-50' : ''}`}>
+        {/* Title with type indicator */}
         <div className="flex justify-between items-start mb-2">
-          <h3 className="font-medium text-gray-900 truncate">{title}</h3>
+          <h3 className={`font-medium truncate ${isItem(data) ? 'text-indigo-900' : 'text-gray-900'}`}>
+            {isItem(data) && <span className="text-xs font-bold text-indigo-600 mr-1">ITEM</span>}
+            {title}
+          </h3>
         </div>
 
         {/* Labels */}
@@ -185,9 +208,11 @@ const Card: React.FC<CardProps> = ({
               key={idx}
               className={`
                 inline-block px-2 py-1 text-xs rounded-full cursor-pointer
-                ${isHighlighted && label.toLowerCase().includes((searchQuery || '').toLowerCase())
-                  ? 'bg-blue-100 text-blue-800' 
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
+                ${activeFilterLabel === label 
+                  ? 'bg-blue-500 text-white' 
+                  : isHighlighted && label.toLowerCase().includes((searchQuery || '').toLowerCase())
+                    ? 'bg-blue-100 text-blue-800' 
+                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
               `}
               onClick={(e) => {
                 e.stopPropagation(); // Prevent card selection
@@ -201,11 +226,9 @@ const Card: React.FC<CardProps> = ({
             <div className="relative">
               <span 
                 className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"
-                onMouseEnter={() => setShowTooltip(true)}
-                onMouseLeave={() => setShowTooltip(false)}
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent card selection
-                  // We don't do anything on click for the +n label itself
+                  setShowTooltip(!showTooltip); // Toggle tooltip on click
                 }}
               >
                 +{labels.length - 3}
@@ -213,12 +236,19 @@ const Card: React.FC<CardProps> = ({
               
               {/* Tooltip for remaining labels */}
               {showTooltip && (
-                <div className="absolute z-50 bottom-full left-0 mb-2 p-2 bg-white rounded-md shadow-lg border border-gray-200 min-w-48 max-w-xs">
+                <div 
+                  className="absolute z-50 bottom-full left-0 mb-2 p-2 bg-white rounded-md shadow-lg border border-gray-200 min-w-48 max-w-xs"
+                >
                   <div className="flex flex-wrap gap-1">
                     {labels.slice(3).map((label, idx) => (
                       <span
                         key={idx}
-                        className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"
+                        className={`
+                          inline-block px-2 py-1 text-xs rounded-full cursor-pointer
+                          ${activeFilterLabel === label 
+                            ? 'bg-blue-500 text-white' 
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
+                        `}
                         onClick={(e) => {
                           e.stopPropagation(); // Prevent card selection
                           if (onLabelClick) onLabelClick(label);
@@ -230,6 +260,17 @@ const Card: React.FC<CardProps> = ({
                     ))}
                   </div>
                   <div className="absolute bottom-0 left-4 transform translate-y-1/2 rotate-45 w-2 h-2 bg-white border-r border-b border-gray-200"></div>
+                  <button
+                    className="absolute top-1 right-1 text-gray-400 hover:text-gray-600"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowTooltip(false);
+                    }}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                  </button>
                 </div>
               )}
             </div>
@@ -243,9 +284,9 @@ const Card: React.FC<CardProps> = ({
             {description && (
               <p className="text-sm text-gray-600 mb-2 line-clamp-2">{description}</p>
             )}
-            {replacementValue !== null && (
+            {replacementValue !== null && replacementValue !== undefined && (
               <p className="text-sm font-medium text-gray-900">
-                Value: ${replacementValue.toFixed(2)}
+                Value: ${Number(replacementValue).toFixed(2)}
               </p>
             )}
           </>
@@ -297,6 +338,44 @@ const Card: React.FC<CardProps> = ({
                       } w-full text-left px-2 py-1 text-sm rounded-md`}
                     >
                       Edit Item Details
+                    </button>
+                  )}
+                </Menu.Item>
+              )}
+              {isItem(data) && onDeleteItem && (
+                <Menu.Item>
+                  {({ active }) => (
+                    <button
+                      onClick={() => {
+                        if (window.confirm('Are you sure you want to delete this item?')) {
+                          onDeleteItem(data.id);
+                        }
+                      }}
+                      className={`${
+                        active ? 'bg-red-100' : ''
+                      } w-full text-left px-2 py-1 text-sm rounded-md text-red-600 flex items-center`}
+                    >
+                      <TrashIcon className="h-4 w-4 mr-2" />
+                      Delete Item
+                    </button>
+                  )}
+                </Menu.Item>
+              )}
+              {isPhoto(data) && onDeletePhoto && (
+                <Menu.Item>
+                  {({ active }) => (
+                    <button
+                      onClick={() => {
+                        if (window.confirm('Are you sure you want to delete this photo?')) {
+                          onDeletePhoto(data.id);
+                        }
+                      }}
+                      className={`${
+                        active ? 'bg-red-100' : ''
+                      } w-full text-left px-2 py-1 text-sm rounded-md text-red-600 flex items-center`}
+                    >
+                      <TrashIcon className="h-4 w-4 mr-2" />
+                      Delete Photo
                     </button>
                   )}
                 </Menu.Item>

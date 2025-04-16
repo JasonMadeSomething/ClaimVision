@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { XMarkIcon, ArrowPathIcon, HomeIcon, ArrowsRightLeftIcon, TagIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon, ArrowPathIcon, HomeIcon, ArrowsRightLeftIcon, TagIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Item, Photo, Room } from "@/types/workbench";
 
 interface ItemDetailsPanelProps {
@@ -12,6 +12,8 @@ interface ItemDetailsPanelProps {
   onChangeThumbnail: () => void;
   onMoveToRoom: (roomId: string | null) => void;
   onAddPhoto: (itemId: string, photoId: string) => void;
+  onDeleteItem?: () => void;
+  onDeletePhoto?: (photoId: string) => void;
 }
 
 interface EditableFieldProps {
@@ -145,6 +147,8 @@ export default function ItemDetailsPanel({
   onChangeThumbnail,
   onMoveToRoom,
   onAddPhoto,
+  onDeleteItem,
+  onDeletePhoto
 }: ItemDetailsPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -188,16 +192,31 @@ export default function ItemDetailsPanel({
   return (
     <div className="w-96 border-l border-gray-200 bg-white overflow-y-auto h-full shadow-lg">
       <div className="sticky top-0 bg-white z-10 border-b border-gray-200">
-        <div className="flex justify-between items-center p-4">
-          <h2 className="text-lg font-semibold text-gray-800">Item Details</h2>
-          <button
-            onClick={onClose}
-            className="p-1 rounded-full hover:bg-gray-100 transition-colors"
-            aria-label="Close panel"
-            data-testid="close-button"
-          >
-            <XMarkIcon className="h-5 w-5 text-gray-500" />
-          </button>
+        <div className="flex justify-between items-center mb-4 border-b pb-2">
+          <h2 className="text-xl font-semibold">Item Details</h2>
+          <div className="flex space-x-2">
+            {onDeleteItem && (
+              <button 
+                onClick={() => {
+                  if (window.confirm('Are you sure you want to delete this item?')) {
+                    onDeleteItem();
+                    onClose();
+                  }
+                }}
+                className="p-1.5 rounded-full text-red-600 hover:bg-red-50"
+                title="Delete Item"
+              >
+                <TrashIcon className="h-5 w-5" />
+              </button>
+            )}
+            <button 
+              onClick={onClose} 
+              className="p-1.5 rounded-full text-gray-500 hover:bg-gray-100"
+              title="Close Panel"
+            >
+              <XMarkIcon className="h-5 w-5" />
+            </button>
+          </div>
         </div>
       </div>
 
@@ -368,14 +387,42 @@ export default function ItemDetailsPanel({
                     </div>
                   </div>
                 )}
-                <button
-                  onClick={() => onRemovePhoto(photo.id)}
-                  className="absolute top-1 right-1 p-1 bg-white rounded-full shadow-md hover:bg-gray-100 transition-colors"
-                  aria-label="Remove photo"
-                  data-testid="remove-photo-button"
-                >
-                  <XMarkIcon className="h-4 w-4 text-gray-700" />
-                </button>
+                <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <div className="flex space-x-1">
+                    <button 
+                      onClick={() => onRemovePhoto(photo.id)}
+                      className="p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
+                      title="Remove from Item"
+                    >
+                      <XMarkIcon className="h-4 w-4 text-gray-700" />
+                    </button>
+                    <button 
+                      onClick={() => {
+                        onUpdate({
+                          ...item,
+                          thumbnailPhotoId: photo.id
+                        });
+                      }}
+                      className="p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
+                      title="Set as Thumbnail"
+                    >
+                      <ArrowPathIcon className="h-4 w-4 text-gray-700" />
+                    </button>
+                    {onDeletePhoto && (
+                      <button 
+                        onClick={() => {
+                          if (window.confirm('Are you sure you want to delete this photo?')) {
+                            onDeletePhoto(photo.id);
+                          }
+                        }}
+                        className="p-1 bg-white rounded-full shadow-md hover:bg-red-100"
+                        title="Delete Photo"
+                      >
+                        <TrashIcon className="h-4 w-4 text-red-600" />
+                      </button>
+                    )}
+                  </div>
+                </div>
               </div>
             ))}
           </div>

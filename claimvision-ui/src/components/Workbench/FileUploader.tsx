@@ -3,6 +3,7 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { ArrowUpTrayIcon, XMarkIcon } from '@heroicons/react/24/outline';
+import UploadPlaceholderCard from './UploadPlaceholderCard';
 
 interface FileUploaderProps {
   claimId: string;
@@ -11,6 +12,7 @@ interface FileUploaderProps {
   maxFiles?: number; // default 10
   authToken: string;
   roomId?: string;
+  showPlaceholderCards?: boolean;
 }
 
 // Maximum size for a single upload batch in bytes (5MB)
@@ -33,7 +35,8 @@ export default function FileUploader({
   maxFileSize = 10 * 1024 * 1024, // 10MB default
   maxFiles = 10,
   authToken,
-  roomId
+  roomId,
+  showPlaceholderCards = false
 }: FileUploaderProps) {
   const [files, setFiles] = useState<FileWithStatus[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -447,31 +450,47 @@ export default function FileUploader({
               Clear All
             </button>
           </div>
-          <ul className="space-y-2 max-h-40 overflow-y-auto">
-            {files.map((file, index) => {
-              const { text, color } = getFileStatusInfo(file.status);
-              return (
-                <li key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
-                  <div className="flex-1 flex items-center">
-                    <span className="text-sm truncate max-w-xs">{file.file.name}</span>
-                    <span className="text-xs text-gray-500 ml-2">
-                      ({(file.file.size / 1024).toFixed(1)} KB)
-                    </span>
-                  </div>
-                  <div className={`text-xs ${color} mx-2`}>{text}</div>
-                  {file.status === 'pending' && (
-                    <button
-                      type="button"
-                      onClick={() => removeFile(index)}
-                      className="text-gray-400 hover:text-gray-600"
-                    >
-                      <XMarkIcon className="h-4 w-4" />
-                    </button>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
+          
+          {showPlaceholderCards ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+              {files.map((file, index) => (
+                <UploadPlaceholderCard
+                  key={index}
+                  fileName={file.file.name}
+                  progress={file.progress}
+                  status={file.status}
+                  className={file.status === 'pending' ? 'cursor-pointer' : ''}
+                />
+              ))}
+            </div>
+          ) : (
+            <ul className="space-y-2 max-h-40 overflow-y-auto">
+              {files.map((file, index) => {
+                const { text, color } = getFileStatusInfo(file.status);
+                return (
+                  <li key={index} className="flex justify-between items-center p-2 bg-gray-50 rounded">
+                    <div className="flex-1 flex items-center">
+                      <span className="text-sm truncate max-w-xs">{file.file.name}</span>
+                      <span className="text-xs text-gray-500 ml-2">
+                        ({(file.file.size / 1024).toFixed(1)} KB)
+                      </span>
+                    </div>
+                    <div className={`text-xs ${color} mx-2`}>{text}</div>
+                    {file.status === 'pending' && (
+                      <button
+                        type="button"
+                        onClick={() => removeFile(index)}
+                        className="text-gray-400 hover:text-gray-600"
+                      >
+                        <XMarkIcon className="h-4 w-4" />
+                      </button>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          
           <button
             type="button"
             onClick={uploadFiles}

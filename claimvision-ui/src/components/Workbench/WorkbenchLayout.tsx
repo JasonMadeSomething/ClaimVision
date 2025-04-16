@@ -176,21 +176,226 @@ export default function WorkbenchLayout() {
   : [];
 
   // Create a new item with optional initial photo
-  const handleCreateItem = (photoId?: string) => {
+  const handleCreateItem = async (photoId?: string) => {
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot create item: missing claim ID or auth token");
+      return;
+    }
+
+    // Create a temporary ID for optimistic UI updates
+    const tempId = `item-${Date.now()}`;
+    
     const newItem: Item = {
-      id: `item-${Date.now()}`,
-      name: '',
+      id: tempId,
+      name: photoId ? 'New Item' : '',
       description: '',
       thumbnailPhotoId: photoId || null,
       photoIds: photoId ? [photoId] : [],
       roomId: selectedRoom?.id || null,
       replacementValue: 0,
     };
+    
+    // Optimistically update the UI
     setItems([...items, newItem]);
     
     // Only set selected item if autoOpenDetailPanel is true
     if (autoOpenDetailPanel) {
       setSelectedItem(newItem);
+    }
+    
+    // Update the photo's itemId if a photoId was provided
+    if (photoId) {
+      setPhotos(photos.map(photo => 
+        photo.id === photoId ? { ...photo, itemId: tempId } : photo
+      ));
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      
+      // Prepare the request body to match what the backend expects
+      const requestBody: any = {
+        name: photoId ? 'New Item' : '',
+        description: '',
+        estimated_value: 0, // Use estimated_value instead of replacement_value
+        room_id: selectedRoom?.id || null
+      };
+      
+      // Add file_id if a photoId is provided (instead of using photo_ids or thumbnail_photo_id)
+      if (photoId) {
+        requestBody.file_id = photoId;
+      }
+      
+      console.log(`Creating item for claim ${claimId} with data:`, requestBody);
+      
+      const response = await fetch(`${baseUrl}/claims/${claimId}/items`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.id_token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Error creating item (${response.status}):`, errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { error_details: errorText || 'Failed to create item' };
+        }
+        throw new Error(errorData.error_details || 'Failed to create item');
+      }
+
+      const result = await response.json();
+      console.log("Item created successfully:", result);
+      
+      if (result.data && result.data.id) {
+        // Replace the temporary item with the server-returned item
+        const serverItem: Item = {
+          id: result.data.id,
+          name: result.data.name,
+          description: result.data.description || '',
+          thumbnailPhotoId: photoId || null, // Use the photoId we already have
+          photoIds: photoId ? [photoId] : [],
+          roomId: result.data.room_id,
+          replacementValue: result.data.estimated_value || 0 // Map estimated_value to replacementValue
+        };
+        
+        setItems(prevItems => prevItems.map(item => 
+          item.id === tempId ? serverItem : item
+        ));
+        
+        // Update the photo's itemId with the server-assigned ID
+        if (photoId) {
+          setPhotos(prevPhotos => prevPhotos.map(photo => 
+            photo.id === photoId ? { ...photo, itemId: serverItem.id } : photo
+          ));
+          
+          // Update the photo's item association on the server
+          try {
+            await fetch(`${baseUrl}/files/${photoId}`, {
+              method: 'PATCH',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${user.id_token}`
+              },
+              body: JSON.stringify({
+                item_id: serverItem.id
+              })
+            });
+            console.log(`Photo ${photoId} associated with item ${serverItem.id}`);
+          } catch (error) {
+            console.error("Error associating photo with item:", error);
+          }
+        }
+        
+        // Update selected item if needed
+        if (selectedItem?.id === tempId) {
+          setSelectedItem(serverItem);
+        }
+      }
+    } catch (error) {
+      console.error("Error creating item:", error);
+      
+      // Revert optimistic updates on error
+      setItems(prevItems => prevItems.filter(item => item.id !== tempId));
+      
+      if (photoId) {
+        setPhotos(prevPhotos => prevPhotos.map(photo => 
+          photo.id === photoId ? { ...photo, itemId: null } : photo
+        ));
+      }
+      
+      if (selectedItem?.id === tempId) {
+        setSelectedItem(null);
+      }
+    }
+  };
+
+  // Handle updating item details
+  const handleUpdateItem = async (updatedItem: Item) => {
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot update item: missing claim ID or auth token");
+      // Still update the UI even if we can't save to the server
+      const updatedItems = items.map(item => 
+        item.id === updatedItem.id ? updatedItem : item
+      );
+      setItems(updatedItems);
+      setSelectedItem(updatedItem);
+      return;
+    }
+    
+    // Skip API calls for temporary items (they haven't been created on the server yet)
+    if (updatedItem.id.startsWith('item-')) {
+      console.log("Skipping API update for temporary item:", updatedItem.id);
+      const updatedItems = items.map(item => 
+        item.id === updatedItem.id ? updatedItem : item
+      );
+      setItems(updatedItems);
+      setSelectedItem(updatedItem);
+      return;
+    }
+    
+    // Store the original item for rollback if needed
+    const originalItem = items.find(item => item.id === updatedItem.id);
+    if (!originalItem) return;
+    
+    // Optimistically update the UI
+    const updatedItems = items.map(item => 
+      item.id === updatedItem.id ? updatedItem : item
+    );
+    setItems(updatedItems);
+    setSelectedItem(updatedItem);
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      
+      // Prepare the request body to match what the backend expects
+      const requestBody = {
+        name: updatedItem.name,
+        description: updatedItem.description,
+        estimated_value: updatedItem.replacementValue, // Map replacementValue to estimated_value
+        room_id: updatedItem.roomId
+      };
+      
+      console.log(`Updating item ${updatedItem.id} with data:`, requestBody);
+      
+      const response = await fetch(`${baseUrl}/items/${updatedItem.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${user.id_token}`
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Error updating item (${response.status}):`, errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { error_details: errorText || 'Failed to update item' };
+        }
+        throw new Error(errorData.error_details || 'Failed to update item');
+      }
+
+      console.log("Item updated successfully");
+    } catch (error) {
+      console.error("Error updating item:", error);
+      
+      // Revert optimistic updates on error
+      if (originalItem) {
+        const revertedItems = items.map(item => 
+          item.id === updatedItem.id ? originalItem : item
+        );
+        setItems(revertedItems);
+        setSelectedItem(originalItem);
+      }
     }
   };
 
@@ -281,7 +486,7 @@ export default function WorkbenchLayout() {
   };
 
   // Handle adding a photo to an item
-  const handleAddPhotoToItem = (itemId: string, photoId: string) => {
+  const handleAddPhotoToItem = async (itemId: string, photoId: string) => {
     // Find the item
     const item = items.find(i => i.id === itemId);
     if (!item) return;
@@ -306,10 +511,13 @@ export default function WorkbenchLayout() {
     if (selectedItem?.id === itemId) {
       setSelectedItem(updatedItem);
     }
+    
+    // Persist the change
+    await handleUpdateItem(updatedItem);
   };
 
   // Handle removing a photo from an item
-  const handleRemovePhotoFromItem = (photoId: string) => {
+  const handleRemovePhotoFromItem = async (photoId: string) => {
     if (!selectedItem) return;
 
     // Update the photo to no longer be part of the item
@@ -321,30 +529,97 @@ export default function WorkbenchLayout() {
     const updatedPhotoIds = selectedItem.photoIds.filter(id => id !== photoId);
     
     if (updatedPhotoIds.length === 0) {
+      // If no photos left, delete the item
       const updatedItems = Array.isArray(items)
         ? items.filter(item => item.id !== selectedItem?.id)
         : [];
       setItems(updatedItems);
       setSelectedItem(null);
+      
+      // Delete the item from the server
+      if (claimId && user?.id_token && selectedItem.id.startsWith('item-') === false) {
+        try {
+          const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+          const response = await fetch(`${baseUrl}/items/${selectedItem.id}`, {
+            method: 'DELETE',
+            headers: {
+              'Authorization': `Bearer ${user.id_token}`
+            }
+          });
+          
+          if (!response.ok) {
+            console.error(`Error deleting item: ${response.status}`);
+            // Revert the local deletion to prevent duplication
+            setItems(prevItems => {
+              // Only add the item back if it's not already in the array
+              if (!prevItems.some(item => item.id === selectedItem.id)) {
+                return [...prevItems, selectedItem];
+              }
+              return prevItems;
+            });
+            return; // Exit early to prevent further processing
+          }
+          
+          console.log("Item deleted successfully");
+        } catch (error) {
+          console.error("Error deleting item:", error);
+          // Revert the local deletion to prevent duplication
+          setItems(prevItems => {
+            // Only add the item back if it's not already in the array
+            if (!prevItems.some(item => item.id === selectedItem.id)) {
+              return [...prevItems, selectedItem];
+            }
+            return prevItems;
+          });
+        }
+      }
     } else {
       // Update the item with remaining photos
-      const updatedItem = {
+      let updatedItem = {
         ...selectedItem,
         photoIds: updatedPhotoIds,
-        thumbnailPhotoId: selectedItem.thumbnailPhotoId === photoId 
-          ? updatedPhotoIds[0] 
-          : selectedItem.thumbnailPhotoId
       };
       
-      const updatedItems = items.map(item => 
-        item.id === selectedItem.id ? updatedItem : item
-      );
+      // If the thumbnail was removed, set a new one
+      if (selectedItem.thumbnailPhotoId === photoId) {
+        updatedItem = {
+          ...updatedItem,
+          thumbnailPhotoId: updatedPhotoIds[0] || null
+        };
+      }
       
-      setItems(updatedItems);
+      // Update state
+      setItems(items.map(item => 
+        item.id === selectedItem.id ? updatedItem : item
+      ));
       setSelectedItem(updatedItem);
+      
+      // Persist the change
+      await handleUpdateItem(updatedItem);
     }
-
+    
+    // Update photos state
     setPhotos(updatedPhotos);
+    
+    // Update the photo's association on the server
+    if (claimId && user?.id_token) {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+        await fetch(`${baseUrl}/files/${photoId}`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user.id_token}`
+          },
+          body: JSON.stringify({
+            item_id: null
+          })
+        });
+        console.log("Photo item association updated successfully");
+      } catch (error) {
+        console.error("Error updating photo item association:", error);
+      }
+    }
   };
 
   // Handle moving an item to a room
@@ -438,17 +713,8 @@ export default function WorkbenchLayout() {
     handleMoveItemToRoom(selectedItem.id, roomId);
   };
 
-  // Handle updating item details
-  const handleUpdateItem = (updatedItem: Item) => {
-    const updatedItems = items.map(item => 
-      item.id === updatedItem.id ? updatedItem : item
-    );
-    setItems(updatedItems);
-    setSelectedItem(updatedItem);
-  };
-
   // Handle changing the thumbnail photo for an item
-  const handleChangeThumbnail = (itemId: string) => {
+  const handleChangeThumbnail = async (itemId: string) => {
     const item = items.find(item => item.id === itemId);
     if (!item || item.photoIds.length <= 1) return;
 
@@ -460,6 +726,8 @@ export default function WorkbenchLayout() {
 
     // Update the item
     const updatedItem = { ...item, thumbnailPhotoId: newThumbnailId };
+    
+    // Optimistically update the UI
     const updatedItems = items.map(item => 
       item.id === itemId ? updatedItem : item
     );
@@ -468,6 +736,9 @@ export default function WorkbenchLayout() {
     if (selectedItem?.id === itemId) {
       setSelectedItem(updatedItem);
     }
+    
+    // Persist the change
+    await handleUpdateItem(updatedItem);
   };
 
   // Handle moving a photo to a room
@@ -548,7 +819,11 @@ export default function WorkbenchLayout() {
   };
 
   // Handle rearranging photos
-  const handleRearrangePhotos = (targetIndex: number, draggedIndex: number) => {
+  const handleRearrangePhotos = (targetIndex: number, draggedId: string) => {
+    // Find the photo at the dragged index
+    const draggedIndex = photos.findIndex(photo => photo.id === draggedId);
+    if (draggedIndex === -1) return;
+    
     // Create a copy of the photos array
     const newPhotos = [...photos];
     // Get the photo at the dragged index
@@ -562,7 +837,11 @@ export default function WorkbenchLayout() {
   };
 
   // Handle rearranging items
-  const handleRearrangeItems = (targetIndex: number, draggedIndex: number) => {
+  const handleRearrangeItems = (targetIndex: number, draggedId: string) => {
+    // Find the item at the dragged index
+    const draggedIndex = items.findIndex(item => item.id === draggedId);
+    if (draggedIndex === -1) return;
+    
     // Create a copy of the items array
     const newItems = [...items];
     // Get the item at the dragged index
@@ -594,11 +873,17 @@ export default function WorkbenchLayout() {
 
   // Handle label click to search in find mode
   const handleLabelClick = (label: string) => {
-    // Set search mode to Find
-    setSearchMode(SearchMode.Find);
-    
-    // Set internal search term without updating the input field
-    setInternalSearchTerm(label);
+    // If the label is already being used as a filter, clear it
+    if (internalSearchTerm === label) {
+      setSearchMode(SearchMode.Highlight);
+      setInternalSearchTerm('');
+    } else {
+      // Set search mode to Find
+      setSearchMode(SearchMode.Find);
+      
+      // Set internal search term without updating the input field
+      setInternalSearchTerm(label);
+    }
     
     // Don't update the visible search query in the input field
     // This way the search works but doesn't populate the search box
@@ -620,6 +905,157 @@ export default function WorkbenchLayout() {
   // Toggle upload modal
   const toggleUploadModal = () => {
     setShowUploadModal(!showUploadModal);
+  };
+
+  // Handle deleting an item
+  const handleDeleteItem = async (itemId: string) => {
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot delete item: missing claim ID or auth token");
+      return;
+    }
+
+    // Find the item to delete for potential rollback
+    const itemToDelete = items.find(item => item.id === itemId);
+    if (!itemToDelete) {
+      console.error("Item not found:", itemId);
+      return;
+    }
+
+    // If the selected item is being deleted, clear the selection
+    if (selectedItem?.id === itemId) {
+      setSelectedItem(null);
+    }
+
+    // Optimistically update the UI
+    setItems(items.filter(item => item.id !== itemId));
+
+    // If the item has photos, update their itemId to null
+    const updatedPhotos = photos.map(photo => 
+      photo.itemId === itemId ? { ...photo, itemId: null } : photo
+    );
+    setPhotos(updatedPhotos);
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      
+      console.log(`Deleting item ${itemId}`);
+      
+      const response = await fetch(`${baseUrl}/items/${itemId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${user.id_token}`
+        }
+      });
+      
+      if (!response.ok) {
+        console.error(`Error deleting item: ${response.status}`);
+        // Revert the local deletion to prevent duplication
+        setItems(prevItems => {
+          // Only add the item back if it's not already in the array
+          if (!prevItems.some(item => item.id === itemId)) {
+            return [...prevItems, itemToDelete];
+          }
+          return prevItems;
+        });
+        return; // Exit early to prevent further processing
+      }
+      
+      console.log("Item deleted successfully");
+    } catch (error) {
+      console.error("Error deleting item:", error);
+      // Revert the local deletion to prevent duplication
+      setItems(prevItems => {
+        // Only add the item back if it's not already in the array
+        if (!prevItems.some(item => item.id === itemId)) {
+          return [...prevItems, itemToDelete];
+        }
+        return prevItems;
+      });
+    }
+  };
+
+  // Handle deleting a photo
+  const handleDeletePhoto = async (photoId: string) => {
+    if (!claimId || !user?.id_token) {
+      console.error("Cannot delete photo: missing claim ID or auth token");
+      return;
+    }
+
+    // Find the photo to delete for potential rollback
+    const photoToDelete = photos.find(photo => photo.id === photoId);
+    if (!photoToDelete) {
+      console.error("Photo not found:", photoId);
+      return;
+    }
+
+    // Optimistically update the UI
+    setPhotos(photos.filter(photo => photo.id !== photoId));
+
+    // If the photo is associated with an item, update the item's photoIds
+    if (photoToDelete.itemId) {
+      const updatedItems = items.map(item => {
+        if (item.id === photoToDelete.itemId) {
+          return {
+            ...item,
+            photoIds: item.photoIds.filter(id => id !== photoId),
+            thumbnailPhotoId: item.thumbnailPhotoId === photoId ? null : item.thumbnailPhotoId
+          };
+        }
+        return item;
+      });
+      setItems(updatedItems);
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      
+      console.log(`Deleting photo ${photoId}`);
+      
+      const response = await fetch(`${baseUrl}/files/${photoId}`, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${user.id_token}`
+        }
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Error deleting photo (${response.status}):`, errorText);
+        let errorData;
+        try {
+          errorData = JSON.parse(errorText);
+        } catch (e) {
+          errorData = { error_details: errorText || 'Failed to delete photo' };
+        }
+        throw new Error(errorData.error_details || 'Failed to delete photo');
+      }
+
+      console.log("Photo deleted successfully");
+    } catch (error) {
+      console.error("Error deleting photo:", error);
+      
+      // Revert optimistic updates on error
+      if (photoToDelete) {
+        setPhotos([...photos, photoToDelete]);
+        
+        // Restore item associations
+        if (photoToDelete.itemId) {
+          const updatedItems = items.map(item => {
+            if (item.id === photoToDelete.itemId) {
+              return {
+                ...item,
+                photoIds: [...item.photoIds, photoId],
+                thumbnailPhotoId: item.thumbnailPhotoId === null && photoToDelete.isMainPhoto 
+                  ? photoId 
+                  : item.thumbnailPhotoId
+              };
+            }
+            return item;
+          });
+          setItems(updatedItems);
+        }
+      }
+    }
   };
 
   return (
@@ -699,16 +1135,24 @@ export default function WorkbenchLayout() {
               <PhotoGrid
                 photos={
                   Array.isArray(photos)
-                    ? selectedRoom
+                    ? selectedRoom 
                       ? photos.filter(photo => photo.roomId === selectedRoom.id)
-                      : photos
+                      : searchMode === SearchMode.Find && internalSearchTerm
+                        ? photos.filter(photo => 
+                            photo.labels.some(label => 
+                              label.toLowerCase().includes(internalSearchTerm.toLowerCase())
+                            )
+                          )
+                        : photos
                     : []
                 }
                 items={
                   Array.isArray(items)
-                    ? selectedRoom
+                    ? selectedRoom 
                       ? items.filter(item => item.roomId === selectedRoom.id)
-                      : items
+                      : searchMode === SearchMode.Find && internalSearchTerm
+                        ? items
+                        : items
                     : []
                 }
                 searchQuery={internalSearchTerm}
@@ -719,6 +1163,9 @@ export default function WorkbenchLayout() {
                 onAddPhotoToItem={handleAddPhotoToItem}
                 onSelectItem={handleSelectItem}
                 onLabelClick={handleLabelClick}
+                activeFilterLabel={searchMode === SearchMode.Find ? internalSearchTerm : ''}
+                onDeleteItem={handleDeleteItem}
+                onDeletePhoto={handleDeletePhoto}
               />
             )}
           </div>
@@ -729,13 +1176,15 @@ export default function WorkbenchLayout() {
           <div className="fixed top-16 right-0 h-[calc(100vh-4rem)] z-10 max-w-sm">
             <ItemDetailsPanel 
               item={selectedItem}
-              photos={photos.filter(photo => selectedItem.photoIds.includes(photo.id))}
+              photos={photos.filter(photo => selectedItem.photoIds?.includes(photo.id) || false)}
               onClose={() => setSelectedItem(null)}
               onUpdate={handleUpdateItem}
               onRemovePhoto={handleRemovePhotoFromItem}
               onChangeThumbnail={() => handleChangeThumbnail(selectedItem.id)}
               onMoveToRoom={handleMoveItemToRoomFromPanel}
               onAddPhoto={handleAddPhotoToItem}
+              onDeleteItem={() => handleDeleteItem(selectedItem.id)}
+              onDeletePhoto={handleDeletePhoto}
               rooms={rooms}
             />
           </div>
