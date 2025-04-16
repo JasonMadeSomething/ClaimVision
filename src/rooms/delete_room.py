@@ -83,8 +83,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         
         # Update associated items to remove room association
         items = db_session.query(Item).filter(
-            Item.room_id == room_id,
-            Item.deleted.is_(False)
+            Item.room_id == room_id
         ).all()
         
         for item in items:

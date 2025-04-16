@@ -29,12 +29,20 @@ def lambda_handler(event, _context, db_session: Session = None):
     db = db_session if db_session else get_db_session()
     
     try:
-        user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        # Get user_id from the context set by the lambda_authorizer
+        user_id = event.get("requestContext", {}).get("authorizer", {}).get("user_id")
+        
+        # Fallback to the old way of getting user_id if the above doesn't work
         if not user_id:
+            user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+            
+        if not user_id:
+            logger.error("Invalid authentication: user_id not found in request context")
             return response.api_response(400, error_details='Invalid authentication.')
 
         claim_id = event.get("pathParameters", {}).get("claim_id")
         if not claim_id:
+            logger.error("Claim ID is required but not provided")
             return response.api_response(400, error_details='Claim ID is required.')
 
         try:
