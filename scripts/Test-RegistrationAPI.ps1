@@ -564,7 +564,7 @@ try {
                     $itemBody = @{
                         name = "Test Item"
                         description = "This is a test item created by the registration test script"
-                        estimated_value = 100.50
+                        unit_cost = 100.50
                         condition = "Good"
                         file_id = $fileIds[0]  # Associate with the first file
                     } | ConvertTo-Json
