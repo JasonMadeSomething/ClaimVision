@@ -13,6 +13,7 @@ import ItemDetailsPanel from "./ItemDetailsPanel";
 import RoomSelector from "./RoomSelector";
 import SearchBar from "./SearchBar";
 import FileUploader from './FileUploader';
+import ReportRequestModal from './ReportRequestModal';
 
 export default function WorkbenchLayout() {
   const router = useRouter();
@@ -28,6 +29,9 @@ export default function WorkbenchLayout() {
   const [error, setError] = useState<string | null>(null);
   const [claimId, setClaimId] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
+  const [showReportRequestModal, setShowReportRequestModal] = useState(false);
+  // Track pending file associations for temporary items
+  const [pendingFileAssociations, setPendingFileAssociations] = useState<{[tempItemId: string]: string[]}>({});
   const { user } = useAuth();
 
   const { autoOpenDetailPanel } = useSettingsStore();
@@ -103,15 +107,14 @@ export default function WorkbenchLayout() {
           }
           setRooms(safeRooms);
 
-          // Set items safely
+          // Process items and associate them with their photos
           const safeItems = Array.isArray(itemsJson?.data?.items)
             ? itemsJson.data.items
             : [];
           if (!Array.isArray(itemsJson?.data?.items)) {
             console.warn("Malformed items response:", itemsJson);
           }
-          setItems(safeItems);
-
+          
           // Set photos safely
           const safePhotos = Array.isArray(photosJson?.data?.files)
             ? photosJson.data.files
@@ -121,8 +124,56 @@ export default function WorkbenchLayout() {
           if (!Array.isArray(photosJson?.data?.files) && !Array.isArray(photosJson)) {
             console.warn("Malformed photos response:", photosJson);
           }
-          setPhotos(safePhotos);
-          console.log("Photos set:", safePhotos);
+          
+          // Process items and associate them with their photos
+          const processedItems = safeItems.map((item: any) => {
+            // Ensure photoIds is always an array
+            if (!Array.isArray(item.file_ids)) {
+              console.warn(`Item ${item.id} has no file_ids array, initializing empty array`);
+              item.file_ids = [];
+            }
+            
+            // Map file_ids to photoIds for backward compatibility
+            item.photoIds = item.file_ids || [];
+            
+            // Set thumbnailPhotoId to the first photo if not set
+            if (!item.thumbnailPhotoId && item.photoIds.length > 0) {
+              item.thumbnailPhotoId = item.photoIds[0];
+            }
+            
+            // Map unit_cost from the API response
+            if (item.unit_cost !== undefined) {
+              item.unit_cost = parseFloat(item.unit_cost);
+            }
+            
+            return item;
+          });
+          
+          // Process photos and associate them with their items
+          const processedPhotos = safePhotos.map((photo: any) => {
+            // Find if this photo is associated with any item
+            const associatedItem = processedItems.find((item: any) => 
+              item.photoIds && item.photoIds.includes(photo.id)
+            );
+            
+            // If associated, set the itemId
+            if (associatedItem) {
+              photo.itemId = associatedItem.id;
+            } else {
+              photo.itemId = null;
+            }
+            
+            // Ensure roomId is properly set from the API response
+            // The backend stores room_id, but frontend uses roomId
+            photo.roomId = photo.room_id || null;
+            
+            return photo;
+          });
+          
+          setItems(processedItems);
+          setPhotos(processedPhotos);
+          console.log("Photos set:", processedPhotos);
+          console.log("Items set:", processedItems);
         } catch (err) {
           console.error("Error fetching claim data:", err);
           // Optional: Show toast or UI fallback state
@@ -217,7 +268,7 @@ export default function WorkbenchLayout() {
       const requestBody: any = {
         name: photoId ? 'New Item' : '',
         description: '',
-        estimated_value: 0, // Use estimated_value instead of replacement_value
+        unit_cost: 0, // Use unit_cost instead of replacement_value
         room_id: selectedRoom?.id || null
       };
       
@@ -261,7 +312,7 @@ export default function WorkbenchLayout() {
           thumbnailPhotoId: photoId || null, // Use the photoId we already have
           photoIds: photoId ? [photoId] : [],
           roomId: result.data.room_id,
-          replacementValue: result.data.estimated_value || 0 // Map estimated_value to replacementValue
+          replacementValue: result.data.unit_cost || 0 // Map unit_cost to replacementValue
         };
         
         setItems(prevItems => prevItems.map(item => 
@@ -295,6 +346,56 @@ export default function WorkbenchLayout() {
         // Update selected item if needed
         if (selectedItem?.id === tempId) {
           setSelectedItem(serverItem);
+        }
+        
+        // Process any pending file associations
+        if (pendingFileAssociations[tempId] && pendingFileAssociations[tempId].length > 0) {
+          const fileIds = [...pendingFileAssociations[tempId]];
+          
+          // Update the pending associations state properly
+          setPendingFileAssociations(prevAssociations => {
+            const newAssociations = { ...prevAssociations };
+            delete newAssociations[tempId];
+            return newAssociations;
+          });
+          
+          // Associate each file with the newly created item
+          for (const fileId of fileIds) {
+            try {
+              // Log the URL we're calling to help with debugging
+              const url = `${baseUrl}/items/${serverItem.id}/files`;
+              const requestBody = {
+                file_id: fileId,
+                seed_labels: true // Optionally seed labels from the file to the item
+              };
+              
+              // Log detailed request information for debugging
+              console.log('File association request details (from pending associations):');
+              console.log('URL:', url);
+              console.log('Method:', 'POST');
+              console.log('Headers:', { 'Content-Type': 'application/json', 'Authorization': 'Bearer [token redacted]' });
+              console.log('Body:', JSON.stringify(requestBody, null, 2));
+              
+              const response = await fetch(url, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${user.id_token}`
+                },
+                body: JSON.stringify(requestBody)
+              });
+
+              if (!response.ok) {
+                const errorText = await response.text();
+                console.error(`Error associating file with item (${response.status}):`, errorText);
+                throw new Error('Failed to associate file with item');
+              }
+
+              console.log(`File ${fileId} associated with item ${serverItem.id}`);
+            } catch (error) {
+              console.error(`Error associating file ${fileId} with item ${serverItem.id}:`, error);
+            }
+          }
         }
       }
     } catch (error) {
@@ -357,7 +458,7 @@ export default function WorkbenchLayout() {
       const requestBody = {
         name: updatedItem.name,
         description: updatedItem.description,
-        estimated_value: updatedItem.replacementValue, // Map replacementValue to estimated_value
+        unit_cost: updatedItem.replacementValue, // Map replacementValue to unit_cost
         room_id: updatedItem.roomId
       };
       
@@ -494,7 +595,7 @@ export default function WorkbenchLayout() {
     // Add the photo to the item
     const updatedItem = {
       ...item,
-      photoIds: [...item.photoIds, photoId],
+      photoIds: Array.isArray(item.photoIds) ? [...item.photoIds, photoId] : [photoId],
       // If this is the first photo, make it the thumbnail
       thumbnailPhotoId: item.thumbnailPhotoId || photoId,
     };
@@ -512,8 +613,56 @@ export default function WorkbenchLayout() {
       setSelectedItem(updatedItem);
     }
     
-    // Persist the change
-    await handleUpdateItem(updatedItem);
+    // Make API call to associate the file with the item
+    if (claimId && user?.id_token && !itemId.startsWith('item-')) {
+      try {
+        const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+        
+        // Use the correct endpoint and HTTP method
+        const url = `${baseUrl}/items/${itemId}/files`;
+        const requestBody = {
+          file_id: photoId,
+          seed_labels: true // Optionally seed labels from the file to the item
+        };
+        
+        // Log detailed request information for debugging
+        console.log('File association request details:');
+        console.log('URL:', url);
+        console.log('Method:', 'POST');
+        console.log('Headers:', { 'Content-Type': 'application/json', 'Authorization': 'Bearer [token redacted]' });
+        console.log('Body:', JSON.stringify(requestBody, null, 2));
+        
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${user.id_token}`
+          },
+          body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error(`Error associating file with item (${response.status}):`, errorText);
+          throw new Error('Failed to associate file with item');
+        }
+
+        console.log(`Successfully associated file ${photoId} with item ${itemId}`);
+      } catch (error) {
+        console.error("Error associating file with item:", error);
+        // Continue with local state updates even if the API call fails
+      }
+    } else if (itemId.startsWith('item-')) {
+      console.log("Skipping API call for temporary item:", itemId);
+      // Store the association for later processing
+      setPendingFileAssociations(prevAssociations => ({
+        ...prevAssociations,
+        [itemId]: [...(prevAssociations[itemId] || []), photoId]
+      }));
+    }
+    
+    // We don't need to call handleUpdateItem since the association is handled by the API
+    // and we've already updated the local state
   };
 
   // Handle removing a photo from an item
@@ -634,12 +783,12 @@ export default function WorkbenchLayout() {
     // Update locally first for immediate feedback
     const updatedItem = { ...item, roomId };
     setItems(items.map(i => i.id === itemId ? updatedItem : i));
-    
+
     // If this was the selected item, update that too
     if (selectedItem?.id === itemId) {
       setSelectedItem(updatedItem);
     }
-    
+
     // Update the rooms' itemIds arrays
     const updatedRooms = rooms.map(room => {
       // Remove the item from its previous room
@@ -1058,12 +1207,28 @@ export default function WorkbenchLayout() {
     }
   };
 
+  // Handle opening the report request modal
+  const handleOpenReportRequestModal = () => {
+    setShowReportRequestModal(true);
+  };
+
+  // Handle closing the report request modal
+  const handleCloseReportRequestModal = () => {
+    setShowReportRequestModal(false);
+  };
+
+  // Handle back to workbench
+  const handleBackToWorkbench = () => {
+    setSelectedRoom(null);
+  };
+
   return (
     <DndProvider backend={HTML5Backend}>
       <div className="flex flex-col h-screen">
         <WorkbenchHeader 
-          selectedRoom={selectedRoom}
-          onBackToWorkbench={() => setSelectedRoom(null)}
+          selectedRoom={selectedRoom} 
+          onBackToWorkbench={handleBackToWorkbench}
+          onRequestReport={handleOpenReportRequestModal}
         />
         
         <div className="flex flex-1 overflow-hidden">
@@ -1103,7 +1268,7 @@ export default function WorkbenchLayout() {
               </div>
             )}
 
-            {/* Upload Button and Search */}
+            {/* Upload Button */}
             <div className="flex justify-end space-x-4 mb-4">
               <button
                 onClick={handleCreateEmptyItem}
@@ -1225,6 +1390,15 @@ export default function WorkbenchLayout() {
               </div>
             </div>
           </div>
+        )}
+        
+        {/* Report Request Modal */}
+        {claimId && showReportRequestModal && (
+          <ReportRequestModal
+            isOpen={showReportRequestModal}
+            onClose={handleCloseReportRequestModal}
+            claimId={claimId}
+          />
         )}
       </div>
     </DndProvider>

@@ -1,18 +1,18 @@
 "use client";
 
 import { Room } from "@/types/workbench";
-import { ArrowLeftIcon } from "@heroicons/react/24/outline";
+import { ArrowLeftIcon, DocumentTextIcon } from "@heroicons/react/24/outline";
 
 interface WorkbenchHeaderProps {
   selectedRoom: Room | null;
   onBackToWorkbench: () => void;
-  onCreateEmptyItem?: () => void;
+  onRequestReport?: () => void;
 }
 
 export default function WorkbenchHeader({ 
   selectedRoom, 
   onBackToWorkbench,
-  onCreateEmptyItem,
+  onRequestReport,
 }: WorkbenchHeaderProps) {
   return (
     <header className="bg-white border-b border-gray-200 px-6 py-4">
@@ -29,6 +29,17 @@ export default function WorkbenchHeader({
           <h1 className="text-xl font-semibold text-gray-900">
             {selectedRoom ? selectedRoom.name : "Main Workbench"}
           </h1>
+        </div>
+        <div className="flex items-center space-x-4">
+          {onRequestReport && (
+            <button
+              onClick={onRequestReport}
+              className="flex items-center px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-green-500"
+            >
+              <DocumentTextIcon className="h-5 w-5 mr-2" />
+              Generate Report
+            </button>
+          )}
         </div>
       </div>
     </header>

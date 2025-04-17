@@ -29,8 +29,18 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
     setError("");
 
     try {
+      // Ensure the date is interpreted correctly by creating a date with the time set to noon
+      // This prevents timezone issues from shifting the date
+      const dateParts = dateOfLoss.split('-');
+      const year = parseInt(dateParts[0], 10);
+      const month = parseInt(dateParts[1], 10) - 1; // JavaScript months are 0-indexed
+      const day = parseInt(dateParts[2], 10);
+      
+      // Create date object with time set to noon to avoid timezone issues
+      const lossDate = new Date(year, month, day, 12, 0, 0);
+      
       // Format the date for display in the claim title
-      const formattedDate = new Date(dateOfLoss).toLocaleDateString('en-US', {
+      const formattedDate = lossDate.toLocaleDateString('en-US', {
         year: 'numeric',
         month: 'long',
         day: 'numeric'
@@ -44,7 +54,7 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
       const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
       const payload = {
         title,
-        date_of_loss: dateOfLoss,
+        date_of_loss: dateOfLoss, // Send the original date string in YYYY-MM-DD format
         description: "Claim details to be added"
       };
       
@@ -73,8 +83,11 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
       // Close the modal before redirecting
       onClose();
       
-      // Redirect to the workbench with the new claim ID
-      router.push(`/workbench?claim_id=${data.id}`);
+      // Store the claim ID in localStorage (same as when selecting existing claims)
+      localStorage.setItem('current_claim_id', data.id);
+      
+      // Redirect to the workbench without query params
+      router.push('/workbench');
     } catch (err: any) {
       console.error("Error creating claim:", err.message);
       setError(err.message);

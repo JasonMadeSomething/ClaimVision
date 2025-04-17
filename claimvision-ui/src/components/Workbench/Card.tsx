@@ -1,8 +1,9 @@
-import React, { useRef, useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { Photo, Item, SearchMode } from '@/types/workbench';
 import { useDrag, useDrop } from 'react-dnd';
 import { Menu } from '@headlessui/react';
 import { EllipsisVerticalIcon, CubeIcon, TrashIcon } from '@heroicons/react/24/outline';
+import { useAuth } from '@/context/AuthContext';
 
 // Type guards for Photo and Item
 const isPhoto = (data: Photo | Item): data is Photo => {
@@ -125,15 +126,71 @@ const Card: React.FC<CardProps> = ({
   };
 
   // Get the image URL
-  const imageUrl = isPhoto(data) 
-    ? data.url 
-    : isItem(data) && data.thumbnailPhotoId 
-      ? (() => {
-          // Find the thumbnail photo in the allPhotos array
-          const thumbnailPhoto = allPhotos.find(p => p.id === data.thumbnailPhotoId);
-          return thumbnailPhoto?.url || '/placeholder-image.jpg';
-        })()
-      : '/placeholder-image.jpg';
+  const [imageUrl, setImageUrl] = useState(isPhoto(data) ? data.url : isItem(data) && data.thumbnailPhotoId ? (() => {
+    // Find the thumbnail photo in the allPhotos array
+    const thumbnailPhoto = allPhotos.find(p => p.id === data.thumbnailPhotoId);
+    return thumbnailPhoto?.url || '/placeholder-image.jpg';
+  })() : '/placeholder-image.jpg');
+
+  useEffect(() => {
+    // Function to fetch file URL if needed
+    const fetchFileUrl = async () => {
+      // Case 1: If this is a photo without a URL, fetch it
+      if (isPhoto(data) && !data.url) {
+        await fetchPhotoUrl(data.id);
+      }
+      // Case 2: If this is an item with a thumbnail but no URL in the corresponding photo
+      else if (isItem(data) && data.thumbnailPhotoId) {
+        const thumbnailPhoto = allPhotos.find(p => p.id === data.thumbnailPhotoId);
+        if (!thumbnailPhoto?.url) {
+          await fetchPhotoUrl(data.thumbnailPhotoId);
+        }
+      }
+    };
+
+    fetchFileUrl();
+  }, [data, allPhotos]);
+
+  // Function to fetch a photo URL from the API
+  const { user } = useAuth();
+  const fetchPhotoUrl = async (photoId: string) => {
+    if (!user?.id_token) {
+      console.error("Cannot fetch photo URL: User not authenticated");
+      return;
+    }
+
+    try {
+      const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+      const response = await fetch(`${baseUrl}/files?ids=${photoId}`, {
+        headers: {
+          'Authorization': `Bearer ${user.id_token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch photo URL: ${response.status}`);
+      }
+
+      const data = await response.json();
+      
+      if (data?.data?.files && data.data.files.length > 0) {
+        const fileData = data.data.files[0];
+        if (fileData.url) {
+          setImageUrl(fileData.url);
+          console.log(`Successfully fetched URL for photo ${photoId}`);
+        } else {
+          console.warn(`No URL available for photo ${photoId}`);
+          setImageUrl('/placeholder-image.jpg');
+        }
+      } else {
+        console.warn(`Photo ${photoId} not found in response`);
+        setImageUrl('/placeholder-image.jpg');
+      }
+    } catch (error) {
+      console.error("Error fetching photo URL:", error);
+      setImageUrl('/placeholder-image.jpg');
+    }
+  };
 
   // Get the title
   const title = isPhoto(data) ? data.fileName : isItem(data) ? data.name : '';

@@ -21,6 +21,7 @@ export interface Item {
   photoIds: string[];
   roomId: string | null;
   replacementValue: number;
+  unit_cost?: number;
 }
 
 export interface Room {
