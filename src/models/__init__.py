@@ -9,5 +9,6 @@ from .item import Item
 from .file_labels import FileLabel
 from .item_labels import ItemLabel
 from .item_files import ItemFile
+from .report import Report, ReportStatus
 
-__all__ = ['Base', 'File', 'Claim', 'Household', 'User', 'Room', 'Label', 'Item', 'FileLabel', 'ItemLabel', 'ItemFile']
+__all__ = ['Base', 'File', 'Claim', 'Household', 'User', 'Room', 'Label', 'Item', 'FileLabel', 'ItemLabel', 'ItemFile', 'Report', 'ReportStatus']
