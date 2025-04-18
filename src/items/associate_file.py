@@ -34,8 +34,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
         dict: API response with association status or error
     """
     # Extract item_id from path parameters
-    path_params = event.get("pathParameters") or {}
-    success, result = extract_uuid_param(path_params, "item_id")
+    success, result = extract_uuid_param(event, "item_id")
     if not success:
         return result  # This is already an API response with error details
     item_id = result

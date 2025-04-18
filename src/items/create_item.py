@@ -75,7 +75,7 @@ def lambda_handler(event, _context, db_session: Session = None):
         # ✅ Allow blank items (default values assigned if missing)
         name = body.get("name", "New Item")
         description = body.get("description", None)
-        estimated_value = body.get("estimated_value", None)
+        unit_cost = body.get("unit_cost", None)
         condition = body.get("condition", None)
         is_ai_suggested = body.get("is_ai_suggested", False)
         
@@ -103,7 +103,7 @@ def lambda_handler(event, _context, db_session: Session = None):
             claim_id=claim_uuid,
             name=name,
             description=description,
-            estimated_value=estimated_value,
+            unit_cost=unit_cost,
             condition=condition,
             is_ai_suggested=is_ai_suggested,
             room_id=room_id
@@ -143,7 +143,7 @@ def lambda_handler(event, _context, db_session: Session = None):
             "id": str(new_item.id),
             "name": new_item.name,
             "description": new_item.description,
-            "estimated_value": new_item.estimated_value,
+            "unit_cost": new_item.unit_cost,
             "condition": new_item.condition,
             "is_ai_suggested": new_item.is_ai_suggested,
             "claim_id": str(new_item.claim_id)

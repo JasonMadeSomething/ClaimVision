@@ -58,13 +58,22 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     # Fetch paginated items for the claim - sort by id instead of created_at
     items = db_session.query(Item).filter(Item.claim_id == claim_uuid).order_by(desc(Item.id)).offset(offset).limit(limit).all()
     
-    items_data = [{
-        "id": str(item.id),
-        "name": item.name,
-        "description": item.description,
-        "estimated_value": item.estimated_value,
-        "condition": item.condition
-    } for item in items]
+    items_data = []
+    for item in items:
+        # Get associated file IDs for this item
+        file_ids = [str(file.id) for file in item.files]
+        
+        # Build item data with file IDs
+        item_data = {
+            "id": str(item.id),
+            "name": item.name,
+            "description": item.description,
+            "unit_cost": item.unit_cost,
+            "condition": item.condition,
+            "file_ids": file_ids,  # Include associated file IDs
+            "room_id": str(item.room_id) if item.room_id else None
+        }
+        items_data.append(item_data)
     
     # Return response with pagination metadata matching files endpoint format
     response_data = {

@@ -27,7 +27,7 @@ def lambda_handler(event, _context, db_session=None):
     
     try:
         # Extract user ID from event for authentication
-        user_id_str = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+        user_id_str = event.get("requestContext", {}).get("authorizer", {}).get("user_id")
         
         # For testing purposes, allow auth_user to be passed directly
         if not user_id_str and "auth_user" in event:
@@ -88,8 +88,8 @@ def lambda_handler(event, _context, db_session=None):
             item.description = body["description"]
             item_updated = True
             
-        if "estimated_value" in body:
-            item.estimated_value = body["estimated_value"]
+        if "unit_cost" in body:
+            item.unit_cost = body["unit_cost"]
             item_updated = True
             
         if "condition" in body:
@@ -143,7 +143,7 @@ def lambda_handler(event, _context, db_session=None):
             "id": str(item.id),
             "name": item.name,
             "description": item.description,
-            "estimated_value": item.estimated_value,
+            "unit_cost": item.unit_cost,
             "condition": item.condition,
             "is_ai_suggested": item.is_ai_suggested,
             "claim_id": str(item.claim_id)

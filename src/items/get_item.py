@@ -41,13 +41,18 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     # Fetch associated labels
     item_labels = db_session.query(Label).join(ItemLabel, Label.id == ItemLabel.label_id).filter(ItemLabel.item_id == item_uuid).all()
     
+    # Get associated file IDs
+    file_ids = [str(file.id) for file in item.files]
+    
     # Prepare response data
     item_data = {
         "id": str(item.id),
         "name": item.name,
         "description": item.description,
-        "estimated_value": item.estimated_value,
+        "unit_cost": item.unit_cost,
         "condition": item.condition,
+        "room_id": str(item.room_id) if item.room_id else None,
+        "file_ids": file_ids,  
         "labels": [
             {
                 "id": str(label.id),
