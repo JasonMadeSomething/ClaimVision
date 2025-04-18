@@ -183,7 +183,6 @@ def lambda_handler(event, context):
                     # Send notification email to the specified email address
                     send_notification_email(
                         email_address,  # Use the email address from the message
-                        user.first_name,
                         claim.title,
                         presigned_url
                     )
@@ -227,7 +226,7 @@ def lambda_handler(event, context):
             'body': json.dumps({'error': str(e)})
         }
 
-def send_notification_email(recipient_email, recipient_name, claim_title, download_url):
+def send_notification_email(recipient_email, claim_title, download_url):
     """
     Send a notification email to the user.
     
@@ -265,7 +264,7 @@ def send_notification_email(recipient_email, recipient_name, claim_title, downlo
                     <h1>ClaimVision Report Ready</h1>
                 </div>
                 <div class="content">
-                    <p>Hello {recipient_name},</p>
+                    <p>Hello,</p>
                     <p>Your requested report for claim <strong>"{claim_title}"</strong> is now ready for download.</p>
                     <p>The report includes a comprehensive summary of your claim, including all items, rooms, and associated files.</p>
                     <p>You can download your report by clicking the button below:</p>
@@ -286,7 +285,7 @@ def send_notification_email(recipient_email, recipient_name, claim_title, downlo
         
         # Plain text version for email clients that don't support HTML
         text_body = f"""
-        Hello {recipient_name},
+        Hello,
         
         Your requested report for claim "{claim_title}" is now ready for download.
         
