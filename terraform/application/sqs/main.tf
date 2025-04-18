@@ -118,3 +118,131 @@ resource "aws_sqs_queue" "cognito_update_dlq" {
     Environment = var.environment
   }
 }
+
+# Report Request Queue
+resource "aws_sqs_queue" "report_request_queue" {
+  name                      = "claimvision-report-request-queue-${var.env}"
+  delay_seconds             = 0
+  max_message_size          = 262144  # 256 KB
+  message_retention_seconds = 86400   # 1 day
+  receive_wait_time_seconds = 10
+  visibility_timeout_seconds = 300    # 5 minutes
+
+  tags = {
+    Name = "ClaimVision-ReportRequestQueue-${var.env}"
+  }
+}
+
+# Report Request DLQ
+resource "aws_sqs_queue" "report_request_dlq" {
+  name                      = "claimvision-report-request-dlq-${var.env}"
+  message_retention_seconds = 1209600  # 14 days
+
+  tags = {
+    Name = "ClaimVision-ReportRequestDLQ-${var.env}"
+  }
+}
+
+# File Organization Queue
+resource "aws_sqs_queue" "file_organization_queue" {
+  name                      = "claimvision-file-organization-queue-${var.env}"
+  delay_seconds             = 0
+  max_message_size          = 262144  # 256 KB
+  message_retention_seconds = 86400   # 1 day
+  receive_wait_time_seconds = 10
+  visibility_timeout_seconds = 600    # 10 minutes
+
+  tags = {
+    Name = "ClaimVision-FileOrganizationQueue-${var.env}"
+  }
+}
+
+# File Organization DLQ
+resource "aws_sqs_queue" "file_organization_dlq" {
+  name                      = "claimvision-file-organization-dlq-${var.env}"
+  message_retention_seconds = 1209600  # 14 days
+
+  tags = {
+    Name = "ClaimVision-FileOrganizationDLQ-${var.env}"
+  }
+}
+
+# Set up redrive policies
+resource "aws_sqs_queue_redrive_policy" "report_request_redrive" {
+  queue_url = aws_sqs_queue.report_request_queue.id
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.report_request_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+resource "aws_sqs_queue_redrive_policy" "file_organization_redrive" {
+  queue_url = aws_sqs_queue.file_organization_queue.id
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.file_organization_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+resource "aws_sqs_queue" "deliver_report_queue" {
+  name = "claimvision-deliver-report-queue-${var.env}"
+
+  message_retention_seconds = 86400  # 1 day
+  visibility_timeout_seconds = 600   # 10 minutes
+
+  tags = {
+    Name = "ClaimVision-DeliverReportQueue-${var.env}"
+  }
+}
+
+resource "aws_sqs_queue" "deliver_report_dlq" {
+  name                      = "claimvision-deliver-report-dlq-${var.env}"
+  message_retention_seconds = 1209600
+}
+
+resource "aws_sqs_queue_redrive_policy" "deliver_report_redrive" {
+  queue_url = aws_sqs_queue.deliver_report_queue.id
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.deliver_report_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+resource "aws_sqs_queue" "email_queue" {
+  name                      = "claimvision-email-queue-${var.env}"
+  delay_seconds             = 0
+  max_message_size          = 262144
+  message_retention_seconds = 345600  # 4 days
+  receive_wait_time_seconds = 0
+  visibility_timeout_seconds = 30
+
+  tags = {
+    Name        = "ClaimVision Email Queue"
+    Environment = var.env
+  }
+}
+
+resource "aws_sqs_queue_policy" "email_queue_policy" {
+  queue_url = aws_sqs_queue.email_queue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Id      = "EmailQueuePolicy"
+    Statement = [
+      {
+        Sid       = "AllowSendMessage"
+        Effect    = "Allow"
+        Principal = {
+          AWS = "*"
+        }
+        Action    = "sqs:SendMessage"
+        Resource  = aws_sqs_queue.email_queue.arn
+        Condition = {
+          ArnLike = {
+            "aws:SourceArn" = "arn:aws:lambda:us-east-1:${var.aws_account_id}:function:*"
+          }
+        }
+      }
+    ]
+  })
+}

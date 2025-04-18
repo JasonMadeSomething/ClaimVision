@@ -33,3 +33,21 @@ variable "aws_region" {
   type        = string
   description = "AWS Region"
 }
+
+variable "lambda_security_group_id" {
+  type        = string
+  description = "Security group ID for Lambda functions"
+  default     = ""
+}
+
+variable "domain_name" {
+  type        = string
+  description = "Domain name for SES configuration"
+  default     = "claimvision.made-something.com"
+}
+
+variable "sender_email" {
+  type        = string
+  description = "Email address to use as the sender for reports"
+  default     = "reports@claimvision.made-something.com"
+}

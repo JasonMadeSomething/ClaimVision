@@ -35,7 +35,8 @@ resource "aws_secretsmanager_secret" "db_secret" {
   recovery_window_in_days = 0  # Allows immediate deletion and recreation
   
   lifecycle {
-    ignore_changes = [name]
+    ignore_changes = [name, description]
+    prevent_destroy = true
   }
 }
 
@@ -45,6 +46,10 @@ resource "aws_secretsmanager_secret_version" "db_secret_version" {
     username = var.db_username
     password = var.db_password
   })
+  
+  lifecycle {
+    ignore_changes = [secret_string]
+  }
 }
 
 resource "aws_ssm_parameter" "db_password" {

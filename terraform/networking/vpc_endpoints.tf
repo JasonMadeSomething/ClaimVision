@@ -8,24 +8,26 @@ resource "aws_vpc_endpoint" "s3" {
   route_table_ids   = [aws_route_table.public_route_table.id]
   
   policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Effect    = "Allow"
-        Principal = "*"
-        Action    = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject",
-          "s3:ListBucket"
-        ]
-        Resource  = [
-          "arn:aws:s3:::claimvision-files-*",
-          "arn:aws:s3:::claimvision-files-*/*"
-        ]
-      }
-    ]
-  })
+  Version = "2012-10-17",
+  Statement = [
+    {
+      Effect    = "Allow",
+      Principal = "*",
+      Action    = [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject",
+        "s3:ListBucket"
+      ],
+      Resource  = [
+        "arn:aws:s3:::claimvision-files-*",
+        "arn:aws:s3:::claimvision-files-*/*",
+        "arn:aws:s3:::claimvision-reports-*",
+        "arn:aws:s3:::claimvision-reports-*/*"
+      ]
+    }
+  ]
+})
 
   tags = {
     Name = "ClaimVisionS3Endpoint-${var.env}"
@@ -55,10 +57,13 @@ resource "aws_vpc_endpoint" "sqs" {
           "sqs:GetQueueUrl"
         ]
         Resource  = [
-          "arn:aws:sqs:*:*:claimvision-file-upload-queue-*",
-          "arn:aws:sqs:*:*:claimvision-file-analysis-queue-*",
-          "arn:aws:sqs:*:*:claimvision-user-registration-queue",
-          "arn:aws:sqs:*:*:claimvision-cognito-update-queue"
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-file-upload-queue-dev",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-file-analysis-queue-dev",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-user-registration-queue",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-cognito-update-queue",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-report-request-queue-dev",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-file-organization-queue-dev",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-deliver-report-queue-dev"
         ]
       }
     ]

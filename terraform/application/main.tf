@@ -32,3 +32,19 @@ module "ssm" {
   rds_endpoint        = module.rds.rds_endpoint
   s3_bucket_name      = module.s3.s3_bucket_name
 }
+
+module "efs" {
+  source                 = "./efs"
+  env                    = var.env
+  vpc_id                 = var.vpc_id
+  public_subnet_1        = var.public_subnet_1
+  public_subnet_2        = var.public_subnet_2
+  lambda_security_group_id = var.lambda_security_group_id
+}
+
+module "ses" {
+  source      = "./ses"
+  env         = var.env
+  domain_name = var.domain_name
+  sender_email = var.sender_email
+}
