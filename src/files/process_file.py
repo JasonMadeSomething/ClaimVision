@@ -36,7 +36,7 @@ def compute_file_hash(s3_bucket, s3_key):
         s3_key (str): S3 object key
         
     Returns:
-        str: SHA-256 hash of the file
+        tuple: (SHA-256 hash of the file, file size in bytes, content type)
     """
     try:
         logger.info("Computing hash for file in S3: %s/%s", s3_bucket, s3_key)
@@ -44,8 +44,14 @@ def compute_file_hash(s3_bucket, s3_key):
         response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
         file_data = response['Body'].read()
         file_hash = sha256(file_data).hexdigest()
-        logger.info("Computed file hash: %s", file_hash)
-        return file_hash
+        
+        # Extract file size and content type
+        file_size = len(file_data)
+        content_type = response.get('ContentType', '')
+        
+        logger.info("Computed file hash: %s, size: %s bytes, content type: %s", 
+                   file_hash, file_size, content_type)
+        return file_hash, file_size, content_type
     except Exception as e:
         logger.error("Error computing file hash: %s", str(e))
         raise
@@ -154,7 +160,7 @@ def lambda_handler(event, _context):
                     }
                     
                 # Compute file hash
-                file_hash = compute_file_hash(S3_BUCKET_NAME, target_s3_key)
+                file_hash, file_size, content_type = compute_file_hash(S3_BUCKET_NAME, target_s3_key)
                 
                 # Store metadata in database
                 try:
@@ -168,6 +174,8 @@ def lambda_handler(event, _context):
                         room_id=room_id,
                         status=FileStatus.UPLOADED,
                         file_hash=file_hash,
+                        file_size=file_size,
+                        content_type=content_type,
                         file_metadata={},  # Initialize with empty metadata
                         created_at=datetime.now(timezone.utc),
                         updated_at=datetime.now(timezone.utc),

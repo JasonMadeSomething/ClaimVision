@@ -1,4 +1,4 @@
-from sqlalchemy import String, ForeignKey, UUID, JSON, Enum, Boolean, DateTime, UniqueConstraint
+from sqlalchemy import String, ForeignKey, UUID, JSON, Enum, Boolean, DateTime, UniqueConstraint, Integer
 from sqlalchemy.orm import Mapped, relationship, mapped_column
 import uuid
 from datetime import datetime, timezone
@@ -29,7 +29,9 @@ class File(Base):
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.UPLOADED, index=True)
     claim_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("claims.id"), nullable=True, index=True)
-    file_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # Restored metadata field
+    file_metadata: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # For any additional metadata
+    content_type: Mapped[str | None] = mapped_column(String, nullable=True)  # MIME type of the file
+    file_size: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Size in bytes
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -59,6 +61,8 @@ class File(Base):
             "status": self.status.value,
             "claim_id": str(self.claim_id) if self.claim_id else None,
             "file_metadata": self.file_metadata,
+            "content_type": self.content_type,
+            "file_size": self.file_size,
             "deleted": self.deleted,
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
             "created_at": self.created_at.isoformat(),
