@@ -99,7 +99,54 @@ Parameters:
     AllowedValues:
       - true
       - false
-    Description: "Enable Route53 + API Gateway domain setup"
+    Description: Enable DNS for Lambda functions
+
+  # Report Infrastructure Parameters
+  ReportsBucketName:
+    Type: String
+    Description: S3 bucket name for storing reports
+  ReportRequestQueueURL:
+    Type: String
+    Description: URL of the report request SQS queue
+  ReportRequestQueueARN:
+    Type: String
+    Description: ARN of the report request SQS queue
+  ReportRequestQueueName:
+    Type: String
+    Description: Name of the report request SQS queue
+  FileOrganizationQueueURL:
+    Type: String
+    Description: URL of the file organization SQS queue
+  FileOrganizationQueueARN:
+    Type: String
+    Description: ARN of the file organization SQS queue
+  FileOrganizationQueueName:
+    Type: String
+    Description: Name of the file organization SQS queue
+  EmailQueueURL:
+    Type: String
+    Description: URL of the email SQS queue for sending report notifications
+  EmailQueueARN:
+    Type: String
+    Description: ARN of the email SQS queue for sending report notifications
+  EmailQueueName:
+    Type: String
+    Description: Name of the email SQS queue for sending report notifications
+  EFSAccessPointARN:
+    Type: String
+    Description: ARN of the EFS access point for report files
+  EFSFileSystemId:
+    Type: String
+    Description: ID of the EFS file system for report files
+  SenderEmail:
+    Type: String
+    Description: Email address used for sending report notifications
+  DeliverReportQueueARN:
+    Type: String
+    Description: ARN of the deliver report SQS queue
+  DeliverReportQueueURL:
+    Type: String
+    Description: URL of the deliver report SQS queue
   HostedZoneId:
     Type: String
     Description: "Route 53 Hosted Zone ID"
@@ -109,6 +156,7 @@ Parameters:
   FrontendOrigin:
     Type: String
     Description: "Frontend origin URL"
+
 Conditions:
   IsDev: !Equals [!Ref Env, "dev"]
   HasVpc: 
@@ -1779,6 +1827,248 @@ Resources:
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
+
+  RequestReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: reports.request_report.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt ReportingLambdaRole.Arn
+      Environment:
+        Variables:
+          REPORT_REQUEST_QUEUE_URL: !Ref ReportRequestQueueURL
+          SENDER_EMAIL: !Ref SenderEmail
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/report
+            Method: post
+            RestApiId: !Ref ClaimVisionAPI
+            Auth:
+              Authorizer: JwtAuthorizer
+
+  AggregateReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: reports.aggregate_report.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt ReportingLambdaRole.Arn
+      Environment:
+        Variables:
+          REPORT_REQUEST_QUEUE_URL: !Ref ReportRequestQueueURL
+          FILE_ORGANIZATION_QUEUE_URL: !Ref FileOrganizationQueueURL
+          REPORTS_BUCKET_NAME: !Ref ReportsBucketName
+          SENDER_EMAIL: !Ref SenderEmail
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref ReportRequestQueueARN
+            BatchSize: 1
+            Enabled: true
+            
+  OrganizeReportFilesFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: reports.organize_report_files.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt ReportingLambdaRole.Arn
+      Environment:
+        Variables:
+          FILE_ORGANIZATION_QUEUE_URL: !Ref FileOrganizationQueueURL
+          S3_BUCKET_NAME: !Ref S3BucketName
+          EFS_ACCESS_POINT_ARN: !Ref EFSAccessPointARN
+          EFS_FILE_SYSTEM_ID: !Ref EFSFileSystemId
+          SENDER_EMAIL: !Ref SenderEmail
+          DELIVER_REPORT_QUEUE_URL: !Ref DeliverReportQueueURL
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      FileSystemConfigs:
+        - Arn: !Ref EFSAccessPointARN
+          LocalMountPath: /mnt/reports
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref FileOrganizationQueueARN
+            BatchSize: 1
+            Enabled: true
+
+  ReportZipperFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: reports.report_zipper.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt ReportingLambdaRole.Arn
+      Environment:
+        Variables:
+          REPORTS_BUCKET_NAME: !Ref ReportsBucketName
+          EMAIL_QUEUE_URL: !Ref EmailQueueURL
+          EFS_ACCESS_POINT_ARN: !Ref EFSAccessPointARN
+          EFS_FILE_SYSTEM_ID: !Ref EFSFileSystemId
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      FileSystemConfigs:
+        - Arn: !Ref EFSAccessPointARN
+          LocalMountPath: /mnt/reports
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref DeliverReportQueueARN
+            BatchSize: 1
+            Enabled: true
+
+  EmailReportFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: reports.email_report.lambda_handler
+      Runtime: python3.12
+      Role: !GetAtt EmailReportLambdaRole.Arn
+      Environment:
+        Variables:
+          SENDER_EMAIL: !Ref SenderEmail
+      VpcConfig: !Ref AWS::NoValue
+      Events:
+        SQSTrigger:
+          Type: SQS
+          Properties:
+            Queue: !Ref EmailQueueARN
+            BatchSize: 1
+            Enabled: true
+## FIX THESE POLICIES!!!!! TODO: FINDME !!!!!!
+  ReportingLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+        - !If
+          - HasVpc
+          - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+          - !Ref AWS::NoValue
+      Policies:
+        - PolicyName: ReportingLambdasPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - sqs:SendMessage
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !Ref FileOrganizationQueueARN
+                  - !Ref ReportRequestQueueARN
+                  - !Ref DeliverReportQueueARN
+                  - !Ref EmailQueueARN
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                  - s3:HeadObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${ReportsBucketName}/*"
+                  - !Sub "arn:aws:s3:::${ReportsBucketName}"
+                  - !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
+                  - !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}"
+              - Effect: Allow
+                Action:
+                  - elasticfilesystem:ClientMount
+                  - elasticfilesystem:ClientWrite
+                  - elasticfilesystem:ClientRootAccess
+                Resource: '*'
+        - !If
+          - HasVpc
+          - PolicyName: VPCAccessPolicy
+            PolicyDocument:
+              Version: '2012-10-17'
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - ec2:CreateNetworkInterface
+                    - ec2:DescribeNetworkInterfaces
+                    - ec2:DeleteNetworkInterface
+                    - ec2:AssignPrivateIpAddresses
+                    - ec2:UnassignPrivateIpAddresses
+                  Resource: '*'
+          - !Ref AWS::NoValue
+
+  EmailReportLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: EmailReportLambdaPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: arn:aws:logs:*:*:*
+              - Effect: Allow
+                Action:
+                  - sqs:ReceiveMessage
+                  - sqs:DeleteMessage
+                  - sqs:GetQueueAttributes
+                Resource:
+                  - !Ref EmailQueueARN
+              - Effect: Allow
+                Action:
+                  - ses:SendEmail
+                  - ses:SendRawEmail
+                Resource: '*'
 
   APICertificate:
     Type: AWS::CertificateManager::Certificate
