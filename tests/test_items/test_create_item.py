@@ -25,7 +25,7 @@ def test_create_item_with_details(api_gateway_event, test_db, seed_claim):
     payload = {
         "name": "Test Item",
         "description": "A sample item",
-        "estimated_value": 250.00,
+        "unit_cost": 250.00,
         "condition": "New"
     }
 

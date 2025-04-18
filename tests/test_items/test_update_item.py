@@ -24,7 +24,7 @@ def test_update_item_multiple_properties(api_gateway_event, test_db, seed_item):
     payload = {
         "name": "Multi-Updated Item",
         "description": "This is an updated description",
-        "estimated_value": 299.99,
+        "unit_cost": 299.99,
         "condition": "Good"
     }
     event = api_gateway_event("PATCH", path_params={"item_id": str(item_id)}, body=json.dumps(payload), auth_user=str(user_id))
@@ -40,7 +40,7 @@ def test_update_item_multiple_properties(api_gateway_event, test_db, seed_item):
     item_data = json.loads(get_response["body"])["data"]
     assert item_data["name"] == "Multi-Updated Item"
     assert item_data["description"] == "This is an updated description"
-    assert item_data["estimated_value"] == 299.99
+    assert item_data["unit_cost"] == 299.99
     assert item_data["condition"] == "Good"
 
 def test_update_item_no_auth(api_gateway_event, test_db, seed_item):

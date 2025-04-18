@@ -379,7 +379,7 @@ def seed_item(test_db: Session, seed_claim):
     item_id = uuid.uuid4()
     household_id = uuid.uuid4()
     test_household = Household(id=household_id, name="Test Household")
-    test_item = Item(id=item_id, claim_id=claim_id, name="Test Item", description="A sample item", estimated_value=100.00)
+    test_item = Item(id=item_id, claim_id=claim_id, name="Test Item", description="A sample item", unit_cost=100.00)
     test_db.add_all([test_household, test_item])
     test_db.commit()
 
@@ -393,7 +393,7 @@ def seed_multiple_items(test_db: Session, seed_claim):
 
     for _ in range(3):
         item_id = uuid.uuid4()
-        test_item = Item(id=item_id, claim_id=claim_id, name=f"Test Item {_}", description="A sample item", estimated_value=100.00)
+        test_item = Item(id=item_id, claim_id=claim_id, name=f"Test Item {_}", description="A sample item", unit_cost=100.00)
         test_db.add_all([test_item])
         item_ids.append(item_id)
 

@@ -35,7 +35,7 @@ def test_get_item_with_labels(api_gateway_event, test_db, seed_claim):
         claim_id=claim_id,
         name="Item with Labels",
         description="Item with label associations",
-        estimated_value=150.00,
+        unit_cost=150.00,
         condition="Good"
     )
     test_db.add(item)
@@ -92,7 +92,7 @@ def test_get_item_with_labels(api_gateway_event, test_db, seed_claim):
     assert body["data"]["id"] == str(item_id)
     assert body["data"]["name"] == "Item with Labels"
     assert body["data"]["description"] == "Item with label associations"
-    assert body["data"]["estimated_value"] == 150.00
+    assert body["data"]["unit_cost"] == 150.00
     assert body["data"]["condition"] == "Good"
     
     # Verify labels
