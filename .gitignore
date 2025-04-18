@@ -103,3 +103,4 @@ terraform/.terraform.lock.hcl
 .windsurfrules
 .windsurfrules
 scripts/config.json
+terraform/tfplan
