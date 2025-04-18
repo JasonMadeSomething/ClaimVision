@@ -221,28 +221,3 @@ resource "aws_sqs_queue" "email_queue" {
     Environment = var.env
   }
 }
-
-resource "aws_sqs_queue_policy" "email_queue_policy" {
-  queue_url = aws_sqs_queue.email_queue.id
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Id      = "EmailQueuePolicy"
-    Statement = [
-      {
-        Sid       = "AllowSendMessage"
-        Effect    = "Allow"
-        Principal = {
-          AWS = "*"
-        }
-        Action    = "sqs:SendMessage"
-        Resource  = aws_sqs_queue.email_queue.arn
-        Condition = {
-          ArnLike = {
-            "aws:SourceArn" = "arn:aws:lambda:us-east-1:${var.aws_account_id}:function:*"
-          }
-        }
-      }
-    ]
-  })
-}
