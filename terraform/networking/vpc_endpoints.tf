@@ -63,7 +63,8 @@ resource "aws_vpc_endpoint" "sqs" {
           "arn:aws:sqs:us-east-1:337214855826:claimvision-cognito-update-queue",
           "arn:aws:sqs:us-east-1:337214855826:claimvision-report-request-queue-dev",
           "arn:aws:sqs:us-east-1:337214855826:claimvision-file-organization-queue-dev",
-          "arn:aws:sqs:us-east-1:337214855826:claimvision-deliver-report-queue-dev"
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-deliver-report-queue-dev",
+          "arn:aws:sqs:us-east-1:337214855826:claimvision-email-queue-dev"
         ]
       }
     ]
