@@ -1,5 +1,6 @@
 from sqlalchemy.orm import Mapped, mapped_column
-from sqlalchemy import Enum, String, ForeignKey, DateTime, JSON
+from sqlalchemy import Enum, ForeignKey, DateTime, JSON
+from sqlalchemy.orm import relationship
 import uuid
 from uuid import UUID
 from datetime import datetime, timezone
@@ -20,7 +21,7 @@ class Permission(Base):
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid.uuid4)
     subject_type: Mapped[str] = mapped_column(Enum("user", "group", name="policy_subject_enum"), nullable=False)
     subject_id: Mapped[UUID] = mapped_column(nullable=False)  # not a FK to support polymorphic subject
-    resource_type: Mapped[str] = mapped_column(String, nullable=False)  # e.g. 'claim', 'file'
+    resource_type_id: Mapped[str] = mapped_column(ForeignKey("resource_types.id"), nullable=False)
     resource_id: Mapped[UUID] = mapped_column(nullable=False)
     action: Mapped[PermissionAction] = mapped_column(Enum(PermissionAction, native_enum=False))
     conditions: Mapped[dict] = mapped_column(JSON, nullable=True)
@@ -29,3 +30,4 @@ class Permission(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+    resource_type = relationship("ResourceType", back_populates="permissions")
