@@ -20,6 +20,7 @@ class Item(Base):
     condition = Column(String, nullable=True)  # (New, Good, Average, Bad, etc.)
     is_ai_suggested = Column(Boolean, default=False)
     room_id = Column(UUID, ForeignKey("rooms.id"), nullable=True)
+    group_id = Column(UUID, ForeignKey("groups.id"), nullable=False, index=True)
     
     # Additional fields for reporting
     brand_manufacturer = Column(String, nullable=True)
@@ -37,6 +38,7 @@ class Item(Base):
     claim = relationship("Claim", back_populates="items")
     files = relationship("File", secondary="item_files", back_populates="items")
     room = relationship("Room", back_populates="items")
+    group = relationship("Group", back_populates="items")
     
     def to_dict(self):
         """

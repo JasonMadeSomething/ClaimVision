@@ -11,13 +11,13 @@ class Label(Base):
     label_text: Mapped[str] = Column(String, nullable=False, )  
     is_ai_generated: Mapped[bool] = Column(Boolean, nullable=False, default=False)
     deleted: Mapped[bool] = Column(Boolean, nullable=False, default=False)
-    household_id: Mapped[uuid.UUID] = Column(UUID, ForeignKey("households.id"), nullable=False)  # ✅ Enforces ownership
-    household = relationship("Household")
+    group_id: Mapped[uuid.UUID] = Column(UUID, ForeignKey("groups.id"), nullable=False)
+    group = relationship("Group")
 
     files = relationship("File", secondary="file_labels", back_populates="labels")
 
     __table_args__ = (
-        UniqueConstraint('label_text', 'is_ai_generated', 'household_id', name='label_text_is_ai_generated_unique'),
+        UniqueConstraint('label_text', 'is_ai_generated', 'group_id', name='label_text_is_ai_generated_unique'),
     )
     def to_dict(self):
         return {

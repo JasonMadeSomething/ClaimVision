@@ -16,15 +16,13 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     first_name: Mapped[str] = mapped_column(String, nullable=False)
     last_name: Mapped[str] = mapped_column(String, nullable=False)
-    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False, index=True)
-    
-    household = relationship("Household", back_populates="users")
+
+    group = relationship("Group", back_populates="users")
 
     def to_dict(self):
         return {
             "id": str(self.id),
             "email": self.email,
             "first_name": self.first_name,
-            "last_name": self.last_name,
-            "household_id": str(self.household_id)
+            "last_name": self.last_name
         }

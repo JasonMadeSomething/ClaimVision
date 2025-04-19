@@ -24,7 +24,7 @@ class File(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
     uploaded_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False, index=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("groups.id"), nullable=False)
     file_name: Mapped[str] = mapped_column(String, nullable=False)
     s3_key: Mapped[str] = mapped_column(String, nullable=False)
     status: Mapped[FileStatus] = mapped_column(Enum(FileStatus), default=FileStatus.UPLOADED, index=True)
@@ -38,7 +38,7 @@ class File(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     file_hash: Mapped[str] = mapped_column(String, nullable=False, default="")
     room_id: Mapped[uuid.UUID | None] = mapped_column(UUID, ForeignKey("rooms.id"), nullable=True)
-    household = relationship("Household")
+    group = relationship("Group")
     user = relationship("User")
     claim = relationship("Claim", back_populates="files")
     items = relationship("Item", secondary="item_files", back_populates="files")
@@ -55,7 +55,7 @@ class File(Base):
         return {
             "id": str(self.id),
             "uploaded_by": str(self.uploaded_by),
-            "household_id": str(self.household_id),
+            "group_id": str(self.group_id),
             "file_name": self.file_name,
             "s3_key": self.s3_key,
             "status": self.status.value,

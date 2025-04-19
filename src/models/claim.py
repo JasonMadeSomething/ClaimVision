@@ -18,7 +18,7 @@ class Claim(Base):
     __tablename__ = "claims"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False, index=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("groups.id"), nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
     date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now(timezone.utc), index=True)  # Added index for date queries
@@ -27,7 +27,7 @@ class Claim(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
-    household = relationship("Household", back_populates="claims")
+    group = relationship("Group", back_populates="claims")
     files = relationship("File", back_populates="claim")
     items = relationship("Item", back_populates="claim", cascade="all, delete-orphan")
     rooms = relationship("Room", back_populates="claim", cascade="all, delete-orphan")
@@ -35,13 +35,13 @@ class Claim(Base):
     __table_args__ = (
         # Create a composite unique constraint on title and deleted per household
         # This allows the same title to exist if one is deleted and one is not
-        UniqueConstraint('title', 'deleted', 'household_id', name='uq_title_deleted_household'),
+        UniqueConstraint('title', 'deleted', 'group_id', name='uq_title_deleted_group'),
     )
 
     def to_dict(self):
         return {
             "id": str(self.id),
-            "household_id": str(self.household_id),
+            "group_id": str(self.group_id),
             "title": self.title,
             "description": self.description,
             "date_of_loss": self.date_of_loss.isoformat(),

@@ -29,7 +29,7 @@ class Report(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    household_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("households.id"), nullable=False, index=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("groups.id"), nullable=False, index=True)
     claim_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("claims.id"), nullable=False, index=True)
     
     status: Mapped[str] = mapped_column(
@@ -61,7 +61,7 @@ class Report(Base):
     
     # Relationships
     user = relationship("User", backref="reports")
-    household = relationship("Household", backref="reports")
+    group = relationship("Group", backref="reports")
     claim = relationship("Claim", backref="reports")
     
     def to_dict(self):
@@ -71,7 +71,7 @@ class Report(Base):
         return {
             "id": str(self.id),
             "user_id": str(self.user_id),
-            "household_id": str(self.household_id),
+            "group_id": str(self.group_id),
             "claim_id": str(self.claim_id),
             "status": self.status,
             "report_type": self.report_type,
