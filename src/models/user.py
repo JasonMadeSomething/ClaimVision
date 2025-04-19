@@ -16,8 +16,9 @@ class User(Base):
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False, index=True)
     first_name: Mapped[str] = mapped_column(String, nullable=False)
     last_name: Mapped[str] = mapped_column(String, nullable=False)
+    cognito_sub: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
-    group = relationship("Group", back_populates="users")
+    memberships: Mapped[list["GroupMembership"]] = relationship("GroupMembership", back_populates="user")
 
     def to_dict(self):
         return {

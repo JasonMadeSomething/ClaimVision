@@ -23,5 +23,7 @@ class Group(Base):
     group_type: Mapped["GroupType"] = relationship("GroupType", back_populates="groups")
     created_by: Mapped[UUID] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    items: Mapped[list["Item"]] = relationship("Item", back_populates="group") # noqa: F821
+    claims: Mapped[list["Claim"]] = relationship("Claim", back_populates="group") # noqa: F821
 
     members: Mapped[list[GroupMembership]] = relationship("GroupMembership", back_populates="group")

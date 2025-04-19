@@ -1,6 +1,5 @@
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base
-from models.group import Group
 from sqlalchemy.orm import relationship
 
 class GroupIdentity(Base):
@@ -15,4 +14,3 @@ class GroupIdentity(Base):
     label: Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    groups: Mapped[list[Group]] = relationship("Group", back_populates="group_identities")
