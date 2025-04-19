@@ -15,7 +15,13 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-from models import Base, Household, Label
+from models import Base
+from models.group_types import GroupType
+from models.group_identities import GroupIdentity
+from models.group_roles import GroupRole
+from models.membership_statuses import MembershipStatus
+from models.resource_types import ResourceType
+from models.room import Room
 
 def get_database_url():
     """
@@ -49,48 +55,67 @@ def create_tables(engine):
     Base.metadata.create_all(engine)
     print("Tables created successfully.")
 
+def seed_vocab(session) -> None:
+    vocab_data = {
+        GroupType: [
+            {"id": "household", "label": "Household", "description": "A residential group or policyholder"},
+            {"id": "firm", "label": "Firm", "description": "Public adjusting or restoration company"},
+            {"id": "partner", "label": "Partner", "description": "Integration or business partner"},
+            {"id": "other", "label": "Other", "description": "Miscellaneous group type"},
+        ],
+        GroupIdentity: [
+            {"id": "homeowner", "label": "Homeowner"},
+            {"id": "adjuster", "label": "Adjuster"},
+            {"id": "contractor", "label": "Contractor"},
+            {"id": "other", "label": "Other"},
+        ],
+        GroupRole: [
+            {"id": "owner", "label": "Owner"},
+            {"id": "editor", "label": "Editor"},
+            {"id": "viewer", "label": "Viewer"},
+        ],
+        MembershipStatus: [
+            {"id": "invited", "label": "Invited"},
+            {"id": "active", "label": "Active"},
+            {"id": "revoked", "label": "Revoked"},
+        ],
+        ResourceType: [
+            {"id": "claim", "label": "Claim"},
+            {"id": "file", "label": "File"},
+            {"id": "item", "label": "Item"},
+            {"id": "label", "label": "Label"},
+            {"id": "room", "label": "Room"},
+            {"id": "report", "label": "Report"},
+        ],
+    }
+
+    for model, rows in vocab_data.items():
+        for row in rows:
+            existing = session.get(model, row["id"])
+            if not existing:
+                session.add(model(**row))
+
+    room_names = [
+        "Attic", "Auto", "Basement", "Bathroom", "Bedroom", "Closet", "Dining Room", "Entry", "Exterior",
+        "Family Room", "Foyer", "Game Room", "Garage", "Hall", "Kitchen", "Laundry Room", "Living Room",
+        "Primary Bathroom", "Primary Bedroom", "Mud Room", "Nursery", "Office", "Pantry", "Patio",
+        "Play Room", "Pool", "Porch", "Shop", "Storage", "Theater", "Utility Room", "Workout Room"
+    ]
+
+    for i, name in enumerate(room_names, start=1):
+        existing = session.query(Room).filter_by(name=name).first()
+        if not existing:
+            session.add(Room(name=name, sort_order=i, is_active=True))
+
+
 def create_default_data(session):
     """Create default data for the application."""
     print("Creating default data...")
-    
-    # Create default labels
-    default_labels = [
-        Label(label_text="Damaged", is_ai_generated=False),
-        Label(label_text="Destroyed", is_ai_generated=False),
-        Label(label_text="Repairable", is_ai_generated=False),
-        Label(label_text="Replacement Needed", is_ai_generated=False),
-        Label(label_text="High Value", is_ai_generated=False),
-        Label(label_text="Sentimental", is_ai_generated=False),
-        Label(label_text="Electronics", is_ai_generated=False),
-        Label(label_text="Furniture", is_ai_generated=False),
-        Label(label_text="Clothing", is_ai_generated=False),
-        Label(label_text="Jewelry", is_ai_generated=False),
-        Label(label_text="Appliance", is_ai_generated=False),
-        Label(label_text="Art", is_ai_generated=False),
-        Label(label_text="Antique", is_ai_generated=False),
-        Label(label_text="Collectible", is_ai_generated=False),
-        Label(label_text="Document", is_ai_generated=False),
-        Label(label_text="Receipt", is_ai_generated=False),
-        Label(label_text="Warranty", is_ai_generated=False),
-        Label(label_text="Insurance", is_ai_generated=False),
-        Label(label_text="Photo", is_ai_generated=False),
-        Label(label_text="Video", is_ai_generated=False)
-    ]
-    
-    # Create a default household for the labels
-    default_household = Household(
-        id=uuid.uuid4(),
-        name="Default Household"
-    )
-    session.add(default_household)
+    print("Seeding rooms...")
+    seed_vocab(session)
+
+
     session.flush()  # Flush to get the ID
-    
-    # Add labels to session
-    for label in default_labels:
-        existing_label = session.query(Label).filter_by(label_text=label.label_text).first()
-        if not existing_label:
-            label.household_id = default_household.id
-            session.add(label)
     
     # Commit changes
     session.commit()
