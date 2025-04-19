@@ -105,8 +105,6 @@ export default function WorkbenchLayout() {
           if (!Array.isArray(roomsJson?.data?.rooms)) {
             console.warn("Malformed rooms response:", roomsJson);
           }
-          setRooms(safeRooms);
-
           // Process items and associate them with their photos
           const safeItems = Array.isArray(itemsJson?.data?.items)
             ? itemsJson.data.items
@@ -144,7 +142,13 @@ export default function WorkbenchLayout() {
             // Map unit_cost from the API response
             if (item.unit_cost !== undefined) {
               item.unit_cost = parseFloat(item.unit_cost);
+            } else {
+              item.unit_cost = item.replacementValue || 0;
             }
+            
+            // Ensure roomId is properly set from the API response
+            // The backend stores room_id, but frontend uses roomId
+            item.roomId = item.room_id || null;
             
             return item;
           });
@@ -170,10 +174,51 @@ export default function WorkbenchLayout() {
             return photo;
           });
           
+          // Process rooms to populate itemIds arrays based on item room assignments
+          const processedRooms = safeRooms.map((room: any) => {
+            // Make sure itemIds is initialized as an array
+            if (!Array.isArray(room.itemIds)) {
+              room.itemIds = [];
+            }
+            
+            // Find all items assigned to this room
+            const roomItems = processedItems.filter((item: any) => 
+              item.room_id === room.id || item.roomId === room.id
+            );
+            
+            // Add item IDs to the room's itemIds array if not already present
+            roomItems.forEach((item: any) => {
+              if (!room.itemIds.includes(item.id)) {
+                room.itemIds.push(item.id);
+              }
+            });
+            
+            // Find all files assigned to this room
+            const roomFiles = processedPhotos.filter((photo: any) => 
+              photo.room_id === room.id || photo.roomId === room.id
+            );
+            
+            // Make sure fileIds is initialized as an array
+            if (!Array.isArray(room.fileIds)) {
+              room.fileIds = [];
+            }
+            
+            // Add file IDs to the room's fileIds array if not already present
+            roomFiles.forEach((photo: any) => {
+              if (!room.fileIds.includes(photo.id)) {
+                room.fileIds.push(photo.id);
+              }
+            });
+            
+            return room;
+          });
+          
           setItems(processedItems);
           setPhotos(processedPhotos);
+          setRooms(processedRooms);
           console.log("Photos set:", processedPhotos);
           console.log("Items set:", processedItems);
+          console.log("Rooms set:", processedRooms);
         } catch (err) {
           console.error("Error fetching claim data:", err);
           // Optional: Show toast or UI fallback state
@@ -211,7 +256,7 @@ export default function WorkbenchLayout() {
       return photo.roomId === selectedRoom.id;
     } else {
       // On main workbench, show photos not assigned to any room
-      return photo.roomId === null;
+      return !photo.roomId;
     }
   });
 
@@ -221,7 +266,8 @@ export default function WorkbenchLayout() {
       if (selectedRoom) {
         return item.roomId === selectedRoom.id;
       } else {
-        return item.roomId === null;
+        // On main workbench, show items not assigned to any room
+        return !item.roomId;
       }
     })
   : [];
@@ -243,7 +289,8 @@ export default function WorkbenchLayout() {
       thumbnailPhotoId: photoId || null,
       photoIds: photoId ? [photoId] : [],
       roomId: selectedRoom?.id || null,
-      replacementValue: 0,
+      unit_cost: 0,
+      quantity: 1
     };
     
     // Optimistically update the UI
@@ -312,7 +359,8 @@ export default function WorkbenchLayout() {
           thumbnailPhotoId: photoId || null, // Use the photoId we already have
           photoIds: photoId ? [photoId] : [],
           roomId: result.data.room_id,
-          replacementValue: result.data.unit_cost || 0 // Map unit_cost to replacementValue
+          unit_cost: result.data.unit_cost || 0, // Map unit_cost to replacementValue
+          quantity: 1
         };
         
         setItems(prevItems => prevItems.map(item => 
@@ -458,8 +506,15 @@ export default function WorkbenchLayout() {
       const requestBody = {
         name: updatedItem.name,
         description: updatedItem.description,
-        unit_cost: updatedItem.replacementValue, // Map replacementValue to unit_cost
-        room_id: updatedItem.roomId
+        unit_cost: updatedItem.unit_cost,
+        room_id: updatedItem.roomId,
+        brand_manufacturer: updatedItem.brand_manufacturer,
+        model_number: updatedItem.model_number,
+        original_vendor: updatedItem.original_vendor,
+        quantity: updatedItem.quantity,
+        age_years: updatedItem.age_years,
+        age_months: updatedItem.age_months,
+        condition: updatedItem.condition
       };
       
       console.log(`Updating item ${updatedItem.id} with data:`, requestBody);
@@ -771,88 +826,70 @@ export default function WorkbenchLayout() {
     }
   };
 
-  // Handle moving an item to a room
+  // Move an item to a room
   const handleMoveItemToRoom = async (itemId: string, roomId: string | null) => {
-    // Find the item
-    const item = items.find(i => i.id === itemId);
-    if (!item) return;
-    
-    // Get the previous room ID
-    const prevRoomId = item.roomId;
-    
-    // Update locally first for immediate feedback
-    const updatedItem = { ...item, roomId };
-    setItems(items.map(i => i.id === itemId ? updatedItem : i));
-
-    // If this was the selected item, update that too
-    if (selectedItem?.id === itemId) {
-      setSelectedItem(updatedItem);
-    }
-
-    // Update the rooms' itemIds arrays
-    const updatedRooms = rooms.map(room => {
-      // Remove the item from its previous room
-      if (prevRoomId === room.id) {
-        return {
-          ...room,
-          itemIds: room.itemIds ? room.itemIds.filter((id: string) => id !== itemId) : []
-        };
-      }
-      
-      // Add the item to its new room
-      if (roomId === room.id) {
-        return {
-          ...room,
-          itemIds: room.itemIds ? [...room.itemIds, itemId] : [itemId]
-        };
-      }
-      
-      // Return unchanged room
-      return room;
-    });
-    
-    setRooms(updatedRooms);
-    
-    // Log the action
-    console.log(`Item ${itemId} moved to room ${roomId || 'Main Workbench'}`);
-    
-    // Update on the server
-    if (!claimId || !user?.id_token) {
-      console.error("Cannot update room assignment: missing claim ID or auth token");
-      return;
-    }
-    
     try {
+      if (!claimId || !user?.id_token) {
+        console.error("Cannot move item: missing claim ID or auth token");
+        return;
+      }
+
+      // Optimistically update the UI
+      const updatedItems = items.map(item => 
+        item.id === itemId ? { ...item, roomId } : item
+      );
+      setItems(updatedItems);
+
+      // Update the selected item if it's the one being moved
+      if (selectedItem && selectedItem.id === itemId) {
+        setSelectedItem({ ...selectedItem, roomId });
+      }
+
+      // Update on the server
       const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
       const response = await fetch(`${baseUrl}/items/${itemId}`, {
-        method: 'PUT',
+        method: 'PATCH',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${user.id_token}`
         },
         body: JSON.stringify({
-          room_id: roomId // null will remove room association
+          room_id: roomId
         })
       });
-      
+
       if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Error updating item room assignment:", errorData);
-        
-        // Revert the local change if the server update failed
-        const revertedItems = items.map(i => i.id === itemId ? item : i);
-        setItems(revertedItems);
-        
-        if (selectedItem?.id === itemId) {
-          setSelectedItem(item);
-        }
-        
-        throw new Error(errorData.error_details || 'Failed to update item room assignment');
+        throw new Error('Failed to update item room');
+      }
+
+      console.log(`Item ${itemId} moved to room ${roomId || 'main workbench'}`);
+      
+      // Also update the room's itemIds array for proper tracking
+      if (roomId) {
+        // Add to new room
+        setRooms(prevRooms => prevRooms.map(room => 
+          room.id === roomId 
+            ? { ...room, itemIds: [...(room.itemIds || []), itemId] } 
+            : room
+        ));
       }
       
-      console.log("Item room assignment updated successfully on server");
+      // Remove from previous room if it was in one
+      const previousRoom = rooms.find(room => 
+        room.itemIds && room.itemIds.includes(itemId)
+      );
+      
+      if (previousRoom && previousRoom.id !== roomId) {
+        setRooms(prevRooms => prevRooms.map(room => 
+          room.id === previousRoom.id 
+            ? { ...room, itemIds: room.itemIds.filter(id => id !== itemId) } 
+            : room
+        ));
+      }
     } catch (error) {
-      console.error("Error updating item room assignment:", error);
+      console.error('Error moving item to room:', error);
+      // Revert optimistic update on error
+      // This would require keeping track of the previous state
     }
   };
 
@@ -1316,8 +1353,8 @@ export default function WorkbenchLayout() {
                     ? selectedRoom 
                       ? items.filter(item => item.roomId === selectedRoom.id)
                       : searchMode === SearchMode.Find && internalSearchTerm
-                        ? items
-                        : items
+                        ? items.filter(item => !item.roomId)
+                        : items.filter(item => !item.roomId)
                     : []
                 }
                 searchQuery={internalSearchTerm}

@@ -204,8 +204,8 @@ const Card: React.FC<CardProps> = ({
   // Get the description (items only)
   const description = isItem(data) ? data.description : '';
 
-  // Get the replacement value (items only)
-  const replacementValue = isItem(data) ? data.replacementValue : null;
+  // Get the unit cost (items only)
+  const unitCost = isItem(data) ? data.unit_cost : null;
 
   return (
     <div
@@ -341,9 +341,9 @@ const Card: React.FC<CardProps> = ({
             {description && (
               <p className="text-sm text-gray-600 mb-2 line-clamp-2">{description}</p>
             )}
-            {replacementValue !== null && replacementValue !== undefined && (
+            {unitCost !== null && unitCost !== undefined && (
               <p className="text-sm font-medium text-gray-900">
-                Value: ${Number(replacementValue).toFixed(2)}
+                Unit Cost: ${Number(unitCost).toFixed(2)}
               </p>
             )}
           </>

@@ -105,7 +105,20 @@ const RoomButton = ({
         <span className="mr-2">{roomType.icon}</span>
         <span className="flex-grow">{room.name}</span>
         <span className="ml-2 text-xs text-gray-500">
-          ({(room.itemIds?.length || 0) + (room.fileIds?.length || 0)})
+          {room.itemIds?.length > 0 && (
+            <span>
+              {room.itemIds.length} items
+            </span>
+          )}
+          {room.fileIds && room.fileIds.length > 0 && (
+            <span>
+              {room.fileIds.length} files
+            </span>
+          )}
+          {(!room.itemIds || room.itemIds.length === 0) && 
+           (!room.fileIds || room.fileIds.length === 0) && (
+            <span>Empty</span>
+          )}
         </span>
       </button>
       

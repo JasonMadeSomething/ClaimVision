@@ -282,15 +282,109 @@ export default function ItemDetailsPanel({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Replacement Value ($)
+              Unit Cost ($)
             </label>
             <EditableField
-              value={item.replacementValue?.toString() || ''}
-              onSave={(value) => handleUpdateField('replacementValue', Number(value))}
-              placeholder="Enter value"
+              value={item.unit_cost?.toString() || ''}
+              onSave={(value) => handleUpdateField('unit_cost', Number(value))}
+              placeholder="Enter unit cost"
               validate={validateValue}
-              data-testid="value-field"
+              data-testid="unit-cost-field"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Quantity
+            </label>
+            <EditableField
+              value={item.quantity?.toString() || '1'}
+              onSave={(value) => handleUpdateField('quantity', Number(value))}
+              placeholder="Enter quantity"
+              validate={validateValue}
+              data-testid="quantity-field"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Brand/Manufacturer
+            </label>
+            <EditableField
+              value={item.brand_manufacturer || ''}
+              onSave={(value) => handleUpdateField('brand_manufacturer', value)}
+              placeholder="Enter brand or manufacturer"
+              data-testid="brand-field"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Model Number
+            </label>
+            <EditableField
+              value={item.model_number || ''}
+              onSave={(value) => handleUpdateField('model_number', value)}
+              placeholder="Enter model number"
+              data-testid="model-field"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Original Vendor
+            </label>
+            <EditableField
+              value={item.original_vendor || ''}
+              onSave={(value) => handleUpdateField('original_vendor', value)}
+              placeholder="Enter original vendor"
+              data-testid="vendor-field"
+            />
+          </div>
+
+          <div className="flex space-x-4">
+            <div className="w-1/2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Age (Years)
+              </label>
+              <EditableField
+                value={item.age_years?.toString() || ''}
+                onSave={(value) => handleUpdateField('age_years', Number(value))}
+                placeholder="Years"
+                validate={validateValue}
+                data-testid="age-years-field"
+              />
+            </div>
+            <div className="w-1/2">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Age (Months)
+              </label>
+              <EditableField
+                value={item.age_months?.toString() || ''}
+                onSave={(value) => handleUpdateField('age_months', Number(value))}
+                placeholder="Months"
+                validate={validateValue}
+                data-testid="age-months-field"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Condition
+            </label>
+            <select
+              value={item.condition || ''}
+              onChange={(e) => handleUpdateField('condition', e.target.value)}
+              className="w-full p-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              data-testid="condition-select"
+            >
+              <option value="">Select condition</option>
+              <option value="New">New</option>
+              <option value="Good">Good</option>
+              <option value="Average">Average</option>
+              <option value="Bad">Bad</option>
+            </select>
           </div>
 
           <div>

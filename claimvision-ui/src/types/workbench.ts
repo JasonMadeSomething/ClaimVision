@@ -20,8 +20,15 @@ export interface Item {
   thumbnailPhotoId: string | null;
   photoIds: string[];
   roomId: string | null;
-  replacementValue: number;
-  unit_cost?: number;
+  unit_cost: number;
+  brand_manufacturer?: string;
+  model_number?: string;
+  original_vendor?: string;
+  quantity: number;
+  age_years?: number;
+  age_months?: number;
+  condition?: string;
+  is_ai_suggested?: boolean;
 }
 
 export interface Room {
