@@ -96,8 +96,28 @@ def lambda_handler(event, _context, db_session=None):
             item.condition = body["condition"]
             item_updated = True
             
-        if "is_ai_suggested" in body:
-            item.is_ai_suggested = body["is_ai_suggested"]
+        if "brand_manufacturer" in body:
+            item.brand_manufacturer = body["brand_manufacturer"]
+            item_updated = True
+            
+        if "model_number" in body:
+            item.model_number = body["model_number"]
+            item_updated = True
+            
+        if "original_vendor" in body:
+            item.original_vendor = body["original_vendor"]
+            item_updated = True
+            
+        if "quantity" in body:
+            item.quantity = body["quantity"]
+            item_updated = True
+            
+        if "age_years" in body:
+            item.age_years = body["age_years"]
+            item_updated = True
+            
+        if "age_months" in body:
+            item.age_months = body["age_months"]
             item_updated = True
             
         # Handle room_id updates
@@ -146,6 +166,12 @@ def lambda_handler(event, _context, db_session=None):
             "unit_cost": item.unit_cost,
             "condition": item.condition,
             "is_ai_suggested": item.is_ai_suggested,
+            "brand_manufacturer": item.brand_manufacturer,
+            "model_number": item.model_number,
+            "original_vendor": item.original_vendor,
+            "quantity": item.quantity,
+            "age_years": item.age_years,
+            "age_months": item.age_months,
             "claim_id": str(item.claim_id)
         }
         
