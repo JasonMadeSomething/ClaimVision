@@ -187,7 +187,7 @@ Globals:
       - !Ref AWS::NoValue
   Api:
     Auth:
-      DefaultAuthorizer: JwtAuthorizer
+      DefaultAuthorizer: CognitoAuthorizer
       AddDefaultAuthorizerToCorsPreflight: false
 
 Resources:
@@ -497,6 +497,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - cognito-idp:SignUp
+                  - cognito-idp:AdminGetUser
                 Resource: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
         - PolicyName: SQSAccess
           PolicyDocument:
@@ -515,14 +516,11 @@ Resources:
       Name: !Sub ClaimVisionAPI-${Env}
       StageName: dev
       Auth:
-        DefaultAuthorizer: JwtAuthorizer
+        DefaultAuthorizer: CognitoAuthorizer
         AddDefaultAuthorizerToCorsPreflight: false
         Authorizers:
-          JwtAuthorizer:
-            FunctionArn: !GetAtt JwtAuthorizerFunction.Arn
-            Identity:
-              Header: Authorization
-              ReauthorizeEvery: 0
+          CognitoAuthorizer:
+            UserPoolArn: !Sub arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${CognitoUserPoolId}
 
   ###Lambdas###
 
@@ -544,29 +542,6 @@ Resources:
             Auth:
               Authorizer: NONE
   ##Auth##
-  # JWT Authorizer Function
-  JwtAuthorizerFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      FunctionName: claimvision-jwt-authorizer
-      Handler: auth.lambda_authorizer.lambda_handler
-      Runtime: python3.12
-      CodeUri: src/
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Policies:
-        - AWSLambdaBasicExecutionRole
-      Timeout: 5
-      Environment:
-        Variables:
-          COGNITO_USER_POOL_CLIENT_ID: !If
-            - IsDev
-            - !ImportValue CognitoUserPoolClientId-dev
-            - !ImportValue CognitoUserPoolClientId-prod
-          COGNITO_USER_POOL_ID: !If
-            - IsDev
-            - !ImportValue CognitoUserPoolId-dev
-            - !ImportValue CognitoUserPoolId-prod
-      VpcConfig: !Ref AWS::NoValue
   # Login Function
   LoginFunction:
     Type: AWS::Serverless::Function
@@ -795,8 +770,7 @@ Resources:
             Path: /claims
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Create Claim Function
   CreateClaimFunction:
@@ -824,8 +798,7 @@ Resources:
             Path: /claims
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Get Claim Function
   GetClaimFunction:
@@ -853,8 +826,7 @@ Resources:
             Path: /claims/{claim_id}
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Update Claim Function
   UpdateClaimFunction:
@@ -882,8 +854,7 @@ Resources:
             Path: /claims/{claim_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Delete Claim Function
   DeleteClaimFunction:
@@ -911,8 +882,7 @@ Resources:
             Path: /claims/{claim_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Create Item Function
   CreateItemFunction:
@@ -940,8 +910,7 @@ Resources:
             Path: /claims/{claim_id}/items
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
   # Get Items Function
   GetItemsFunction:
     Type: AWS::Serverless::Function
@@ -968,8 +937,7 @@ Resources:
             Path: /claims/{claim_id}/items
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Get Item Function
   GetItemFunction:
@@ -997,8 +965,7 @@ Resources:
             Path: /items/{item_id}
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Update Item Function
   UpdateItemFunction:
@@ -1026,8 +993,7 @@ Resources:
             Path: /items/{item_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Delete Item Function
   DeleteItemFunction:
@@ -1055,8 +1021,7 @@ Resources:
             Path: /items/{item_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
 
   # Associate File with Item Function
@@ -1085,8 +1050,7 @@ Resources:
             Path: /items/{item_id}/files
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
 
   # Inherit Labels from File Function
@@ -1115,8 +1079,7 @@ Resources:
             Path: /items/{item_id}/inherit/{file_id}
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
 
   # Manage Item Labels Function
@@ -1145,8 +1108,7 @@ Resources:
             Path: /items/{item_id}/labels
             Method: PATCH
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Create Label Function
   CreateLabelFunction:
@@ -1174,8 +1136,7 @@ Resources:
             Path: /files/{file_id}/labels
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Get Labels Function
   GetLabelsFunction:
@@ -1203,8 +1164,7 @@ Resources:
             Path: /files/{file_id}/labels
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
 
   # Delete Label Function
@@ -1233,8 +1193,7 @@ Resources:
             Path: /files/{file_id}/labels/{label_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Remove Label Function
   RemoveLabelFunction:
@@ -1262,8 +1221,7 @@ Resources:
             Path: /files/{file_id}/labels/{label_id}/remove
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Restore Label Function
   RestoreLabelFunction:
@@ -1291,8 +1249,7 @@ Resources:
             Path: /files/{file_id}/labels/{label_id}/restore
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Room Functions
   # Create Room Function
@@ -1321,8 +1278,7 @@ Resources:
             Path: /claims/{claim_id}/rooms
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
   # Get Rooms Function
   GetRoomsFunction:
     Type: AWS::Serverless::Function
@@ -1349,8 +1305,7 @@ Resources:
             Path: /claims/{claim_id}/rooms
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Get Room Function
   GetRoomFunction:
@@ -1378,8 +1333,7 @@ Resources:
             Path: /claims/{claim_id}/rooms/{room_id}
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Update Room Function
   UpdateRoomFunction:
@@ -1407,8 +1361,7 @@ Resources:
             Path: /claims/{claim_id}/rooms/{room_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Delete Room Function
   DeleteRoomFunction:
@@ -1436,8 +1389,7 @@ Resources:
             Path: /claims/{claim_id}/rooms/{room_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   ##Admin##
   # Get Users Function
@@ -1478,8 +1430,7 @@ Resources:
             Path: /admin/users
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Update User Role Function
   UpdateUserRoleFunction:
@@ -1525,8 +1476,7 @@ Resources:
             Path: /admin/users/{username}/role
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Get Files Function (Paginated)
   GetFilesFunction:
@@ -1566,16 +1516,14 @@ Resources:
             Path: /files
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
         GetFilesByClaimAPI:
           Type: Api
           Properties:
             Path: /claims/{claim_id}/files
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Get Single File Metadata Function
   GetFileFunction:
@@ -1617,8 +1565,7 @@ Resources:
             Path: /files/{file_id}
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Update File Metadata Function (PATCH)
   UpdateFileMetadataFunction:
@@ -1646,8 +1593,7 @@ Resources:
             Path: /files/{file_id}
             Method: PATCH
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Replace File Function (PUT)
   ReplaceFileFunction:
@@ -1679,8 +1625,7 @@ Resources:
             Path: /files/{file_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   # Delete File Function
   DeleteFileFunction:
@@ -1711,8 +1656,7 @@ Resources:
             Path: /files/{file_id}
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
     Policies:
       - AWSLambdaBasicExecutionRole
       - Statement:
@@ -1746,8 +1690,7 @@ Resources:
             Path: /claims/{claim_id}/files/upload
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
       Environment:
         Variables:
           DB_USERNAME: !Ref DBUsername
@@ -1851,8 +1794,7 @@ Resources:
             Path: /claims/{claim_id}/report
             Method: post
             RestApiId: !Ref ClaimVisionAPI
-            Auth:
-              Authorizer: JwtAuthorizer
+
 
   AggregateReportFunction:
     Type: AWS::Serverless::Function

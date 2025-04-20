@@ -25,14 +25,6 @@ Resources:
           RequireSymbols: false
       AutoVerifiedAttributes:
         - email
-      Schema:
-        - Name: household_id
-          AttributeDataType: String  # Store as a String
-          Mutable: true
-          Required: false
-          DeveloperOnlyAttribute: false
-      # Removing the Lambda configuration to eliminate circular dependency
-      # and rely on the update_cognito_attributes function instead
 
   # Cognito App Client
   CognitoUserPoolClient:
@@ -58,10 +50,9 @@ Resources:
         - "http://localhost:3000"
       WriteAttributes:
         - email
-        - custom:household_id
       ReadAttributes:
         - email
-        - custom:household_id
+
 Outputs:
   CognitoUserPoolId:
     Description: "Cognito User Pool ID"
