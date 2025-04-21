@@ -1,133 +1,37 @@
 import json
 import boto3
 import os
-import jwt
 from utils import response
-# Import for future database operations
-from utils.database import get_database_url  # noqa
-from botocore.exceptions import ClientError
 
-def get_cognito_client() -> boto3.client:
-    """
-    Get an AWS Cognito client for user authentication.
+cognito = boto3.client("cognito-idp")
 
-    Returns:
-        boto3.client: A Cognito IDP client for handling authentication.
-    """
-    return boto3.client("cognito-idp", region_name=os.getenv("AWS_REGION", "us-east-1"))
+COGNITO_USER_POOL_CLIENT_ID = os.environ["COGNITO_USER_POOL_CLIENT_ID"]
 
-def lambda_handler(event: dict, _context: dict) -> dict:
-    """
-    Handles user login using AWS Cognito.
-
-    Args:
-        event (dict): API Gateway event containing the request body.
-        context (dict): Lambda execution context (unused).
-
-    Returns:
-        dict: API response with authentication tokens or an error message.
-    """
-    # Parse the request body
+def lambda_handler(event, context):
     try:
-        body = json.loads(event.get("body", "{}"))
-    except json.JSONDecodeError:
-        return response.api_response(400, error_details="Invalid request format")
-    
-    # Validate required fields
-    username = body.get("username")
-    password = body.get("password")
+        body = json.loads(event["body"])
+        email = body["email"].lower()
+        password = body["password"]
 
-    if not username or not password:
-        missing_fields = []
-        if not username:
-            missing_fields.append("username")
-        if not password:
-            missing_fields.append("password")
-        return response.api_response(400, missing_fields=missing_fields)
-    
-    # Get Cognito client
-    cognito_client = get_cognito_client()
-    
-    # Authenticate with Cognito
-    try:
-        # Authenticate the user with Cognito
-        cognito_response = cognito_client.initiate_auth(
-            ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
+        # Authenticate the user
+        auth_response = cognito.initiate_auth(
+            ClientId=COGNITO_USER_POOL_CLIENT_ID,
             AuthFlow="USER_PASSWORD_AUTH",
             AuthParameters={
-                "USERNAME": username,
-                "PASSWORD": password
-            }
+                "USERNAME": email,
+                "PASSWORD": password,
+            },
         )
-        
-        # Try to extract user_id and household_id from the token
-        user_id = None
-        household_id = None
-        try:
-            # Decode the ID token to extract user_id and household_id
-            id_token = cognito_response["AuthenticationResult"]["IdToken"]
-            if isinstance(id_token, str):
-                id_token = id_token.encode('utf-8')
-            decoded_token = jwt.decode(id_token, options={"verify_signature": False})
-            
-            # Extract user_id (sub) from the token
-            user_id = decoded_token.get("sub")
-            
-            # Extract household_id from the ID token
-            # In ID tokens, custom attributes are in the format "custom:attribute_name"
-            household_id = decoded_token.get("custom:household_id")
-            
-            # If household_id is not in the token, get it from Cognito user attributes
-            if not household_id and user_id:
-                user_attributes = cognito_client.admin_get_user(
-                    UserPoolId=os.getenv("COGNITO_USER_POOL_ID"),
-                    Username=username
-                )
-                
-                # Extract household_id from user attributes
-                for attr in user_attributes.get("UserAttributes", []):
-                    if attr["Name"] == "custom:household_id":
-                        household_id = attr["Value"]
-                        break
-        except (jwt.PyJWTError, ClientError) as e:
-            # Log the error but don't fail the login
-            print(f"Error retrieving household_id: {str(e)}")
-            
-        # Extract authentication token
-        response_data = {
-            "access_token": cognito_response["AuthenticationResult"]["AccessToken"],
-            "id_token": cognito_response["AuthenticationResult"]["IdToken"],
-            "refresh_token": cognito_response["AuthenticationResult"]["RefreshToken"]
-        }
-        
-        # Include user_id and household_id if available
-        if user_id:
-            response_data["user_id"] = user_id
-        if household_id:
-            response_data["household_id"] = household_id
-            
-        return response.api_response(200, data=response_data)
-        
+
+        tokens = auth_response["AuthenticationResult"]
+
+        return response.api_response(
+            status_code=200,
+            data={
+                "access_token": tokens["AccessToken"],
+                "refresh_token": tokens["RefreshToken"],
+                "id_token": tokens["IdToken"]
+            })
+
     except Exception as e:
-        # Handle specific Cognito exceptions
-        exception_type = type(e).__name__
-        error_message = str(e)
-        
-        if exception_type == "NotAuthorizedException":
-            return response.api_response(401, error_details=error_message)
-        
-        elif exception_type == "UserNotFoundException":
-            return response.api_response(404, error_details=error_message)
-        
-        elif exception_type == "UserNotConfirmedException":
-            return response.api_response(403, error_details=error_message)
-        
-        elif exception_type == "PasswordResetRequiredException":
-            return response.api_response(403, error_details=error_message)
-        
-        elif exception_type == "TooManyRequestsException":
-            return response.api_response(429, error_details=error_message)
-        
-        else:
-            # Catch any other exceptions
-            return response.api_response(500, error_details=error_message)
+        return response.api_response(status_code=401, error_details=f"Authentication failed: {str(e)}")

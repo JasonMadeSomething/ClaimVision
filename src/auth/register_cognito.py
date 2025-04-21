@@ -14,7 +14,8 @@ def lambda_handler(event, context):
         body = json.loads(event["body"])
         email = body["email"].lower()
         password = body["password"]
-        name = body.get("name") or "New User"
+        first_name = body.get("first_name") or "New"
+        last_name = body.get("last_name") or "User"
 
         # Create user in Cognito
         cognito.sign_up(
@@ -40,7 +41,8 @@ def lambda_handler(event, context):
             MessageBody=json.dumps({
                 "cognito_sub": sub,
                 "email": email,
-                "name": name
+                "first_name": first_name,
+                "last_name": last_name
             })
         )
 
