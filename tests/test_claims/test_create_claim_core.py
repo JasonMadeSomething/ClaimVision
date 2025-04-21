@@ -176,7 +176,7 @@ def create_claim_core(db_session, user, body):
             return create_claim.response.api_response(400, error_details="Multiple active groups found. Please specify which group to use.")
     
     # Check if the user has permission to create claims in this group
-    if not create_claim.has_permission(user, action=PermissionAction.WRITE.value, resource_type="claim", group_id=group_id, db=db_session):
+    if not create_claim.has_permission(user, action=PermissionAction.WRITE, resource_type="claim", group_id=group_id, db=db_session):
         return create_claim.response.api_response(403, error_details="You do not have permission to create claims in this group")
     
     # Validate title

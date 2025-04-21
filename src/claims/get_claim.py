@@ -4,19 +4,22 @@ Lambda handler for retrieving a claim and its associated data.
 This module handles the retrieval of claim details from the ClaimVision system,
 ensuring proper authorization and data access.
 """
-from utils.logging_utils import get_logger
 from sqlalchemy.exc import IntegrityError, OperationalError
-from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from models import Claim
 
+from database.database import get_db_session
+from models import Claim
+from utils import response
+from utils.access_control import has_permission
+from utils.lambda_utils import extract_uuid_param, standard_lambda_handler
+from utils.logging_utils import get_logger
+from utils.vocab_enums import PermissionAction, ResourceTypeEnum
 
 logger = get_logger(__name__)
 
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
-    Handles retrieving a claim by ID for the authenticated user's household.
+    Handles retrieving a claim by ID for the authenticated user's group.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
@@ -43,18 +46,16 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             return response.api_response(404, error_details="Claim not found")
         
         # Check if claim is soft-deleted
-        if claim.deleted:
+        if claim.deleted_at:
             return response.api_response(404, error_details="Claim not found")
         
-        # Check if user has access to the claim (belongs to their household)
-        if str(claim.household_id) != str(user.household_id):
-            # Return 404 for security reasons (don't reveal that the claim exists)
-            return response.api_response(404, error_details="Claim not found")
+        if not has_permission(user, action=PermissionAction.READ, resource_type=ResourceTypeEnum.CLAIM, resource_id=claim.id, db=db_session):
+            logger.warning("User %s does not have permission to read claim %s", user.id, claim.id)
+            return response.api_response(403, error_details="You do not have access to this claim")
         
         # Convert claim to dictionary for response
         claim_data = {
             "id": str(claim.id),
-            "household_id": str(claim.household_id),
             "title": claim.title,
             "description": claim.description or "",
             "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d") if claim.date_of_loss else None

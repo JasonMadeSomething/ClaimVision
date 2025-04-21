@@ -119,7 +119,7 @@ def seed_user_and_group(test_db):
     """Create a test user and group for testing."""
     # Create a test user
     user_id = uuid.uuid4()
-    cognito_sub = f"test-{uuid.uuid4()}"
+    cognito_sub = uuid.uuid4()
     user = User(
         id=user_id,
         email="test@example.com",
@@ -153,7 +153,7 @@ def seed_user_and_group(test_db):
     test_db.add(membership)
     
     # Add permission for the user to create claims in the group
-    permission = Permission(
+    write_permission = Permission(
         id=uuid.uuid4(),
         subject_type="user",
         subject_id=str(user_id),
@@ -163,7 +163,20 @@ def seed_user_and_group(test_db):
         conditions=json.dumps({"group_id": str(group_id)}),
         group_id=group_id
     )
-    test_db.add(permission)
+    test_db.add(write_permission)
+    
+    # Add permission for the user to read claims in the group
+    read_permission = Permission(
+        id=uuid.uuid4(),
+        subject_type="user",
+        subject_id=str(user_id),
+        resource_type_id=ResourceTypeEnum.CLAIM.value,
+        resource_id=None,  # Applies to all claims
+        action=PermissionAction.READ,
+        conditions=json.dumps({"group_id": str(group_id)}),
+        group_id=group_id
+    )
+    test_db.add(read_permission)
     
     test_db.commit()
     
@@ -289,6 +302,92 @@ def mock_cognito():
         }
 
         yield mock_cognito_client  # Provide mock to all tests
+
+@pytest.fixture
+def generate_jwt_token():
+    """
+    Generate a valid JWT token for testing.
+    
+    This fixture creates a properly structured JWT token that can be used
+    in tests to bypass authentication checks.
+    
+    Returns:
+        function: A function that takes a user_id and returns a valid JWT token
+    """
+    def _generate_token(user_id):
+        import base64
+        import json
+        
+        # Create a simple JWT with header, payload, and signature parts
+        header = base64.b64encode(json.dumps({"alg": "none"}).encode()).decode()
+        
+        # Ensure the UUID is in the correct format (no hyphens)
+        if isinstance(user_id, str) and '-' in user_id:
+            # Remove hyphens from the UUID string
+            user_id = user_id.replace('-', '')
+        
+        payload = base64.b64encode(json.dumps({"sub": str(user_id)}).encode()).decode()
+        signature = base64.b64encode(b"").decode()
+        
+        # Join the parts with dots to form a valid JWT structure
+        return f"{header}.{payload}.{signature}"
+    
+    return _generate_token
+
+@pytest.fixture
+def mock_auth_utils():
+    """
+    Mock the auth_utils.extract_user_id function to bypass JWT validation.
+    
+    This fixture patches the extract_user_id function to always return success
+    and the provided user ID.
+    """
+    with patch("utils.auth_utils.extract_user_id") as mock_extract:
+        def side_effect(event):
+            # Extract the user ID from the event's authorizer claims or Authorization header
+            user_id = event.get("requestContext", {}).get("authorizer", {}).get("claims", {}).get("sub")
+            
+            # If not found in claims, try to get from the auth_user in the event (for our test fixtures)
+            if not user_id and "auth_user" in event:
+                user_id = event["auth_user"]
+                
+            if user_id:
+                return True, user_id
+            return False, {"statusCode": 401, "body": json.dumps({"error": "Unauthorized"})}
+            
+        mock_extract.side_effect = side_effect
+        yield mock_extract
+
+@pytest.fixture
+def auth_api_gateway_event(generate_jwt_token):
+    """
+    Create an API Gateway event with proper JWT authentication.
+    
+    This fixture enhances the basic api_gateway_event fixture by adding
+    a valid JWT token in the Authorization header.
+    """
+    def _event(http_method="GET", path_params=None, query_params=None, body=None, auth_user="user-123", group_id=None):
+        # If group_id is not provided, generate a random one
+        if group_id is None and auth_user:
+            group_id = str(uuid.uuid4())
+            
+        # Generate a JWT token for the auth_user
+        token = generate_jwt_token(auth_user)
+        
+        event = {
+            "httpMethod": http_method,
+            "pathParameters": path_params or {},
+            "queryStringParameters": query_params or {},
+            "headers": {"Authorization": f"Bearer {token}"} if auth_user else {},
+            "requestContext": {
+                "authorizer": {"claims": {"sub": auth_user}} if auth_user else {}
+            },
+            "body": json.dumps(body) if isinstance(body, dict) else body,
+            "auth_user": auth_user  # Add this for our mock_auth_utils fixture
+        }
+        return event
+
+    return _event
 
 # -----------------
 # TEST DATA FIXTURES
