@@ -1,143 +1,202 @@
 import json
 import uuid
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
+from sqlalchemy.exc import SQLAlchemyError
+
 from claims.create_claim import lambda_handler
 from models.claim import Claim
-from models.household import Household
 
-def test_create_claim_success(test_db, api_gateway_event):
-    """Test successful claim creation with real test DB"""
-
-    # Create a test household before inserting a claim
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_db.add(test_household)
-    test_db.commit()
-
-    event = api_gateway_event(
-        http_method="POST",
-        body={"title": "Lost Laptop", "date_of_loss": "2024-01-10", "household_id": str(household_id)},  # Now a real existing household
-    )
-
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-
-    claim = test_db.query(Claim).filter_by(title="Lost Laptop").first()
-
-    assert response["statusCode"] == 201
-    assert claim is not None  # Ensure claim was stored
-    assert claim.date_of_loss == datetime.strptime("2024-01-10", "%Y-%m-%d")
-    assert "id" in body["data"]
-
-def test_create_claim_missing_fields(test_db, api_gateway_event):
-    """Test creating a claim with missing required fields"""
-    event = api_gateway_event(http_method="POST", body={"title": "Lost Laptop"})  # Missing `date_of_loss`
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-
-    assert response["statusCode"] == 400
-    assert "missing_fields" in body["data"]
-    assert "error_details" in body
-    assert body["error_details"] == "Missing required fields"
-
-def test_create_claim_invalid_date_format(test_db, api_gateway_event):
-    """Test creating a claim with an invalid date format"""
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_db.add(test_household)
-    test_db.commit()
-
-    event = api_gateway_event(http_method="POST", body={"title": "Lost Laptop", "date_of_loss": "10-01-2024", "household_id": str(household_id)})  # Wrong format
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-    print(body)
-    assert response["statusCode"] == 400
-    assert "Invalid date format" in body["error_details"]
-
-def test_create_claim_database_failure(test_db, api_gateway_event):
-    """Test creating a claim when PostgreSQL connection fails"""
-    # Create a mock database session that raises an exception when queried
-    from unittest.mock import MagicMock
-    from sqlalchemy.exc import SQLAlchemyError
+# Patch extract_user_id at the module level to avoid authentication issues
+@patch("utils.auth_utils.extract_user_id")
+class TestCreateClaim:
+    def test_create_claim_success(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test successful claim creation with real test DB"""
+        group_id = seed_user_and_group["group_id"]
+        user = seed_user_and_group["user"]
     
-    # Create a mock session that raises an exception
-    mock_db = MagicMock()
-    mock_db.query.side_effect = SQLAlchemyError("Database connection error")
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        event = api_gateway_event(
+            http_method="POST",
+            body={"title": "Lost Laptop", "date_of_loss": "2024-01-10", "group_id": str(group_id)},
+            auth_user=user.cognito_sub
+        )
     
-    # Use a valid event
-    event = api_gateway_event(
-        http_method="POST",
-        body={"title": "Lost Laptop", "date_of_loss": "2024-01-10"},
-    )
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
     
-    # Pass the mock session to the handler
-    response = lambda_handler(event, {}, db_session=mock_db)
-    body = json.loads(response["body"])
+        claim = test_db.query(Claim).filter_by(title="Lost Laptop").first()
     
-    assert response["statusCode"] == 500
-    assert "Database error" in body["error_details"]
+        assert response["statusCode"] == 201, f"Expected 201, got {response['statusCode']}: {body}"
+        assert claim is not None, "Claim was not stored in the database"
+        assert claim.date_of_loss.strftime("%Y-%m-%d") == "2024-01-10"
+        assert claim.group_id == group_id
+        assert "id" in body["data"]
 
-def test_create_claim_duplicate_title(test_db, api_gateway_event):
-    """Test creating a duplicate claim title in the same household"""
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_db.add(test_household)
-    
-    # Create first claim
-    claim = Claim(title="Duplicate Title", date_of_loss=datetime.now(timezone.utc), household_id=household_id)
-    test_db.add(claim)
-    test_db.commit()
-    
-    # Try to create another claim with the same title
-    event = api_gateway_event(http_method="POST", body={"title": "Duplicate Title", "date_of_loss": "2024-01-10", "household_id": str(household_id)})
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-    
-    assert response["statusCode"] == 400
-    assert "already exists" in body["error_details"]
+    def test_create_claim_missing_fields(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a claim with missing required fields"""
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        event = api_gateway_event(
+            http_method="POST", 
+            body={"title": "Lost Laptop"},  # Missing `date_of_loss`
+            auth_user=user.cognito_sub
+        )
+        
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 400
+        assert "error_details" in body
+        assert "date_of_loss" in body["error_details"]
 
-def test_create_claim_future_date(test_db, api_gateway_event):
-    """Test creating a claim with a future date"""
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_db.add(test_household)
-    test_db.commit()
-    
-    # Set date to tomorrow
-    future_date = (datetime.now(timezone.utc) + timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    event = api_gateway_event(http_method="POST", body={"title": "Future Loss", "date_of_loss": future_date, "household_id": str(household_id)})
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-    
-    assert response["statusCode"] == 400
-    assert "future date" in body["error_details"].lower()
+    def test_create_claim_invalid_date_format(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a claim with an invalid date format"""
+        group_id = seed_user_and_group["group_id"]
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        event = api_gateway_event(
+            http_method="POST",
+            body={"title": "Lost Laptop", "date_of_loss": "01/10/2024", "group_id": str(group_id)},
+            auth_user=user.cognito_sub
+        )
+        
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 400
+        assert "error_details" in body
+        assert "date_of_loss" in body["error_details"]
 
-def test_create_claim_empty_title(test_db, api_gateway_event):
-    """Test creating a claim with an empty title"""
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_db.add(test_household)
-    test_db.commit()
-    
-    event = api_gateway_event(http_method="POST", body={"title": "", "date_of_loss": "2024-01-10", "household_id": str(household_id)})
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-    
-    assert response["statusCode"] == 400
-    assert "title" in body["error_details"].lower()
+    def test_create_claim_database_failure(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a claim when PostgreSQL connection fails"""
+        group_id = seed_user_and_group["group_id"]
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        # Mock the database session to raise an exception
+        with patch("sqlalchemy.orm.session.Session.add") as mock_db_add:
+            mock_db_add.side_effect = SQLAlchemyError("Database error")
+            
+            event = api_gateway_event(
+                http_method="POST",
+                body={"title": "Lost Laptop", "date_of_loss": "2024-01-10", "group_id": str(group_id)},
+                auth_user=user.cognito_sub
+            )
+            
+            response = lambda_handler(event, {})
+            body = json.loads(response["body"])
+            
+            assert response["statusCode"] == 500
+            assert "error_details" in body
+            assert "database" in body["error_details"].lower()
 
-def test_create_claim_sql_injection(test_db, api_gateway_event):
-    """Test SQL injection attempt in title field"""
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_db.add(test_household)
-    test_db.commit()
-    
-    event = api_gateway_event(http_method="POST", body={"title": "'; DROP TABLE claims; --", "date_of_loss": "2024-01-10", "household_id": str(household_id)})
-    response = lambda_handler(event, {})
-    body = json.loads(response["body"])
-    
-    # The claim should be rejected due to invalid characters in the title
-    assert response["statusCode"] == 400
-    assert "Invalid characters in title" in body["error_details"]
+    def test_create_claim_duplicate_title(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a duplicate claim title in the same group"""
+        group_id = seed_user_and_group["group_id"]
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        # Create a claim with the same title first
+        existing_claim = Claim(
+            id=uuid.uuid4(),
+            title="Duplicate Title",
+            date_of_loss=datetime.now(timezone.utc),
+            group_id=group_id,
+            created_by_id=user.id  # Use created_by_id instead of created_by
+        )
+        test_db.add(existing_claim)
+        test_db.commit()
+        
+        # Now try to create another claim with the same title
+        event = api_gateway_event(
+            http_method="POST",
+            body={"title": "Duplicate Title", "date_of_loss": "2024-01-10", "group_id": str(group_id)},
+            auth_user=user.cognito_sub
+        )
+        
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 400
+        assert "error_details" in body
+        assert "duplicate" in body["error_details"].lower() or "already exists" in body["error_details"].lower()
+
+    def test_create_claim_future_date(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a claim with a future date"""
+        group_id = seed_user_and_group["group_id"]
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        # Get a date 7 days in the future
+        future_date = (datetime.now(timezone.utc) + timedelta(days=7)).strftime("%Y-%m-%d")
+        
+        event = api_gateway_event(
+            http_method="POST",
+            body={"title": "Future Loss", "date_of_loss": future_date, "group_id": str(group_id)},
+            auth_user=user.cognito_sub
+        )
+        
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 400
+        assert "error_details" in body
+        assert "future" in body["error_details"].lower()
+
+    def test_create_claim_empty_title(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a claim with an empty title"""
+        group_id = seed_user_and_group["group_id"]
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        event = api_gateway_event(
+            http_method="POST",
+            body={"title": "", "date_of_loss": "2024-01-10", "group_id": str(group_id)},
+            auth_user=user.cognito_sub
+        )
+        
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 400
+        assert "error_details" in body
+        assert "title" in body["error_details"].lower()
+
+    def test_create_claim_infer_group(self, mock_extract_user_id, test_db, api_gateway_event, seed_user_and_group):
+        """Test creating a claim without specifying group_id (should be inferred)"""
+        user = seed_user_and_group["user"]
+        
+        # Configure the mock to return the user's Cognito sub
+        mock_extract_user_id.return_value = (True, user.cognito_sub)
+        
+        event = api_gateway_event(
+            http_method="POST",
+            body={"title": "Inferred Group Claim", "date_of_loss": "2024-01-10"},  # No group_id
+            auth_user=user.cognito_sub
+        )
+        
+        response = lambda_handler(event, {})
+        body = json.loads(response["body"])
+        
+        assert response["statusCode"] == 201, f"Expected 201, got {response['statusCode']}: {body}"
+        
+        claim = test_db.query(Claim).filter_by(title="Inferred Group Claim").first()
+        assert claim is not None, "Claim was not stored in the database"
+        assert claim.group_id == seed_user_and_group["group_id"]

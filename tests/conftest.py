@@ -2,20 +2,20 @@ import json
 import os
 import sys
 import uuid
+from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import pytest
 from dotenv import load_dotenv
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.orm import Session
-from models.file_labels import FileLabel
 from sqlalchemy import text
-from models import Base, File, Household, User, Label
+from models import Base, File, User, Group, Permission
 from models.file import FileStatus
-from models.item_files import ItemFile
-from models.item_labels import ItemLabel
-from models.item import Item
+from models.group_membership import GroupMembership
 from models.claim import Claim
+from models.item import Item
+from utils.vocab_enums import GroupTypeEnum, GroupRoleEnum, GroupIdentityEnum, MembershipStatusEnum, PermissionAction, ResourceTypeEnum
+
 load_dotenv()
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
@@ -58,25 +58,122 @@ def test_db():
 
     # Ensure tables are dropped and recreated before each test
     with engine.begin() as conn:
-        conn.execute(text("DROP TABLE IF EXISTS file_labels CASCADE;"))  # Drop join table first
-        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))  # Drop labels next
-        conn.execute(text("DROP TABLE IF EXISTS files CASCADE;"))  # Now it's safe to drop files
-        Base.metadata.drop_all(conn)
-        Base.metadata.create_all(conn)
-
-    session = TestingSessionLocal()
-
-    yield session  # Provide session for the test
-
-    # Teardown: Drop all tables after each test
-    session.rollback()
-    session.close()
-    with engine.begin() as conn:
+        # Drop all tables with CASCADE to handle dependencies
         conn.execute(text("DROP TABLE IF EXISTS file_labels CASCADE;"))
-        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS item_files CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS item_labels CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS rooms CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS claims CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS items CASCADE;"))
         conn.execute(text("DROP TABLE IF EXISTS files CASCADE;"))
-        Base.metadata.drop_all(conn)
-    engine.dispose()
+        conn.execute(text("DROP TABLE IF EXISTS labels CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS group_memberships CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS permissions CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS users CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS groups CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS group_types CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS group_roles CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS group_identities CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS membership_statuses CASCADE;"))
+        conn.execute(text("DROP TABLE IF EXISTS resource_types CASCADE;"))
+        
+        # Now recreate all tables
+        Base.metadata.create_all(conn)
+        
+        # Basic reference data setup
+        # Group Types
+        conn.execute(text("INSERT INTO group_types (id, name, description, is_active) VALUES ('household', 'Household', 'A household group', TRUE)"))
+        conn.execute(text("INSERT INTO group_types (id, name, description, is_active) VALUES ('firm', 'Firm', 'A business firm', TRUE)"))
+        conn.execute(text("INSERT INTO group_types (id, name, description, is_active) VALUES ('partner', 'Partner', 'A partner organization', TRUE)"))
+        conn.execute(text("INSERT INTO group_types (id, name, description, is_active) VALUES ('other', 'Other', 'Other group type', TRUE)"))
+        
+        # Group Roles
+        conn.execute(text("INSERT INTO group_roles (id, label, description, is_active) VALUES ('owner', 'Owner', 'Group owner', TRUE)"))
+        conn.execute(text("INSERT INTO group_roles (id, label, description, is_active) VALUES ('editor', 'Editor', 'Can edit', TRUE)"))
+        conn.execute(text("INSERT INTO group_roles (id, label, description, is_active) VALUES ('viewer', 'Viewer', 'View only', TRUE)"))
+        
+        # Group Identities
+        conn.execute(text("INSERT INTO group_identities (id, label, description, is_active) VALUES ('homeowner', 'Homeowner', 'Primary homeowner', TRUE)"))
+        conn.execute(text("INSERT INTO group_identities (id, label, description, is_active) VALUES ('adjuster', 'Adjuster', 'Insurance adjuster', TRUE)"))
+        conn.execute(text("INSERT INTO group_identities (id, label, description, is_active) VALUES ('contractor', 'Contractor', 'Repair contractor', TRUE)"))
+        
+        # Membership Statuses
+        conn.execute(text("INSERT INTO membership_statuses (id, label, description, is_active) VALUES ('active', 'Active', 'Active membership', TRUE)"))
+        conn.execute(text("INSERT INTO membership_statuses (id, label, description, is_active) VALUES ('invited', 'Invited', 'Invited membership', FALSE)"))
+        conn.execute(text("INSERT INTO membership_statuses (id, label, description, is_active) VALUES ('revoked', 'Revoked', 'Revoked membership', FALSE)"))
+        
+        # Resource Types
+        conn.execute(text("INSERT INTO resource_types (id, label, description, is_active) VALUES ('claim', 'Claim', 'Insurance claim', TRUE)"))
+        conn.execute(text("INSERT INTO resource_types (id, label, description, is_active) VALUES ('file', 'File', 'Uploaded file', TRUE)"))
+        conn.execute(text("INSERT INTO resource_types (id, label, description, is_active) VALUES ('item', 'Item', 'Item within a claim', TRUE)"))
+
+    # Create a new session for the test
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+@pytest.fixture
+def seed_user_and_group(test_db):
+    """Create a test user and group for testing."""
+    # Create a test user
+    user_id = uuid.uuid4()
+    cognito_sub = f"test-{uuid.uuid4()}"
+    user = User(
+        id=user_id,
+        email="test@example.com",
+        cognito_sub=cognito_sub,
+        first_name="Test",
+        last_name="User"
+    )
+    test_db.add(user)
+    test_db.flush()
+    
+    # Create a test group
+    group_id = uuid.uuid4()
+    group = Group(
+        id=group_id,
+        name="Test Group",
+        group_type_id=GroupTypeEnum.HOUSEHOLD.value,
+        created_at=datetime.now(timezone.utc),
+        created_by=user_id
+    )
+    test_db.add(group)
+    test_db.flush()
+    
+    # Create membership for the user in the group
+    membership = GroupMembership(
+        user_id=user_id,
+        group_id=group_id,
+        role_id=GroupRoleEnum.OWNER.value,
+        identity_id=GroupIdentityEnum.HOMEOWNER.value,
+        status_id=MembershipStatusEnum.ACTIVE.value
+    )
+    test_db.add(membership)
+    
+    # Add permission for the user to create claims in the group
+    permission = Permission(
+        id=uuid.uuid4(),
+        subject_type="user",
+        subject_id=str(user_id),
+        resource_type_id=ResourceTypeEnum.CLAIM.value,
+        resource_id=None,  # Applies to all claims
+        action=PermissionAction.WRITE,
+        conditions=json.dumps({"group_id": str(group_id)}),
+        group_id=group_id
+    )
+    test_db.add(permission)
+    
+    test_db.commit()
+    
+    return {
+        "user_id": user_id,
+        "group_id": group_id,
+        "user": user,
+        "group": group
+    }
+
 # -----------------
 # API GATEWAY MOCKS
 # -----------------
@@ -84,11 +181,11 @@ def test_db():
 def api_gateway_event():
     """Creates a mock API Gateway event for testing"""
 
-    def _event(http_method="GET", path_params=None, query_params=None, body=None, auth_user="user-123", household_id=None):
+    def _event(http_method="GET", path_params=None, query_params=None, body=None, auth_user="user-123", group_id=None):
         """Generate an API event, allowing optional auth_user=None for unauthenticated tests"""
-        # If household_id is not provided, generate a random one
-        if household_id is None and auth_user:
-            household_id = str(uuid.uuid4())
+        # If group_id is not provided, generate a random one
+        if group_id is None and auth_user:
+            group_id = str(uuid.uuid4())
             
         event = {
             "httpMethod": http_method,
@@ -96,7 +193,7 @@ def api_gateway_event():
             "queryStringParameters": query_params or {},
             "headers": {"Authorization": "Bearer fake-jwt-token"} if auth_user else {},
             "requestContext": {
-                "authorizer": {"claims": {"sub": auth_user, "household_id": household_id}} if auth_user else {}
+                "authorizer": {"claims": {"sub": auth_user}} if auth_user else {}
             },
             "body": json.dumps(body) if isinstance(body, dict) else body,
         }
@@ -179,7 +276,7 @@ def mock_cognito():
         mock_cognito_client.exceptions.CodeMismatchException = type("CodeMismatchException", (Exception,), {})
         mock_cognito_client.exceptions.LimitExceededException = type("LimitExceededException", (Exception,), {})
 
-        # Mock Attribute Updates (e.g., Household ID)
+        # Mock Attribute Updates
         mock_cognito_client.admin_update_user_attributes.return_value = {}
 
         # Mock Cognito Login - make sure this is a valid format for JWT decoding
@@ -193,287 +290,84 @@ def mock_cognito():
 
         yield mock_cognito_client  # Provide mock to all tests
 
+# -----------------
+# TEST DATA FIXTURES
+# -----------------
 @pytest.fixture
-def seed_file(test_db):
+def seed_file(test_db, seed_user_and_group):
     """Inserts a test file into the database."""
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
+    user_id = seed_user_and_group["user_id"]
+    group_id = seed_user_and_group["group_id"]
     file_id = uuid.uuid4()
-    claim_id = uuid.uuid4()
-
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(
-        id=user_id,
-        email="test@example.com",
-        first_name="Test",
-        last_name="User",
-        household_id=household_id
-    )
-    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
-    test_file = File(
-        id=file_id,
-        uploaded_by=user_id,
-        household_id=household_id,
-        claim_id=claim_id,
-        file_name="original.jpg",
-        s3_key="original-key",
-        status=FileStatus.UPLOADED,
-        file_metadata={"mime_type": "image/jpeg", "size": 12345},
-        file_hash="test_hash"
-    )
-
-    test_db.add_all([test_household, test_user, test_claim, test_file])
-    test_db.commit()
-
-    return file_id, user_id, household_id
-
-@pytest.fixture
-def seed_files(test_db):
-    """Insert multiple test files into the database."""
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    claim_id = uuid.uuid4()
-
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(
-        id=user_id,
-        email="test@example.com",
-        first_name="Test",
-        last_name="User",
-        household_id=household_id,
-    )
-    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
-    test_files = [
-        File(
-            id=uuid.uuid4(),
-            uploaded_by=user_id,
-            household_id=household_id,
-            claim_id=claim_id,
-            file_name=f"file_{i}.jpg",
-            s3_key=f"key_{i}",
-            status=FileStatus.UPLOADED,
-            labels=[],
-            file_metadata={"mime_type": "image/jpeg", "size": 1234 + i},
-            file_hash=f"test_hash_{i}",
-        )
-        for i in range(5)
-    ]
-
-    test_db.add_all([test_household, test_user, test_claim, *test_files])
-    test_db.commit()
-
-    return user_id, household_id, test_files
-
-@pytest.fixture
-def seed_file_with_labels(test_db: Session):
-    """Insert a test file with AI-generated and user-created labels, ensuring uniqueness."""
-
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    file_id = uuid.uuid4()
-    claim_id = uuid.uuid4()
-
-    # Create Household, User, and Claim
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
-    test_claim = Claim(id=claim_id, household_id=household_id, title="Lost Item")
-
-    # Create File
-    test_file = File(
-        id=file_id,
-        uploaded_by=user_id,
-        household_id=household_id,
-        claim_id=claim_id,  # Files must belong to a claim
-        file_name="test.jpg",
-        s3_key="test-key",
-        file_hash="test_hash"
-    )
-
-    # Insert Labels (Ensuring Unique Entries)
-    ai_label = Label(id=uuid.uuid4(), label_text="AI Label", is_ai_generated=True, deleted=False, household_id=household_id)
-    user_label = Label(id=uuid.uuid4(), label_text="User Label", is_ai_generated=False, deleted=False, household_id=household_id)
-
-    test_db.add_all([test_household, test_user, test_claim, test_file, ai_label, user_label])
-    test_db.commit()
-
-    # Link Labels to File
-    ai_file_label = FileLabel(file_id=file_id, label_id=ai_label.id)
-    user_file_label = FileLabel(file_id=file_id, label_id=user_label.id)
-
-    test_db.add_all([ai_file_label, user_file_label])
-    test_db.commit()
-
-    return file_id, user_id, household_id, ai_label.id, user_label.id  # Include label IDs
-
-@pytest.fixture
-def seed_labels(test_db: Session):
-    """Insert a test file with labels for label deletion tests."""
     
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    file_id = uuid.uuid4()
-    claim_id = uuid.uuid4()
-
-    # Create Household, User, and Claim
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
-    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
-
-    # Create File
-    test_file = File(
+    # Create a file
+    file = File(
         id=file_id,
+        file_name="test_file.jpg",
+        s3_key=f"files/{file_id}.jpg",
+        content_type="image/jpeg",
+        size_bytes=1024,
+        status=FileStatus.PROCESSED,
         uploaded_by=user_id,
-        household_id=household_id,
-        claim_id=claim_id,
-        file_name="test.jpg",
-        s3_key="test-key",
-        file_hash="test_hash"
+        group_id=group_id
     )
-
-    # Insert Labels
-    ai_label = Label(id=uuid.uuid4(), label_text="AI Label", is_ai_generated=True, deleted=False, household_id=household_id)
-    user_label = Label(id=uuid.uuid4(), label_text="User Label", is_ai_generated=False, deleted=False, household_id=household_id)
-
-    test_db.add_all([test_household, test_user, test_claim, test_file, ai_label, user_label])
+    test_db.add(file)
     test_db.commit()
-
-    # Link Labels to File
-    ai_file_label = FileLabel(file_id=file_id, label_id=ai_label.id)
-    user_file_label = FileLabel(file_id=file_id, label_id=user_label.id)
-
-    test_db.add_all([ai_file_label, user_file_label])
-    test_db.commit()
-
-    return file_id, user_id, ai_label.id, user_label.id
+    
+    return {
+        "file_id": file_id,
+        "file": file,
+        "user_id": user_id,
+        "group_id": group_id
+    }
 
 @pytest.fixture
-def seed_claim(test_db: Session):
+def seed_claim(test_db, seed_user_and_group):
     """Seeds a claim and returns its ID."""
+    user_id = seed_user_and_group["user_id"]
+    group_id = seed_user_and_group["group_id"]
+    
     claim_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    household_id = uuid.uuid4()
-    file_id = uuid.uuid4()
-    
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(id=user_id, email=f"{user_id}@example.com", first_name="Test", last_name="User", household_id=household_id)
-    test_claim = Claim(id=claim_id, household_id=household_id, title="Test Claim")
-    test_file = File(
-        id=file_id,
-        uploaded_by=user_id,
-        household_id=household_id,
-        claim_id=claim_id,
-        file_name="test.jpg",
-        s3_key="test-key",
-        file_hash="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    claim = Claim(
+        id=claim_id,
+        title="Test Claim",
+        description="This is a test claim",
+        date_of_loss=datetime.now(timezone.utc),
+        group_id=group_id,
+        created_by=user_id
     )
-    test_db.add_all([test_household, test_user, test_claim, test_file])
+    test_db.add(claim)
     test_db.commit()
     
-    return claim_id, user_id, file_id
-
+    return {
+        "claim_id": claim_id,
+        "claim": claim,
+        "user_id": user_id,
+        "group_id": group_id
+    }
 
 @pytest.fixture
-def seed_item(test_db: Session, seed_claim):
+def seed_item(test_db, seed_claim):
     """Seeds a single item under a claim."""
-    claim_id, user_id, file_id = seed_claim
+    claim_id = seed_claim["claim_id"]
+    group_id = seed_claim["group_id"]
+    
     item_id = uuid.uuid4()
-    household_id = uuid.uuid4()
-    test_household = Household(id=household_id, name="Test Household")
-    test_item = Item(id=item_id, claim_id=claim_id, name="Test Item", description="A sample item", unit_cost=100.00)
-    test_db.add_all([test_household, test_item])
-    test_db.commit()
-
-    return item_id, user_id, file_id
-
-@pytest.fixture
-def seed_multiple_items(test_db: Session, seed_claim):
-    """Seeds multiple items under the same claim."""
-    claim_id, user_id, file_id = seed_claim
-    item_ids = []
-
-    for _ in range(3):
-        item_id = uuid.uuid4()
-        test_item = Item(id=item_id, claim_id=claim_id, name=f"Test Item {_}", description="A sample item", unit_cost=100.00)
-        test_db.add_all([test_item])
-        item_ids.append(item_id)
-
-    test_db.commit()
-    return claim_id, user_id, item_ids
-
-@pytest.fixture
-def seed_item_with_file_labels(test_db: Session, seed_item):
-    """Seeds an item with a file and labels."""
-    item_id, user_id, _ = seed_item  # Ignore the original file_id
-    
-    # Get the item to find its claim_id
-    item = test_db.query(Item).filter(Item.id == item_id).first()
-    user = test_db.query(User).filter(User.id == user_id).first()
-    
-    # Create file with the same claim_id and household_id
-    test_file = File(
-        id=uuid.uuid4(),
-        uploaded_by=user_id,
-        household_id=user.household_id,  # Use the same household_id as the user
-        claim_id=item.claim_id,  # Use the same claim_id as the item
-        file_name="test.jpg",
-        s3_key="test-key",
-        file_hash="test_file_hash"
+    item = Item(
+        id=item_id,
+        name="Test Item",
+        description="This is a test item",
+        quantity=1,
+        value=100.00,
+        claim_id=claim_id,
+        group_id=group_id
     )
-    test_db.add(test_file)
+    test_db.add(item)
     test_db.commit()
-
-    # Associate file with item
-    test_db.add(ItemFile(item_id=item_id, file_id=test_file.id))
-    test_db.commit()
-
-    # Create labels with the same household_id
-    label_1 = Label(
-        id=uuid.uuid4(),
-        label_text="TV",
-        is_ai_generated=True,
-        household_id=user.household_id  # Use the same household_id as the user
-    )
-    label_2 = Label(
-        id=uuid.uuid4(),
-        label_text="Couch",
-        is_ai_generated=True,
-        household_id=user.household_id  # Use the same household_id as the user
-    )
-
-    test_db.add_all([label_1, label_2])
-    test_db.commit()
-
-    # Associate only the TV label with the item
-    test_db.add(ItemLabel(item_id=item_id, label_id=label_1.id))
-    test_db.commit()
-
-    return item_id, user_id, test_file.id
-
-@pytest.fixture
-def seed_multiple_items_with_labels(test_db: Session, seed_multiple_items):
-    """Seeds multiple items, each with different labels, ensuring label inheritance is correct."""
-    _, user_id, item_ids = seed_multiple_items
-    labels = ["TV", "Couch", "Table"]
     
-    # Get the user to find their household_id
-    user = test_db.query(User).filter(User.id == user_id).first()
-    
-    # Ensure we're using the same household_id as the user
-    household_id = user.household_id
-
-    for i, item_id in enumerate(item_ids):
-        # Create label with the same household_id as the user
-        label = Label(
-            id=uuid.uuid4(), 
-            label_text=labels[i], 
-            is_ai_generated=True, 
-            household_id=household_id
-        )
-        test_db.add(label)
-        test_db.commit()
-
-        # Associate label with item
-        test_db.add(ItemLabel(item_id=item_id, label_id=label.id))
-        test_db.commit()
-
-    return item_ids, user_id
+    return {
+        "item_id": item_id,
+        "item": item,
+        "claim_id": claim_id,
+        "group_id": group_id
+    }
