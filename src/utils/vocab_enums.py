@@ -23,10 +23,10 @@ class MembershipStatusEnum(str, Enum):
     REVOKED = "revoked"
 
 class PermissionAction(str, Enum):
-    READ = "read"
-    WRITE = "write"
-    DELETE = "delete"
-    EXPORT = "export"
+    READ = "READ"
+    WRITE = "WRITE"
+    DELETE = "DELETE"
+    EXPORT = "EXPORT"
 
 class ResourceTypeEnum(str, Enum):
     CLAIM = "claim"

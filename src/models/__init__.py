@@ -14,6 +14,7 @@ from .group_types import GroupType
 from .group_identities import GroupIdentity
 from .group_roles import GroupRole
 from .membership_statuses import MembershipStatus
+from .permissions import Permission
 from .resource_types import ResourceType
 
-__all__ = ['Base', 'File', 'Claim', 'User', 'Room', 'Label', 'Item', 'FileLabel', 'ItemLabel', 'ItemFile', 'Report', 'ReportStatus', 'Group', 'GroupType', 'GroupIdentity', 'GroupRole', 'MembershipStatus', 'ResourceType']
+__all__ = ['Base', 'File', 'Claim', 'User', 'Room', 'Label', 'Item', 'FileLabel', 'ItemLabel', 'ItemFile', 'Report', 'ReportStatus', 'Group', 'GroupType', 'GroupIdentity', 'GroupRole', 'MembershipStatus', 'Permission', 'ResourceType']

@@ -26,7 +26,9 @@ class Claim(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False)
 
+    creator: Mapped["User"] = relationship("User", back_populates="claims_created")
     group = relationship("Group", back_populates="claims")
     files = relationship("File", back_populates="claim")
     items = relationship("Item", back_populates="claim", cascade="all, delete-orphan")

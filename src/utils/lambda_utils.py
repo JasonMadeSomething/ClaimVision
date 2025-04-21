@@ -80,24 +80,16 @@ def standard_lambda_handler(
                 
                 # Authenticate user if required
                 if requires_auth:
-                    logger.debug(f"{function_name}: Extracting user from Lambda Authorizer context")
-
-                    auth_ctx = event.get("requestContext", {}).get("authorizer", {})
-                    user_id = auth_ctx.get("user_id")
-                    household_id = auth_ctx.get("household_id")
-                    email = auth_ctx.get("email")
-
-                    if not all([user_id, household_id]):
-                        logger.warning(f"{function_name}: Missing required auth context fields")
-                        return response.api_response(401, error_details="Unauthorized: Invalid token context")
-
-                    # Load the user from the DB if needed
-                    success, result = auth_utils.get_authenticated_user(db_session, user_id, event)
+                    logger.debug(f"{function_name}: Extracting user ID from token")
+                    success, user_id_or_response = auth_utils.extract_user_id(event)
                     if not success:
-                        logger.warning(f"{function_name}: User not found or unauthorized: {user_id}")
-                        return result
+                        return user_id_or_response
 
-                    user = result
+                    success, user_or_response = auth_utils.get_authenticated_user(db_session, user_id_or_response)
+                    if not success:
+                        return user_or_response
+
+                    user = user_or_response
                     logger.debug(f"{function_name}: User authenticated: {user.id}")
                 
                 # Process request body if required

@@ -4,10 +4,11 @@ from uuid import UUID
 
 from models import User, Claim, File, Item, Label, Report
 from models.group_membership import GroupMembership
-from models.permissions import Permission
-
+from models.permissions import Permission, PermissionAction
+from utils.vocab_enums import MembershipStatusEnum
 from database.database import Session
-
+import logging
+logger = logging.getLogger(__name__)
 
 class AccessDeniedError(Exception):
     pass
@@ -38,7 +39,7 @@ def load_resource(resource_type: str, resource_id: UUID, db: Session):
 def can_access(user: User, resource: Any, action: str, db: Session) -> bool:
     # 1. User belongs to the owning group
     if hasattr(resource, "group_id") and resource.group_id:
-        membership = db.query(GroupMembership).filter_by(
+        membership = db.query(GroupMembership).filter(
             user_id=user.id, group_id=resource.group_id, status="active"
         ).first()
         if membership:
@@ -47,7 +48,7 @@ def can_access(user: User, resource: Any, action: str, db: Session) -> bool:
     # 2. Group-level permission
     group_ids = [m.group_id for m in user.memberships if m.status == "active"]
     if group_ids:
-        group_perm = db.query(Permission).filter_by(
+        group_perm = db.query(Permission).filter(
             subject_type="group",
             resource_type=resource.__class__.__name__.lower(),
             resource_id=resource.id,
@@ -57,7 +58,7 @@ def can_access(user: User, resource: Any, action: str, db: Session) -> bool:
             return True
 
     # 3. User-level permission
-    user_perm = db.query(Permission).filter_by(
+    user_perm = db.query(Permission).filter(
         subject_type="user",
         subject_id=user.id,
         resource_type=resource.__class__.__name__.lower(),
@@ -73,38 +74,51 @@ def check_access(user: User, resource: Any, action: str, db: Session) -> None:
 
 def has_permission(
     user: User,
-    action: str,
+    action: PermissionAction,
     resource_type: str,
     db: Session,
     resource_id: UUID | None = None,
     group_id: UUID | None = None,
 ) -> bool:
     # 1. Check direct user permission
-    query = db.query(Permission).filter_by(
-        subject_type="user",
-        subject_id=user.id,
-        resource_type=resource_type,
-        action=action,
+    query = db.query(Permission).filter(
+        Permission.subject_type == "user",
+        Permission.subject_id == user.id,
+        Permission.action == action.value,  
+        Permission.resource_type.has(id=resource_type)
     )
+    
+    logger.debug("User permission query: %s", query)
+    
     if resource_id:
-        query = query.filter_by(resource_id=resource_id)
+        logger.debug("Checking user permission for resource %s with ID %s", resource_type, resource_id)
+        query = query.filter(Permission.resource_id == resource_id)
+    
     if query.first():
         return True
 
     # 2. Check group-based permission
-    group_ids = [m.group_id for m in user.memberships if m.status == "active"]
-    if group_id and group_id not in group_ids:
-        return False  # Cannot check permission in a group you're not a member of
+    group_ids = [m.group_id for m in user.memberships if m.status_id == MembershipStatusEnum.ACTIVE.value]
+    
+    if group_id:
+        if group_id not in group_ids:
+            return False  # Cannot check permission in a group you're not a member of
+        group_ids = [group_id]
 
+    if not group_ids:
+        return False
+        
     group_query = db.query(Permission).filter(
         Permission.subject_type == "group",
         Permission.subject_id.in_(group_ids),
-        Permission.resource_type == resource_type,
-        Permission.action == action,
+        Permission.resource_type.has(id=resource_type),
+        Permission.action == action.value,  
     )
+    
     if resource_id:
-        group_query = group_query.filter_by(resource_id=resource_id)
-
+        group_query = group_query.filter(Permission.resource_id == resource_id)
+    
+    logger.debug("Group permission query: %s", group_query)
     return bool(group_query.first())
 
 

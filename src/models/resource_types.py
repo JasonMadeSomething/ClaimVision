@@ -15,4 +15,4 @@ class ResourceType(Base):
     description: Mapped[str] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
 
-    permissions = relationship("Permission", back_populates="resource_type")
+    permissions = relationship("Permission", back_populates="resource_type", lazy="selectin")

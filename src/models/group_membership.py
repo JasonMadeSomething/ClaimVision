@@ -3,6 +3,7 @@ from sqlalchemy import Enum, ForeignKey
 from uuid import UUID
 from models.base import Base
 from models.user import User
+from utils.vocab_enums import MembershipStatusEnum
 
 
 class GroupMembership(Base):

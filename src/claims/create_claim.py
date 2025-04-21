@@ -1,119 +1,135 @@
-from utils.logging_utils import get_logger
+import json
 import uuid
-from datetime import datetime, date
-from sqlalchemy.exc import SQLAlchemyError
-from utils import response
+from datetime import datetime
+from sqlalchemy.exc import IntegrityError
+from models.claim import Claim
+from models.user import User
+from utils.vocab_enums import MembershipStatusEnum
+from utils.access_control import has_permission
 from utils.lambda_utils import standard_lambda_handler
-from models import Claim, Household
+from utils.auth_utils import extract_user_id
+from utils import response
 from utils.logging_utils import get_logger
-
-
-logger = get_logger(__name__)
-
+from models.permissions import Permission, PermissionAction
+from models.resource_types import ResourceType
+from models.group_membership import GroupMembership
 
 # Configure logging
 logger = get_logger(__name__)
+
 @standard_lambda_handler(requires_auth=True, requires_body=True, required_fields=["title", "date_of_loss"])
-def lambda_handler(event: dict, context: dict = None, db_session=None, user=None, body=None) -> dict:
-    """
-    Handles creating a new claim for the authenticated user's household.
+def lambda_handler(event, context, db_session):
+    body = json.loads(event["body"])
 
-    Args:
-        event (dict): API Gateway event containing authentication details and claim data.
-        context (dict): Lambda execution context (unused).
-        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
-        user (User): Authenticated user object (provided by decorator).
-        body (dict): Request body containing claim data (provided by decorator).
-
-    Returns:
-        dict: API response containing the created claim details or an error message.
-    """
-    try:
-        # Validate title is not empty
-        if not body["title"].strip():
-            return response.api_response(400, error_details="Title cannot be empty")
-            
-        # Check for SQL injection or invalid characters in title
-        if "'" in body["title"] or ";" in body["title"]:
-            return response.api_response(400, error_details="Invalid characters in title")
-
-        # Validate date format
+    # Get the authenticated user ID
+    success, user_id_or_response = extract_user_id(event)
+    if not success:
+        return user_id_or_response
+    
+    user_id = user_id_or_response
+    
+    # Get the user from the database with their group memberships
+    user = db_session.query(User).filter(User.cognito_sub == user_id).first()
+    if not user:
+        return response.api_response(404, error_details="User not found")
+    
+    # Get the group ID from the request or infer it from user's memberships
+    group_id_raw = body.get("group_id")
+    if group_id_raw:
         try:
-            date_of_loss = datetime.strptime(body["date_of_loss"], "%Y-%m-%d").date()
-        except ValueError:
-            return response.api_response(400, error_details="Invalid date format. Expected YYYY-MM-DD")
-            
-        # Validate date is not in the future
-        if date_of_loss > date.today():
-            return response.api_response(400, error_details="Future date is not allowed")
-
-        # Use the household_id from the authenticated user or from the body (for tests)
-        if "household_id" in body:
-            # This is primarily for testing
-            try:
-                household_id = str(body["household_id"])
-                household_uuid = uuid.UUID(household_id)
-            except (ValueError, TypeError):
-                return response.api_response(400, error_details="Invalid household ID format. Expected UUID")
-                
-            # Check if household exists
-            household = db_session.query(Household).filter_by(id=household_uuid).first()
-            if not household:
-                return response.api_response(404, error_details="Household not found")
+            group_id = uuid.UUID(group_id_raw)
+        except (ValueError, TypeError):
+            return response.api_response(400, error_details="Invalid group ID format. Expected UUID")
+    else:
+        # Infer group from user's active memberships
+        active_memberships = [
+            m for m in user.memberships
+            if m.status_id == MembershipStatusEnum.ACTIVE.value
+        ]
+        if len(active_memberships) == 1:
+            group_id = active_memberships[0].group_id
+        elif len(active_memberships) == 0:
+            return response.api_response(400, error_details="You are not part of any active group.")
         else:
-            # Use the household_id from the authenticated user
-            household_id = str(user.household_id)
-            household_uuid = uuid.UUID(household_id)
+            return response.api_response(400, error_details="Multiple active groups found. Please specify which group to use.")
 
-        # Check for duplicate title
-        existing_claim = db_session.query(Claim).filter(
-            Claim.title == body["title"],
-            Claim.household_id == household_uuid
-        ).first()
+    if not has_permission(user, action=PermissionAction.WRITE, resource_type="claim", group_id=group_id, db=db_session):
+        return response.api_response(403, error_details="You do not have permission to create claims in this group")
+
+    # Validate title
+    title = body["title"].strip()
+    if not title:
+        return response.api_response(400, error_details="Title cannot be empty")
+
+    # Validate and parse date_of_loss
+    try:
+        date_of_loss = datetime.strptime(body["date_of_loss"], "%Y-%m-%d").date()
+        if date_of_loss > datetime.now().date():
+            return response.api_response(400, error_details="Date of loss cannot be in the future")
+    except ValueError:
+        return response.api_response(400, error_details="Invalid date format. Expected YYYY-MM-DD")
+
+    try:
+        new_claim = Claim(
+            title=title,
+            description=body.get("description", ""),
+            date_of_loss=date_of_loss,
+            group_id=group_id,
+            created_by=user.id
+        )
+        db_session.add(new_claim)
+        db_session.commit()
+        db_session.refresh(new_claim)
+
+        logger.info("Claim %s created by user %s in group %s", new_claim.id, user.id, group_id)
         
-        if existing_claim:
-            return response.api_response(400, error_details="A claim with this title already exists")
+        resource_types = db_session.query(ResourceType).filter(
+            ResourceType.id.in_(["claim", "file", "item"])
+        ).all()
+        resource_map = {r.id: r for r in resource_types}
 
-        # Create the claim
-        try:
-            new_claim = Claim(
-                id=uuid.uuid4(),
-                title=body["title"],
-                description=body.get("description", ""),
-                date_of_loss=date_of_loss,
-                household_id=household_uuid
-            )
-            
-            db_session.add(new_claim)
-            db_session.commit()
-            db_session.refresh(new_claim)
-        except Exception as e:
-            # This will catch database connection issues
-            logger.error("Database error occurred: %s", str(e))
-            return response.api_response(500, error_details=f"Database error: {str(e)}")
+        permissions = []
 
-        # Prepare response
-        created_claim = {
+        # Claim permissions
+        for action in [PermissionAction.READ, PermissionAction.WRITE, PermissionAction.DELETE]:
+            permissions.append(Permission(
+                subject_type="user",
+                subject_id=user.id,
+                action=action,
+                resource_type=resource_map["claim"],
+                resource_id=new_claim.id
+            ))
+
+        # File and Item creation permissions scoped to the claim
+        for resource_id in ["file", "item"]:
+            permissions.append(Permission(
+                subject_type="user",
+                subject_id=user.id,
+                action=PermissionAction.WRITE,
+                resource_type=resource_map[resource_id],
+                resource_id=new_claim.id
+            ))
+
+        db_session.add_all(permissions)
+        db_session.commit()
+        # Prepare response data
+        claim_data = {
             "id": str(new_claim.id),
             "title": new_claim.title,
             "description": new_claim.description,
             "date_of_loss": new_claim.date_of_loss.strftime("%Y-%m-%d"),
+            "group_id": str(new_claim.group_id)
         }
+        
+        return response.api_response(201, data=claim_data, success_message="Claim created successfully")
 
-        return response.api_response(201, data=created_claim, success_message="Claim created successfully")
-
-    except SQLAlchemyError as e:
-        logger.error("Database error occurred: %s", str(e))
-        if 'db_session' in locals():
-            db_session.rollback()
-        return response.api_response(500, error_details=f"Database error: {str(e)}")
+    except IntegrityError as e:
+        db_session.rollback()
+        if "duplicate key" in str(e.orig):
+            return response.api_response(409, error_details="A claim with similar data already exists")
+        return response.api_response(500, error_details="Database error: " + str(e))
 
     except Exception as e:
-        logger.exception("Unexpected error creating claim")
-        if 'db_session' in locals():
-            db_session.rollback()
-        return response.api_response(500, error_details=f"Internal server error: {str(e)}")
-
-    finally:
-        if db_session is not None:
-            db_session.close()
+        db_session.rollback()
+        logger.exception("Error creating claim")
+        return response.api_response(500, error_details="An unexpected error occurred: " + str(e))

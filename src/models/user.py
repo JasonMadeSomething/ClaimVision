@@ -1,6 +1,7 @@
-from sqlalchemy import String, ForeignKey, UUID
+from sqlalchemy import String, UUID
 from sqlalchemy.orm import relationship, Mapped, mapped_column
 import uuid
+from typing import List
 from models.base import Base  # Restored Base import
 
 class User(Base):
@@ -18,7 +19,8 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String, nullable=False)
     cognito_sub: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
-    memberships: Mapped[list["GroupMembership"]] = relationship("GroupMembership", back_populates="user")
+    memberships: Mapped[List["GroupMembership"]] = relationship("GroupMembership", back_populates="user")
+    claims_created: Mapped[List["Claim"]] = relationship("Claim", back_populates="creator")
 
     def to_dict(self):
         return {
