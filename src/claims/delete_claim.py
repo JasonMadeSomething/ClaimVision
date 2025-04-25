@@ -11,6 +11,8 @@ from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
 from database.database import get_db_session
 from datetime import datetime, timezone
+from utils.access_control import has_permission, AccessDeniedError
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 
 logger = get_logger(__name__)
@@ -18,7 +20,7 @@ logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
-    Handles soft deleting a claim for the authenticated user's household.
+    Handles soft deleting a claim for the authenticated user.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
@@ -47,17 +49,23 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if not claim:
             return response.api_response(404, error_details="Claim not found")
         
-        # Check if user has access to the claim (belongs to their household)
-        if str(claim.household_id) != str(user.household_id):
-            # Return 404 for security reasons (don't reveal that the claim exists)
-            return response.api_response(404, error_details="Claim not found")
+        # Check if user has permission to delete the claim
+        if not has_permission(
+            user=user,
+            action=PermissionAction.DELETE,
+            resource_type=ResourceTypeEnum.CLAIM.value,
+            db=db_session,
+            resource_id=claim_id
+        ):
+            logger.warning(f"User {user.id} attempted to delete claim {claim_id} without permission")
+            return response.api_response(403, error_details="You do not have access to delete this claim")
 
         # Perform soft delete
         try:
-            # Check for an existing deleted claim with the same title in this household
+            # Check for an existing deleted claim with the same title in this group
             existing_deleted_claim = db_session.query(Claim).filter(
                 Claim.title == claim.title,
-                Claim.household_id == claim.household_id,
+                Claim.group_id == claim.group_id,
                 Claim.deleted,  
                 Claim.id != claim.id
             ).first()
@@ -93,6 +101,9 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         db_session.rollback()
         logger.error(f"Database error when deleting claim {claim_id}: {str(e)}")
         return response.api_response(500, error_details="Database error when deleting claim")
+    except AccessDeniedError as e:
+        logger.warning(f"Access denied: {str(e)}")
+        return response.api_response(403, error_details=f"Access denied: {str(e)}")
     except Exception as e:
         logger.exception("Unexpected error deleting claim")
         return response.api_response(500, error_details=f"Internal server error: {str(e)}")
