@@ -370,12 +370,12 @@ def test_permission_inheritance_does_not_apply(test_db, api_gateway_event, setup
     user1 = setup_multiple_groups_and_users["user1"]
     user2 = setup_multiple_groups_and_users["user2"]
     group1_id = setup_multiple_groups_and_users["group1_id"]
+    group1_claim1_id = setup_multiple_groups_and_users["group1_claim1_id"]
     group1_claim2_id = setup_multiple_groups_and_users["group1_claim2_id"]
     
     # Grant user2 access to one specific claim in group1
     specific_claim_permission = Permission(
         id=uuid.uuid4(),
-        group1_claim1_id = setup_multiple_groups_and_users["group1_claim1_id"]
         subject_type="user",
         subject_id=user2.id,
         resource_type_id=ResourceTypeEnum.CLAIM.value,  # Permission on a specific claim
