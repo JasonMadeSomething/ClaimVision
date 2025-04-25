@@ -221,3 +221,71 @@ resource "aws_sqs_queue" "email_queue" {
     Environment = var.env
   }
 }
+
+# S3 upload notification queue
+resource "aws_sqs_queue" "s3_upload_notification_queue" {
+  name                      = "claimvision-s3-upload-notification-queue-${var.env}"
+  delay_seconds             = 0
+  max_message_size          = 262144  # 256 KB
+  message_retention_seconds = 86400   # 1 day
+  receive_wait_time_seconds = 10
+  visibility_timeout_seconds = 300    # 5 minutes
+
+  tags = {
+    Name = "ClaimVision-S3UploadNotificationQueue-${var.env}"
+  }
+}
+
+# Dead Letter Queue for S3 upload notifications
+resource "aws_sqs_queue" "s3_upload_notification_dlq" {
+  name                      = "claimvision-s3-upload-notification-dlq-${var.env}"
+  message_retention_seconds = 1209600  # 14 days
+
+  tags = {
+    Name = "ClaimVision-S3UploadNotificationDLQ-${var.env}"
+  }
+}
+
+# Update the S3 notification queue to use the DLQ
+resource "aws_sqs_queue_redrive_policy" "s3_upload_notification_redrive" {
+  queue_url = aws_sqs_queue.s3_upload_notification_queue.id
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.s3_upload_notification_dlq.arn
+    maxReceiveCount     = 5
+  })
+}
+
+# S3 bucket notification to SQS
+resource "aws_s3_bucket_notification" "bucket_notification" {
+  bucket = var.s3_bucket_id
+  
+  queue {
+    queue_arn     = aws_sqs_queue.s3_upload_notification_queue.arn
+    events        = ["s3:ObjectCreated:*"]
+    filter_prefix = "pending/"
+  }
+}
+
+# Allow S3 to send messages to SQS
+resource "aws_sqs_queue_policy" "s3_to_sqs_policy" {
+  queue_url = aws_sqs_queue.s3_upload_notification_queue.id
+
+  policy = jsonencode({
+    Version = "2012-10-17",
+    Statement = [
+      {
+        Effect = "Allow",
+        Principal = {
+          Service = "s3.amazonaws.com"
+        },
+        Action = "sqs:SendMessage",
+        Resource = aws_sqs_queue.s3_upload_notification_queue.arn,
+        Condition = {
+          ArnEquals = {
+            "aws:SourceArn" = var.s3_bucket_arn
+          }
+        }
+      }
+    ]
+  })
+}

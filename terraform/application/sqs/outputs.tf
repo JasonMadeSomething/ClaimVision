@@ -99,3 +99,16 @@ output "deliver_report_queue_url" {
 output "deliver_report_queue_arn" {
   value = aws_sqs_queue.deliver_report_queue.arn
 }
+
+output "s3_upload_notification_queue_url" {
+  value = aws_sqs_queue.s3_upload_notification_queue.url
+}
+
+output "s3_upload_notification_queue_arn" {
+  value = aws_sqs_queue.s3_upload_notification_queue.arn
+}
+
+output "s3_upload_notification_queue_name" {
+  description = "Name of the S3 upload notification queue"
+  value       = aws_sqs_queue.s3_upload_notification_queue.name
+}
