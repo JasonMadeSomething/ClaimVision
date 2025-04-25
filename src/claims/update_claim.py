@@ -10,6 +10,8 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from models import Claim
+from utils.access_control import has_permission, AccessDeniedError
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 
 logger = get_logger(__name__)
@@ -19,7 +21,7 @@ logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True, requires_body=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
     """
-    Handles updating a claim by ID for the authenticated user's household.
+    Handles updating a claim by ID for the authenticated user.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
@@ -46,10 +48,16 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
         if not claim:
             return response.api_response(404, error_details="Claim not found")
         
-        # Check if user has access to the claim (belongs to their household)
-        if str(claim.household_id) != str(user.household_id):
-            # Return 404 for security reasons (don't reveal that the claim exists)
-            return response.api_response(404, error_details="Claim not found")
+        # Check if user has permission to update the claim
+        if not has_permission(
+            user=user,
+            action=PermissionAction.WRITE,
+            resource_type=ResourceTypeEnum.CLAIM.value,
+            db=db_session,
+            resource_id=claim_id
+        ):
+            logger.warning(f"User {user.id} attempted to update claim {claim_id} without permission")
+            return response.api_response(403, error_details="You do not have access to update this claim")
         
         # Validate that only allowed fields are being updated
         allowed_fields = ["title", "description", "date_of_loss"]
@@ -108,8 +116,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
             "description": claim.description or "",
             "date_of_loss": claim.date_of_loss.strftime("%Y-%m-%d"),
             "created_at": claim.created_at.isoformat() if hasattr(claim, 'created_at') else None,
-            "updated_at": claim.updated_at.isoformat() if hasattr(claim, 'updated_at') and claim.updated_at else None,
-            "household_id": str(claim.household_id)
+            "updated_at": claim.updated_at.isoformat() if hasattr(claim, 'updated_at') and claim.updated_at else None
         }
         
         return response.api_response(200, data=updated_claim, success_message="Claim updated successfully")
@@ -126,6 +133,9 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
         db_session.rollback()
         logger.error(f"Database error when updating claim {claim_id}: {str(e)}")
         return response.api_response(500, error_details="Database error when updating claim")
+    except AccessDeniedError as e:
+        logger.warning(f"Access denied: {str(e)}")
+        return response.api_response(403, error_details=f"Access denied: {str(e)}")
     except Exception as e:
         logger.error("Error updating claim: %s", str(e))
         return response.api_response(500, error_details=f"Error updating claim: {str(e)}")

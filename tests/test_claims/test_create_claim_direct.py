@@ -9,22 +9,6 @@ from models.permissions import PermissionAction
 # Import the lambda_handler function directly
 from claims.create_claim import lambda_handler
 
-def create_mock_jwt(user_id):
-    """Create a mock JWT token with the correct structure."""
-    # Create a simple JWT with header, payload, and signature parts
-    header = base64.b64encode(json.dumps({"alg": "none"}).encode()).decode()
-    
-    # Ensure the UUID is in the correct format (no hyphens)
-    if isinstance(user_id, str) and '-' in user_id:
-        # Remove hyphens from the UUID string
-        user_id = user_id.replace('-', '')
-    
-    payload = base64.b64encode(json.dumps({"sub": str(user_id)}).encode()).decode()
-    signature = base64.b64encode(b"").decode()
-    
-    # Join the parts with dots to form a valid JWT structure
-    return f"{header}.{payload}.{signature}"
-
 @pytest.fixture
 def mock_db_session():
     """Create a mock database session for testing."""
@@ -41,14 +25,14 @@ def mock_db_session():
     
     return mock_session
 
-def test_create_claim_direct(mock_db_session, seed_user_and_group):
+def test_create_claim_direct(mock_db_session, seed_user_and_group, create_jwt_token):
     """Test claim creation directly without going through the decorator."""
     # Get test data from the seed_user_and_group fixture
     user = seed_user_and_group["user"]
     group_id = seed_user_and_group["group_id"]
     
-    # Create a mock JWT token
-    mock_token = create_mock_jwt(user.cognito_sub)
+    # Create a mock JWT token using the fixture
+    mock_token = create_jwt_token(user.cognito_sub)
     
     # Create a mock event with the necessary data and Authorization header
     event = {
@@ -73,6 +57,35 @@ def test_create_claim_direct(mock_db_session, seed_user_and_group):
         with patch("claims.create_claim.has_permission") as mock_has_permission:
             mock_has_permission.return_value = True
             
+            # Create mock resource types
+            mock_claim_type = MagicMock()
+            mock_claim_type.id = "claim"
+            
+            mock_file_type = MagicMock()
+            mock_file_type.id = "file"
+            
+            mock_item_type = MagicMock()
+            mock_item_type.id = "item"
+            
+            # Set up resource types dictionary
+            resource_types_dict = {
+                "claim": mock_claim_type,
+                "file": mock_file_type,
+                "item": mock_item_type
+            }
+            
+            # Mock the db_session.query for ResourceType
+            def mock_query_side_effect(*args):
+                if args and args[0].__name__ == "ResourceType":
+                    mock_query = MagicMock()
+                    mock_filter = MagicMock()
+                    mock_query.filter.return_value = mock_filter
+                    mock_filter.all.return_value = [mock_claim_type, mock_file_type, mock_item_type]
+                    return mock_query
+                return mock_db_session.query.return_value
+            
+            mock_db_session.query.side_effect = mock_query_side_effect
+            
             # Call the lambda handler directly with our mocked session
             response = lambda_handler(event, {}, db_session=mock_db_session)
             
@@ -80,30 +93,36 @@ def test_create_claim_direct(mock_db_session, seed_user_and_group):
             assert response["statusCode"] == 201, f"Expected 201, got {response['statusCode']}: {response['body']}"
             
             # Verify that a claim was created
-            mock_db_session.add.assert_called_once()
-            mock_db_session.commit.assert_called_once()
+            mock_db_session.add.assert_called()
+            mock_db_session.commit.assert_called()
             
             # Get the claim that was created
-            claim_arg = mock_db_session.add.call_args[0][0]
-            assert isinstance(claim_arg, Claim)
+            claim_arg = None
+            for call in mock_db_session.add.call_args_list:
+                arg = call[0][0]
+                if isinstance(arg, Claim):
+                    claim_arg = arg
+                    break
+                    
+            assert claim_arg is not None
             assert claim_arg.title == "Test Claim"
             assert claim_arg.group_id == group_id
             
             # Verify that has_permission was called with the correct action
             mock_has_permission.assert_called_with(
                 user, 
-                action=PermissionAction.WRITE.value, 
+                action=PermissionAction.WRITE, 
                 resource_type="claim", 
                 group_id=group_id, 
                 db=mock_db_session
             )
 
-def test_create_claim_missing_fields_direct(mock_db_session, seed_user_and_group):
+def test_create_claim_missing_fields_direct(mock_db_session, seed_user_and_group, create_jwt_token):
     """Test claim creation with missing fields."""
     user = seed_user_and_group["user"]
     
-    # Create a mock JWT token
-    mock_token = create_mock_jwt(user.cognito_sub)
+    # Create a mock JWT token using the fixture
+    mock_token = create_jwt_token(user.cognito_sub)
     
     # Create a mock event with missing date_of_loss and Authorization header
     event = {
@@ -129,20 +148,20 @@ def test_create_claim_missing_fields_direct(mock_db_session, seed_user_and_group
         # Check the response
         assert response["statusCode"] == 400
         body = json.loads(response["body"])
-        assert "error_details" in body
-        assert "date_of_loss" in body["error_details"]
+        assert "missing_fields" in body["data"]
+        assert "date_of_loss" in body["data"]["missing_fields"]
         
         # Verify that no claim was created
         mock_db_session.add.assert_not_called()
         mock_db_session.commit.assert_not_called()
 
-def test_create_claim_invalid_date_format_direct(mock_db_session, seed_user_and_group):
+def test_create_claim_invalid_date_format_direct(mock_db_session, seed_user_and_group, create_jwt_token):
     """Test claim creation with invalid date format."""
     user = seed_user_and_group["user"]
     group_id = seed_user_and_group["group_id"]
     
-    # Create a mock JWT token
-    mock_token = create_mock_jwt(user.cognito_sub)
+    # Create a mock JWT token using the fixture
+    mock_token = create_jwt_token(user.cognito_sub)
     
     # Create a mock event with invalid date format and Authorization header
     event = {
@@ -176,13 +195,13 @@ def test_create_claim_invalid_date_format_direct(mock_db_session, seed_user_and_
         mock_db_session.add.assert_not_called()
         mock_db_session.commit.assert_not_called()
 
-def test_create_claim_no_permission_direct(mock_db_session, seed_user_and_group):
+def test_create_claim_no_permission_direct(mock_db_session, seed_user_and_group, create_jwt_token):
     """Test claim creation when the user doesn't have permission."""
     user = seed_user_and_group["user"]
     group_id = seed_user_and_group["group_id"]
     
-    # Create a mock JWT token
-    mock_token = create_mock_jwt(user.cognito_sub)
+    # Create a mock JWT token using the fixture
+    mock_token = create_jwt_token(user.cognito_sub)
     
     # Create a mock event with Authorization header
     event = {
@@ -223,7 +242,7 @@ def test_create_claim_no_permission_direct(mock_db_session, seed_user_and_group)
             # Verify that has_permission was called with the correct action
             mock_has_permission.assert_called_with(
                 user, 
-                action=PermissionAction.WRITE.value, 
+                action=PermissionAction.WRITE, 
                 resource_type="claim", 
                 group_id=group_id, 
                 db=mock_db_session

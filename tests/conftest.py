@@ -190,6 +190,206 @@ def seed_user_and_group(test_db):
         "group": group
     }
 
+@pytest.fixture
+def create_resource_permission(test_db):
+    """
+    Create a permission for a specific resource.
+    
+    This fixture returns a function that can be used to create permissions for specific resources,
+    making it easier to test the ACL system with different resource types.
+    
+    Args:
+        user_id: The ID of the user to grant permission to
+        resource_type: The type of resource (from ResourceTypeEnum)
+        resource_id: The ID of the specific resource (or None for all resources of this type)
+        action: The permission action (from PermissionAction)
+        group_id: The group ID to associate with the permission
+        conditions: Optional conditions for the permission (default: group_id condition)
+        
+    Returns:
+        The created Permission object
+    """
+    def _create_permission(user_id, resource_type, resource_id, action, group_id, conditions=None):
+        if conditions is None:
+            conditions = {"group_id": str(group_id)}
+            
+        permission = Permission(
+            id=uuid.uuid4(),
+            subject_type="user",
+            subject_id=str(user_id),
+            resource_type_id=resource_type,
+            resource_id=resource_id,
+            action=action,
+            conditions=json.dumps(conditions),
+            group_id=group_id
+        )
+        test_db.add(permission)
+        test_db.commit()
+        return permission
+        
+    return _create_permission
+
+@pytest.fixture
+def seed_multiple_users_and_groups(test_db):
+    """
+    Create multiple users and groups with different permission configurations.
+    
+    This fixture is useful for testing complex ACL scenarios where multiple users
+    have different levels of access to different resources.
+    
+    Returns:
+        dict: A dictionary containing the created users, groups, and their relationships
+    """
+    # Create users
+    owner_id = uuid.uuid4()
+    editor_id = uuid.uuid4()
+    viewer_id = uuid.uuid4()
+    
+    owner = User(
+        id=owner_id,
+        email="owner@example.com",
+        cognito_sub=str(uuid.uuid4()),
+        first_name="Owner",
+        last_name="User"
+    )
+    
+    editor = User(
+        id=editor_id,
+        email="editor@example.com",
+        cognito_sub=str(uuid.uuid4()),
+        first_name="Editor",
+        last_name="User"
+    )
+    
+    viewer = User(
+        id=viewer_id,
+        email="viewer@example.com",
+        cognito_sub=str(uuid.uuid4()),
+        first_name="Viewer",
+        last_name="User"
+    )
+    
+    test_db.add_all([owner, editor, viewer])
+    test_db.flush()
+    
+    # Create a group
+    group_id = uuid.uuid4()
+    group = Group(
+        id=group_id,
+        name="Test ACL Group",
+        group_type_id=GroupTypeEnum.HOUSEHOLD.value,
+        created_at=datetime.now(timezone.utc),
+        created_by=owner_id
+    )
+    test_db.add(group)
+    test_db.flush()
+    
+    # Create memberships
+    owner_membership = GroupMembership(
+        user_id=owner_id,
+        group_id=group_id,
+        role_id=GroupRoleEnum.OWNER.value,
+        identity_id=GroupIdentityEnum.HOMEOWNER.value,
+        status_id=MembershipStatusEnum.ACTIVE.value
+    )
+    
+    editor_membership = GroupMembership(
+        user_id=editor_id,
+        group_id=group_id,
+        role_id=GroupRoleEnum.EDITOR.value,
+        identity_id=GroupIdentityEnum.HOMEOWNER.value,
+        status_id=MembershipStatusEnum.ACTIVE.value
+    )
+    
+    viewer_membership = GroupMembership(
+        user_id=viewer_id,
+        group_id=group_id,
+        role_id=GroupRoleEnum.VIEWER.value,
+        identity_id=GroupIdentityEnum.HOMEOWNER.value,
+        status_id=MembershipStatusEnum.ACTIVE.value
+    )
+    
+    test_db.add_all([owner_membership, editor_membership, viewer_membership])
+    
+    # Create permissions for each user based on their role
+    
+    # Owner: Full permissions (read, write, delete)
+    for action in [PermissionAction.READ, PermissionAction.WRITE, PermissionAction.DELETE]:
+        for resource_type in [ResourceTypeEnum.CLAIM.value, ResourceTypeEnum.FILE.value, ResourceTypeEnum.ITEM.value]:
+            permission = Permission(
+                id=uuid.uuid4(),
+                subject_type="user",
+                subject_id=str(owner_id),
+                resource_type_id=resource_type,
+                resource_id=None,  # Applies to all resources of this type
+                action=action,
+                conditions=json.dumps({"group_id": str(group_id)}),
+                group_id=group_id
+            )
+            test_db.add(permission)
+    
+    # Editor: Read and write permissions, but no delete
+    for action in [PermissionAction.READ, PermissionAction.WRITE]:
+        for resource_type in [ResourceTypeEnum.CLAIM.value, ResourceTypeEnum.FILE.value, ResourceTypeEnum.ITEM.value]:
+            permission = Permission(
+                id=uuid.uuid4(),
+                subject_type="user",
+                subject_id=str(editor_id),
+                resource_type_id=resource_type,
+                resource_id=None,  # Applies to all resources of this type
+                action=action,
+                conditions=json.dumps({"group_id": str(group_id)}),
+                group_id=group_id
+            )
+            test_db.add(permission)
+    
+    # Viewer: Read-only permissions
+    for resource_type in [ResourceTypeEnum.CLAIM.value, ResourceTypeEnum.FILE.value, ResourceTypeEnum.ITEM.value]:
+        permission = Permission(
+            id=uuid.uuid4(),
+            subject_type="user",
+            subject_id=str(viewer_id),
+            resource_type_id=resource_type,
+            resource_id=None,  # Applies to all resources of this type
+            action=PermissionAction.READ,
+            conditions=json.dumps({"group_id": str(group_id)}),
+            group_id=group_id
+        )
+        test_db.add(permission)
+    
+    test_db.commit()
+    
+    return {
+        "group": group,
+        "group_id": group_id,
+        "owner": owner,
+        "owner_id": owner_id,
+        "editor": editor,
+        "editor_id": editor_id,
+        "viewer": viewer,
+        "viewer_id": viewer_id
+    }
+
+@pytest.fixture
+def create_jwt_token():
+    """
+    Create a valid JWT token for testing.
+    
+    Returns a function that takes a user's cognito_sub and generates a valid JWT token
+    that can be used in the Authorization header.
+    """
+    def _create_token(cognito_sub):
+        import base64
+        import json
+        
+        header = base64.b64encode(json.dumps({"alg": "none"}).encode()).decode()
+        payload = base64.b64encode(json.dumps({"sub": cognito_sub}).encode()).decode()
+        signature = base64.b64encode(b"").decode()
+        
+        return f"{header}.{payload}.{signature}"
+    
+    return _create_token
+
 # -----------------
 # API GATEWAY MOCKS
 # -----------------

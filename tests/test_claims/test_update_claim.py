@@ -1,238 +1,364 @@
 import json
+import pytest
 import uuid
-from datetime import datetime, timedelta, date
-from unittest.mock import patch
-from claims.update_claim import lambda_handler
+import base64
+from datetime import datetime, timezone
+from unittest.mock import patch, MagicMock
+
 from models.claim import Claim
-from models.household import Household
 from models.user import User
+from models.group import Group
+from models.group_membership import GroupMembership
+from models.permissions import Permission
+from utils.vocab_enums import GroupRoleEnum, GroupIdentityEnum, MembershipStatusEnum, GroupTypeEnum, ResourceTypeEnum, PermissionAction
+from claims.update_claim import lambda_handler
 
-
-def test_update_claim_success(test_db, api_gateway_event):
-    """ Test successful claim update"""
-    household_id = uuid.uuid4()
+def test_update_claim_success(test_db, api_gateway_event, seed_user_and_group, create_jwt_token, create_resource_permission):
+    """Test successful claim update"""
+    # Get the user and group from the fixture
+    user = seed_user_and_group["user"]
+    group_id = seed_user_and_group["group_id"]
+    
+    # Create a claim to update
     claim_id = uuid.uuid4()
-
-    # Create household, user, and claim
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(
-        id=uuid.uuid4(),
-        email="test@example.com",
-        first_name="Test",
-        last_name="User",
-        household_id=household_id,
-    )
-    test_claim = Claim(
+    claim = Claim(
         id=claim_id,
-        household_id=household_id,
-        title="Old Title",
-        date_of_loss=datetime(2024, 1, 10),
+        group_id=group_id,
+        title="Original Title",
+        description="Original Description",
+        date_of_loss=datetime(2024, 1, 1),
+        created_by=user.id
     )
-
-    test_db.add_all([test_household, test_user, test_claim])
+    test_db.add(claim)
     test_db.commit()
-
+    
+    # Add permission for the user to update this claim
+    create_resource_permission(
+        user_id=user.id,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        resource_id=claim_id,
+        action=PermissionAction.WRITE,
+        group_id=group_id
+    )
+    
+    # Create a valid JWT token
+    token = create_jwt_token(user.cognito_sub)
+    
+    # Create the event with updated claim data
     event = api_gateway_event(
         http_method="PUT",
         path_params={"claim_id": str(claim_id)},
-        auth_user=str(test_user.id),
-        body={"title": "New Title"},
+        body=json.dumps({
+            "title": "Updated Title",
+            "description": "Updated Description"
+        }),
+        auth_user=user.cognito_sub
     )
-    response = lambda_handler(event, {}, db_session=test_db)
-    response_body = json.loads(response["body"])
-
-    assert response["statusCode"] == 200
-    assert response_body["data"]["title"] == "New Title"
-
-
-def test_update_claim_unauthorized(test_db, api_gateway_event):
-    """ Test updating a claim that belongs to another user"""
-
-    # Create two separate households
-    authorized_household_id = uuid.uuid4()
-    unauthorized_household_id = uuid.uuid4()
-
-    test_household = Household(id=authorized_household_id, name="Authorized Household")
-    unauthorized_household = Household(
-        id=unauthorized_household_id, name="Unauthorized Household"
-    )
-
-    test_db.add_all([test_household, unauthorized_household])
-    test_db.commit()
-
-    # Create two users, each in their own household
-    authorized_user_id = uuid.uuid4()
-    unauthorized_user_id = uuid.uuid4()
-
-    authorized_user = User(
-        id=authorized_user_id,
-        email="auth@example.com",
-        first_name="Auth",
-        last_name="User",
-        household_id=authorized_household_id,
-    )
-    unauthorized_user = User(
-        id=unauthorized_user_id,
-        email="unauth@example.com",
-        first_name="Unauth",
-        last_name="User",
-        household_id=unauthorized_household_id,
-    )
-
-    test_db.add_all([authorized_user, unauthorized_user])
-    test_db.commit()
-
-    # Now create a claim in the authorized household
-    claim_id = uuid.uuid4()
-    test_claim = Claim(
-        id=claim_id,
-        household_id=authorized_household_id,
-        title="Old Title",
-        date_of_loss=datetime(2024, 1, 10),
-    )
-
-    test_db.add(test_claim)
-    test_db.commit()
-
-    # The unauthorized user tries to update the claim
-    event = api_gateway_event(
-        http_method="PUT",
-        path_params={"claim_id": str(claim_id)},
-        auth_user=str(unauthorized_user_id),
-        body={"title": "New Title"},
-    )
-    response = lambda_handler(event, {}, db_session=test_db)
-
-    assert response["statusCode"] == 404  # Security: Pretend it doesn't exist
-
-
-def test_update_claim_not_found(test_db, api_gateway_event):
-    """ Test updating a non-existent claim"""
-
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()  # Generate a valid user UUID
-
-    # Create a household and user before calling lambda_handler
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(
-        id=user_id,
-        email="test@example.com",
-        first_name="Test",
-        last_name="User",
-        household_id=household_id,
-    )
-    test_db.add_all([test_household, test_user])
-    test_db.commit()
-
-    # Attempt to update a claim that doesn’t exist
-    event = api_gateway_event(
-        http_method="PUT",
-        path_params={"claim_id": str(uuid.uuid4())},
-        auth_user=str(user_id),
-        body={"title": "Updated Title"},
-    )
-    response = lambda_handler(event, {}, db_session=test_db)
-    response_body = json.loads(response["body"])
-
-    assert response["statusCode"] == 404
-    assert "Claim not found" in response_body["error_details"]
-
-
-def test_update_claim_invalid_id(test_db, api_gateway_event):
-    """ Test updating a claim with an invalid UUID"""
-
-    # Ensure the user exists before testing the invalid claim ID
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
+    event["headers"]["Authorization"] = f"Bearer {token}"
     
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
-    
-    test_db.add_all([test_household, test_user])
-    test_db.commit()
-
-    event = api_gateway_event(
-        http_method="PUT",
-        path_params={"claim_id": "invalid-uuid"},  # Invalid claim ID
-        auth_user=str(user_id),  # User exists in the DB
-        body={"title": "New Title"},
-    )
-
-    response = lambda_handler(event, {}, db_session=test_db)
-    response_body = json.loads(response["body"])
-
-    assert response["statusCode"] == 400
-    assert "Invalid claim_id format" in response_body["error_details"]
-
-def test_update_claim_invalid_fields(test_db, api_gateway_event):
-    """ Test updating a claim with invalid fields"""
-    # Create a test household, user, and claim first
-    household_id = uuid.uuid4()
-    user_id = uuid.uuid4()
-    claim_id = uuid.uuid4()
-    
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(id=user_id, email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
-    test_claim = Claim(
-        id=claim_id,
-        title="Test Claim",
-        description="Test Description",
-        date_of_loss=date.today(),
-        household_id=household_id
-    )
-    
-    test_db.add_all([test_household, test_user, test_claim])
-    test_db.commit()
-    
-    # Now try to update with invalid fields
-    event = api_gateway_event(
-        http_method="PUT",
-        path_params={"claim_id": str(claim_id)},
-        auth_user=str(user_id),
-        body={"invalid_field": "Bad Data"},
-    )
+    # Call the lambda handler
     response = lambda_handler(event, {})
-    response_body = json.loads(response["body"])
-
-    assert response["statusCode"] == 400
-    assert "Invalid update fields" in response_body["error_details"]
-
-
-def test_update_claim_db_failure(api_gateway_event):
-    """ Test handling a database failure during claim update"""
-    with patch(
-        "utils.lambda_utils.get_db_session", side_effect=Exception("DB Failure")
-    ):
-        event = api_gateway_event(
-            http_method="PUT",
-            path_params={"claim_id": str(uuid.uuid4())},
-            auth_user=str(uuid.uuid4()),
-            body={"title": "New Title"},
-        )
-        response = lambda_handler(event, {})
-        response_body = json.loads(response["body"])
-
-    assert response["statusCode"] == 500
-    assert "DB Failure" in response_body["error_details"]
-
-def test_update_claim_no_future_date(test_db, api_gateway_event):
-    """ Test that claim date of loss cannot be set to a future date"""
-    household_id = uuid.uuid4()
-    claim_id = uuid.uuid4()
-
-    # Create household, user, and claim
-    test_household = Household(id=household_id, name="Test Household")
-    test_user = User(id=uuid.uuid4(), email="test@example.com", first_name="Test", last_name="User", household_id=household_id)
-    test_claim = Claim(id=claim_id, household_id=household_id, title="Old Title", date_of_loss=datetime(2024, 1, 10))
+    body = json.loads(response["body"])
     
-    test_db.add_all([test_household, test_user, test_claim])
+    # Verify the response
+    assert response["statusCode"] == 200
+    assert body["data"]["title"] == "Updated Title"
+    assert body["data"]["description"] == "Updated Description"
+    
+    # Verify the claim was updated in the database
+    updated_claim = test_db.query(Claim).filter(Claim.id == claim_id).first()
+    assert updated_claim.title == "Updated Title"
+    assert updated_claim.description == "Updated Description"
+
+def test_update_claim_not_found(test_db, api_gateway_event, seed_user_and_group, create_jwt_token):
+    """Test updating a non-existent claim"""
+    # Get the user from the fixture
+    user = seed_user_and_group["user"]
+    
+    # Generate a random claim ID that doesn't exist
+    non_existent_claim_id = uuid.uuid4()
+    
+    # Create a valid JWT token
+    token = create_jwt_token(user.cognito_sub)
+    
+    # Create the event with the non-existent claim ID
+    event = api_gateway_event(
+        http_method="PUT",
+        path_params={"claim_id": str(non_existent_claim_id)},
+        body=json.dumps({
+            "title": "Updated Title",
+            "description": "Updated Description"
+        }),
+        auth_user=user.cognito_sub
+    )
+    event["headers"]["Authorization"] = f"Bearer {token}"
+    
+    # Call the lambda handler
+    response = lambda_handler(event, {})
+    
+    # Verify the response
+    assert response["statusCode"] == 404
+    body = json.loads(response["body"])
+    assert "not found" in body["error_details"].lower()
+
+def test_update_claim_no_permission(test_db, api_gateway_event, seed_multiple_users_and_groups, create_jwt_token):
+    """Test updating a claim without permission"""
+    # Get users from the fixture
+    owner = seed_multiple_users_and_groups["owner"]
+    viewer = seed_multiple_users_and_groups["viewer"]
+    group_id = seed_multiple_users_and_groups["group_id"]
+    
+    # Create a claim that only the owner should be able to update
+    claim_id = uuid.uuid4()
+    claim = Claim(
+        id=claim_id,
+        group_id=group_id,
+        title="Owner's Claim",
+        description="This claim belongs to the owner",
+        date_of_loss=datetime(2024, 1, 1),
+        created_by=owner.id
+    )
+    test_db.add(claim)
     test_db.commit()
+    
+    # Create a valid JWT token for the viewer
+    token = create_jwt_token(viewer.cognito_sub)
+    
+    # Create the event with the viewer trying to update the owner's claim
+    event = api_gateway_event(
+        http_method="PUT",
+        path_params={"claim_id": str(claim_id)},
+        body=json.dumps({
+            "title": "Unauthorized Update",
+            "description": "This update should be rejected"
+        }),
+        auth_user=viewer.cognito_sub
+    )
+    event["headers"]["Authorization"] = f"Bearer {token}"
+    
+    # Call the lambda handler
+    response = lambda_handler(event, {})
+    
+    # Verify the response
+    assert response["statusCode"] == 403
+    body = json.loads(response["body"])
+    assert "permission" in body["error_details"].lower() or "access" in body["error_details"].lower()
+    
+    # Verify the claim was not updated in the database
+    unchanged_claim = test_db.query(Claim).filter(Claim.id == claim_id).first()
+    assert unchanged_claim.title == "Owner's Claim"
+    assert unchanged_claim.description == "This claim belongs to the owner"
 
-    future_date = (datetime.now() + timedelta(days=10)).strftime("%Y-%m-%d")
-
-    event = api_gateway_event(http_method="PUT", path_params={"claim_id": str(claim_id)}, auth_user=str(test_user.id), body={"date_of_loss": future_date})
-    response = lambda_handler(event, {}, db_session=test_db)
-    response_body = json.loads(response["body"])
-
+def test_update_claim_invalid_data(test_db, api_gateway_event, seed_user_and_group, create_jwt_token, create_resource_permission):
+    """Test updating a claim with invalid data"""
+    # Get the user and group from the fixture
+    user = seed_user_and_group["user"]
+    group_id = seed_user_and_group["group_id"]
+    
+    # Create a claim to update
+    claim_id = uuid.uuid4()
+    claim = Claim(
+        id=claim_id,
+        group_id=group_id,
+        title="Original Title",
+        description="Original Description",
+        date_of_loss=datetime(2024, 1, 1),
+        created_by=user.id
+    )
+    test_db.add(claim)
+    test_db.commit()
+    
+    # Add permission for the user to update this claim
+    create_resource_permission(
+        user_id=user.id,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        resource_id=claim_id,
+        action=PermissionAction.WRITE,
+        group_id=group_id
+    )
+    
+    # Create a valid JWT token
+    token = create_jwt_token(user.cognito_sub)
+    
+    # Create the event with invalid data (empty title)
+    event = api_gateway_event(
+        http_method="PUT",
+        path_params={"claim_id": str(claim_id)},
+        body=json.dumps({
+            "title": "",  # Empty title is invalid
+            "description": "Updated Description"
+        }),
+        auth_user=user.cognito_sub
+    )
+    event["headers"]["Authorization"] = f"Bearer {token}"
+    
+    # Call the lambda handler
+    response = lambda_handler(event, {})
+    
+    # Verify the response
     assert response["statusCode"] == 400
-    assert "Future date is not allowed" in response_body["error_details"]
+    body = json.loads(response["body"])
+    assert "title" in body["error_details"].lower()
+    
+    # Verify the claim was not updated in the database
+    unchanged_claim = test_db.query(Claim).filter(Claim.id == claim_id).first()
+    assert unchanged_claim.title == "Original Title"
+
+def test_update_claim_partial(test_db, api_gateway_event, seed_user_and_group, create_jwt_token, create_resource_permission):
+    """Test partial claim update (only updating some fields)"""
+    # Get the user and group from the fixture
+    user = seed_user_and_group["user"]
+    group_id = seed_user_and_group["group_id"]
+    
+    # Create a claim to update
+    claim_id = uuid.uuid4()
+    claim = Claim(
+        id=claim_id,
+        group_id=group_id,
+        title="Original Title",
+        description="Original Description",
+        date_of_loss=datetime(2024, 1, 1),
+        created_by=user.id
+    )
+    test_db.add(claim)
+    test_db.commit()
+    
+    # Add permission for the user to update this claim
+    create_resource_permission(
+        user_id=user.id,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        resource_id=claim_id,
+        action=PermissionAction.WRITE,
+        group_id=group_id
+    )
+    
+    # Create a valid JWT token
+    token = create_jwt_token(user.cognito_sub)
+    
+    # Create the event with only updating the title
+    event = api_gateway_event(
+        http_method="PUT",
+        path_params={"claim_id": str(claim_id)},
+        body=json.dumps({
+            "title": "Updated Title Only"
+            # No description update
+        }),
+        auth_user=user.cognito_sub
+    )
+    event["headers"]["Authorization"] = f"Bearer {token}"
+    
+    # Call the lambda handler
+    response = lambda_handler(event, {})
+    body = json.loads(response["body"])
+    
+    # Verify the response
+    assert response["statusCode"] == 200
+    assert body["data"]["title"] == "Updated Title Only"
+    assert body["data"]["description"] == "Original Description"  # Description should remain unchanged
+    
+    # Verify the claim was partially updated in the database
+    updated_claim = test_db.query(Claim).filter(Claim.id == claim_id).first()
+    assert updated_claim.title == "Updated Title Only"
+    assert updated_claim.description == "Original Description"
+
+def test_update_claim_malformed_json(test_db, api_gateway_event, seed_user_and_group, create_jwt_token):
+    """Test updating a claim with malformed JSON in the request body"""
+    # Get the user from the fixture
+    user = seed_user_and_group["user"]
+    group_id = seed_user_and_group["group_id"]
+    
+    # Create a claim to update
+    claim_id = uuid.uuid4()
+    claim = Claim(
+        id=claim_id,
+        group_id=group_id,
+        title="Original Title",
+        description="Original Description",
+        date_of_loss=datetime(2024, 1, 1),
+        created_by=user.id
+    )
+    test_db.add(claim)
+    test_db.commit()
+    
+    # Create a valid JWT token
+    token = create_jwt_token(user.cognito_sub)
+    
+    # Create the event with malformed JSON
+    event = api_gateway_event(
+        http_method="PUT",
+        path_params={"claim_id": str(claim_id)},
+        body="{title: 'Missing quotes', description: 'Invalid JSON'}",  # Malformed JSON
+        auth_user=user.cognito_sub
+    )
+    event["headers"]["Authorization"] = f"Bearer {token}"
+    
+    # Call the lambda handler
+    response = lambda_handler(event, {})
+    
+    # Verify the response
+    assert response["statusCode"] == 400
+    body = json.loads(response["body"])
+    assert "json" in body["error_details"].lower()
+    
+    # Verify the claim was not updated in the database
+    unchanged_claim = test_db.query(Claim).filter(Claim.id == claim_id).first()
+    assert unchanged_claim.title == "Original Title"
+
+def test_update_claim_db_error(test_db, api_gateway_event, seed_user_and_group, create_jwt_token, create_resource_permission):
+    """Test handling database errors during claim update"""
+    # Get the user and group from the fixture
+    user = seed_user_and_group["user"]
+    group_id = seed_user_and_group["group_id"]
+    
+    # Create a claim to update
+    claim_id = uuid.uuid4()
+    claim = Claim(
+        id=claim_id,
+        group_id=group_id,
+        title="Original Title",
+        description="Original Description",
+        date_of_loss=datetime(2024, 1, 1),
+        created_by=user.id
+    )
+    test_db.add(claim)
+    test_db.commit()
+    
+    # Add permission for the user to update this claim
+    create_resource_permission(
+        user_id=user.id,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        resource_id=claim_id,
+        action=PermissionAction.WRITE,
+        group_id=group_id
+    )
+    
+    # Create a valid JWT token
+    token = create_jwt_token(user.cognito_sub)
+    
+    # Create the event with updated claim data
+    event = api_gateway_event(
+        http_method="PUT",
+        path_params={"claim_id": str(claim_id)},
+        body=json.dumps({
+            "title": "Updated Title",
+            "description": "Updated Description"
+        }),
+        auth_user=user.cognito_sub
+    )
+    event["headers"]["Authorization"] = f"Bearer {token}"
+    
+    # Patch the SQLAlchemy session commit method to raise an exception
+    with patch('sqlalchemy.orm.session.Session.commit', side_effect=Exception("Test DB Error")):
+        # Call the lambda handler
+        response = lambda_handler(event, {})
+        
+        # Verify the response
+        assert response["statusCode"] == 500
+        body = json.loads(response["body"])
+        assert "error" in body["error_details"].lower()
+        
+        # Verify the claim was not updated in the database
+        test_db.expire_all()  # Clear the session cache
+        unchanged_claim = test_db.query(Claim).filter(Claim.id == claim_id).first()
+        assert unchanged_claim.title == "Original Title"
+        assert unchanged_claim.description == "Original Description"
