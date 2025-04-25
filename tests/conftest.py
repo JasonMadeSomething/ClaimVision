@@ -609,7 +609,7 @@ def seed_file(test_db, seed_user_and_group):
         file_name="test_file.jpg",
         s3_key=f"files/{file_id}.jpg",
         content_type="image/jpeg",
-        size_bytes=1024,
+        file_size=1024,
         status=FileStatus.PROCESSED,
         uploaded_by=user_id,
         group_id=group_id
@@ -673,4 +673,35 @@ def seed_item(test_db, seed_claim):
         "item": item,
         "claim_id": claim_id,
         "group_id": group_id
+    }
+
+@pytest.fixture
+def seed_file_with_claim(test_db, seed_claim):
+    """Inserts a test file into the database and associates it with a claim."""
+    user_id = seed_claim["user_id"]
+    group_id = seed_claim["group_id"]
+    claim_id = seed_claim["claim_id"]
+    file_id = uuid.uuid4()
+    
+    # Create a file associated with the claim
+    file = File(
+        id=file_id,
+        file_name="test_file.jpg",
+        s3_key=f"files/{file_id}.jpg",
+        content_type="image/jpeg",
+        file_size=1024,
+        status=FileStatus.PROCESSED,
+        uploaded_by=user_id,
+        group_id=group_id,
+        claim_id=claim_id
+    )
+    test_db.add(file)
+    test_db.commit()
+    
+    return {
+        "file_id": file_id,
+        "file": file,
+        "user_id": user_id,
+        "group_id": group_id,
+        "claim_id": claim_id
     }
