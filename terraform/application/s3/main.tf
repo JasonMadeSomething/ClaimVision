@@ -1,4 +1,3 @@
-
 locals {
   claimvision_bucket_arn = aws_s3_bucket.claimvision_bucket.arn
   reports_bucket_arn     = aws_s3_bucket.reports_bucket.arn
@@ -104,3 +103,22 @@ resource "aws_s3_bucket_policy" "reports_bucket_policy" {
   depends_on = [aws_s3_bucket.reports_bucket]
 }
 
+# S3 Event Notification for uploaded files
+resource "aws_s3_bucket_notification" "file_upload_notification" {
+  bucket = aws_s3_bucket.claimvision_bucket.id
+  
+  lambda_function {
+    lambda_function_arn = var.process_uploaded_file_lambda_arn
+    events              = ["s3:ObjectCreated:*"]
+    filter_prefix       = "pending/"
+  }
+}
+
+# Permission for S3 to invoke Lambda
+resource "aws_lambda_permission" "allow_s3_invoke_lambda" {
+  statement_id  = "AllowExecutionFromS3"
+  action        = "lambda:InvokeFunction"
+  function_name = var.process_uploaded_file_lambda_name
+  principal     = "s3.amazonaws.com"
+  source_arn    = aws_s3_bucket.claimvision_bucket.arn
+}

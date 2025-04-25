@@ -72,3 +72,52 @@ resource "aws_efs_access_point" "reports_access_point" {
     Name = "ClaimVision-ReportsAccessPoint-${var.env}"
   }
 }
+
+# File Processing EFS for handling ZIP files
+resource "aws_efs_file_system" "files_efs" {
+  creation_token = "claimvision-files-efs-${var.env}"
+  
+  lifecycle_policy {
+    transition_to_ia = "AFTER_7_DAYS"
+  }
+  
+  tags = {
+    Name = "ClaimVision-FilesEFS-${var.env}"
+  }
+}
+
+# Mount targets for file processing EFS
+resource "aws_efs_mount_target" "files_efs_mount_1" {
+  file_system_id  = aws_efs_file_system.files_efs.id
+  subnet_id       = var.public_subnet_1
+  security_groups = [aws_security_group.efs_sg.id]
+}
+
+resource "aws_efs_mount_target" "files_efs_mount_2" {
+  file_system_id  = aws_efs_file_system.files_efs.id
+  subnet_id       = var.public_subnet_2
+  security_groups = [aws_security_group.efs_sg.id]
+}
+
+# Access point for file processing Lambda functions
+resource "aws_efs_access_point" "files_access_point" {
+  file_system_id = aws_efs_file_system.files_efs.id
+  
+  posix_user {
+    gid = 1000
+    uid = 1000
+  }
+  
+  root_directory {
+    path = "/files"
+    creation_info {
+      owner_gid   = 1000
+      owner_uid   = 1000
+      permissions = "755"
+    }
+  }
+  
+  tags = {
+    Name = "ClaimVision-FilesAccessPoint-${var.env}"
+  }
+}

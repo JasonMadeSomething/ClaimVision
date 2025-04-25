@@ -6,3 +6,15 @@ variable "aws_account_id" {
   type        = string
   description = "AWS account ID"
 }
+
+variable "process_uploaded_file_lambda_arn" {
+  type        = string
+  description = "ARN of the process_uploaded_file Lambda function"
+  default     = ""
+}
+
+variable "process_uploaded_file_lambda_name" {
+  type        = string
+  description = "Name of the process_uploaded_file Lambda function"
+  default     = ""
+}
