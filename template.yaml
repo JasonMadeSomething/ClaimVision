@@ -1431,7 +1431,6 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Update User Role Function
   UpdateUserRoleFunction:
     Type: AWS::Serverless::Function
@@ -1476,7 +1475,6 @@ Resources:
             Path: /admin/users/{username}/role
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-
 
   # Get Files Function (Paginated)
   GetFilesFunction:
@@ -1524,7 +1522,6 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Get Single File Metadata Function
   GetFileFunction:
     Type: AWS::Serverless::Function
@@ -1566,7 +1563,6 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Update File Metadata Function (PATCH)
   UpdateFileMetadataFunction:
     Type: AWS::Serverless::Function
@@ -1593,7 +1589,6 @@ Resources:
             Path: /files/{file_id}
             Method: PATCH
             RestApiId: !Ref ClaimVisionAPI
-
 
   # Replace File Function (PUT)
   ReplaceFileFunction:
@@ -1625,7 +1620,6 @@ Resources:
             Path: /files/{file_id}
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
-
 
   # Delete File Function
   DeleteFileFunction:
@@ -1710,6 +1704,70 @@ Resources:
               - sqs:SendMessage
               - sqs:GetQueueUrl
             Resource: !Ref FileUploadQueueARN
+
+  GetUploadUrlFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.get_upload_url.lambda_handler
+      Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Architectures:
+        - x86_64
+      Events:
+        GetUploadUrlAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/upload-url
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: claimvision
+          S3_BUCKET_NAME: !Ref S3BucketName
+
+  ProcessUploadedFileFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: files.process_uploaded_file.lambda_handler
+      Runtime: python3.12
+      VpcConfig: !If 
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      CodeUri: src/
+      Role: !GetAtt ProcessFileLambdaRole.Arn
+      Timeout: 30
+      MemorySize: 512
+      Architectures:
+        - x86_64
+      Events:
+        S3UploadEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref S3BucketName
+            Events: s3:ObjectCreated:*
+            Filter:
+              S3Key:
+                Prefix: pending/
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: claimvision
+          S3_BUCKET_NAME: !Ref S3BucketName
+          SQS_UPLOAD_QUEUE_URL: !Ref FileUploadQueueURL
+          EFS_MOUNT_PATH: "/mnt/efs"
 
   ProcessFileFunction:
     Type: AWS::Serverless::Function
