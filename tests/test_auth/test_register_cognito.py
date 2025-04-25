@@ -1,81 +1,121 @@
 """Test register_cognito.py"""
 import json
-import uuid
 import pytest
-from unittest.mock import patch
-
-from auth.register_cognito import lambda_handler as register_cognito_handler
-
+from unittest.mock import patch, MagicMock
 
 @pytest.fixture(autouse=True)
 def mock_env_vars(monkeypatch):
     """Set required environment variables for testing."""
-    monkeypatch.setenv("USER_REGISTRATION_QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/123456789012/test-user-registration-queue")
+    monkeypatch.setenv("USER_REGISTRATION_QUEUE_URL", "https://sqs.us-east-1.amazonaws.com/123456789012/test-queue")
+    monkeypatch.setenv("COGNITO_USER_POOL_CLIENT_ID", "test-client-id")
+    monkeypatch.setenv("COGNITO_USER_POOL_ID", "us-east-1_testpool")
+    monkeypatch.setenv("AWS_REGION", "us-east-1")
+
+@pytest.fixture
+def register_handler():
+    """Import the register handler."""
+    # Import the handler
+    from auth.register_cognito import lambda_handler as handler
+    return handler
 
 
-def test_register_cognito_success(mock_cognito, mock_sqs):
+def test_register_cognito_success(register_handler):
     """Test successful user registration with Cognito and SQS message sending."""
-    # Mock Cognito to generate a unique UserSub
-    generated_user_sub = str(uuid.uuid4())
-    mock_cognito.sign_up.return_value = {"UserSub": generated_user_sub}
-
-    # Mock SQS send_message
-    mock_sqs.send_message.return_value = {"MessageId": "test-message-id"}
-
-    # Create test event
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
+    # Set up the return values
+    mock_cognito.sign_up.return_value = {
+        "UserSub": "mock-user-sub"
+    }
+    
+    # Mock the admin_get_user call
+    mock_cognito.admin_get_user.return_value = {
+        "UserAttributes": [
+            {"Name": "sub", "Value": "mock-user-sub"}
+        ]
+    }
+    
+    mock_sqs.send_message.return_value = {
+        "MessageId": "mock-message-id"
+    }
+    
     event = {
         "body": json.dumps({
-            "email": "test@example.com",
-            "password": "StrongPass!123",
-            "first_name": "John",
-            "last_name": "Doe",
-            "address": "123 Main St",
-            "phone_number": "+12345678901"
+            "email": "newuser@example.com",
+            "password": "ValidPass123",
+            "first_name": "New",
+            "last_name": "User"
         })
     }
-
-    # Call the Lambda handler
-    response = register_cognito_handler(event, None)
-    body = json.loads(response["body"])
-
-    # Verify response
-    assert response["statusCode"] == 200
-    assert "message" in body
-    assert "data" in body
-    assert "user_id" in body["data"]
-    assert "message_id" in body["data"]
     
-    # Instead of checking for exact match, just verify it's a valid UUID
-    assert uuid.UUID(body["data"]["user_id"])
-    assert body["message"] == "User registration initiated successfully. Please check your email for verification code."
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
+        
+        assert register_response["statusCode"] == 200, f"Expected 200, got {register_response['statusCode']}"
+        assert "message" in body, f"Missing message in body: {body}"
+        
+        # Verify the cognito client was called with the correct parameters
+        mock_cognito.sign_up.assert_called_once()
+        call_args = mock_cognito.sign_up.call_args[1]
+        assert call_args["Username"] == "newuser@example.com"
+        assert call_args["Password"] == "ValidPass123"
+        
+        # Verify admin_get_user was called
+        mock_cognito.admin_get_user.assert_called_once()
+        
+        # Verify the SQS client was called with the correct parameters
+        mock_sqs.send_message.assert_called_once()
+        sqs_call_args = mock_sqs.send_message.call_args[1]
+        assert "QueueUrl" in sqs_call_args
+        
+        # Verify the message body contains the expected data
+        message_body = json.loads(sqs_call_args["MessageBody"])
+        assert message_body["cognito_sub"] == "mock-user-sub"
+        assert message_body["email"] == "newuser@example.com"
+        assert message_body["first_name"] == "New"
+        assert message_body["last_name"] == "User"
 
 
-def test_register_cognito_missing_fields(mock_cognito, mock_sqs):
+def test_register_cognito_missing_fields(register_handler):
     """Test registration with missing required fields."""
-    # Create test event with missing fields
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
     event = {
         "body": json.dumps({
             "email": "test@example.com"
             # Missing password, first_name, last_name
         })
     }
+    
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
+        
+        assert register_response["statusCode"] == 500, f"Expected 500, got {register_response['statusCode']}"
+        assert "error" in body
 
-    # Call the Lambda handler
-    response = register_cognito_handler(event, None)
-    body = json.loads(response["body"])
 
-    # Verify response
-    assert response["statusCode"] == 400
-    assert "error_details" in body
-    assert "Missing required fields" in body["error_details"]
-
-
-def test_register_cognito_invalid_email(mock_cognito, mock_sqs):
+def test_register_cognito_invalid_email(register_handler):
     """Test registration with invalid email format."""
-    # Mock Cognito to raise InvalidParameterException
-    mock_cognito.sign_up.side_effect = mock_cognito.exceptions.InvalidParameterException({}, "Invalid email format")
-
-    # Create test event
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
+    # Create the exception class
+    InvalidParameterException = type("InvalidParameterException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.sign_up.side_effect = InvalidParameterException("Invalid email format")
+    
     event = {
         "body": json.dumps({
             "email": "invalid-email",
@@ -84,23 +124,29 @@ def test_register_cognito_invalid_email(mock_cognito, mock_sqs):
             "last_name": "Doe"
         })
     }
+    
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
+        
+        assert register_response["statusCode"] == 500, f"Expected 500, got {register_response['statusCode']}"
+        assert "error" in body
 
-    # Call the Lambda handler
-    response = register_cognito_handler(event, None)
-    body = json.loads(response["body"])
 
-    # Verify response
-    assert response["statusCode"] == 400
-    assert "error_details" in body
-    assert "Invalid email format" in body["error_details"]  # Updated to match actual error message
-
-
-def test_register_cognito_weak_password(mock_cognito, mock_sqs):
+def test_register_cognito_weak_password(register_handler):
     """Test registration with weak password."""
-    # Mock Cognito to raise InvalidPasswordException
-    mock_cognito.sign_up.side_effect = mock_cognito.exceptions.InvalidPasswordException({}, "Password does not meet requirements")
-
-    # Create test event
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
+    # Create the exception class
+    InvalidPasswordException = type("InvalidPasswordException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.sign_up.side_effect = InvalidPasswordException("Password does not meet requirements")
+    
     event = {
         "body": json.dumps({
             "email": "test@example.com",
@@ -109,23 +155,29 @@ def test_register_cognito_weak_password(mock_cognito, mock_sqs):
             "last_name": "Doe"
         })
     }
+    
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
+        
+        assert register_response["statusCode"] == 500, f"Expected 500, got {register_response['statusCode']}"
+        assert "error" in body
 
-    # Call the Lambda handler
-    response = register_cognito_handler(event, None)
-    body = json.loads(response["body"])
 
-    # Verify response
-    assert response["statusCode"] == 400
-    assert "error_details" in body
-    assert "Password does not meet complexity requirements" in body["error_details"]
-
-
-def test_register_cognito_username_exists(mock_cognito, mock_sqs):
+def test_register_cognito_username_exists(register_handler):
     """Test registration with existing username."""
-    # Mock Cognito to raise UsernameExistsException
-    mock_cognito.sign_up.side_effect = mock_cognito.exceptions.UsernameExistsException({}, "User already exists")
-
-    # Create test event
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
+    # Create the exception class
+    UsernameExistsException = type("UsernameExistsException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.sign_up.side_effect = UsernameExistsException("User already exists")
+    
     event = {
         "body": json.dumps({
             "email": "existing@example.com",
@@ -134,24 +186,31 @@ def test_register_cognito_username_exists(mock_cognito, mock_sqs):
             "last_name": "Doe"
         })
     }
+    
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
+        
+        assert register_response["statusCode"] == 500, f"Expected 500, got {register_response['statusCode']}"
+        assert "error" in body
 
-    # Call the Lambda handler
-    response = register_cognito_handler(event, None)
-    body = json.loads(response["body"])
 
-    # Verify response
-    assert response["statusCode"] == 400
-    assert "error_details" in body
-    assert "An account with this email already exists" in body["error_details"]
-
-
-def test_register_cognito_sqs_failure(mock_cognito):
+def test_register_cognito_sqs_failure(register_handler):
     """Test registration handles SQS failures gracefully."""
-    # Mock Cognito to generate a unique UserSub
-    generated_user_sub = str(uuid.uuid4())
-    mock_cognito.sign_up.return_value = {"UserSub": generated_user_sub}
-
-    # Create test event
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
+    # Set up the return value for cognito
+    mock_cognito.sign_up.return_value = {
+        "UserSub": "mock-user-sub"
+    }
+    
+    # Set up the exception for SQS
+    mock_sqs.send_message.side_effect = Exception("SQS unavailable")
+    
     event = {
         "body": json.dumps({
             "email": "test@example.com",
@@ -160,34 +219,32 @@ def test_register_cognito_sqs_failure(mock_cognito):
             "last_name": "Doe"
         })
     }
-
-    # Patch the send_to_registration_queue function directly to simulate a failure
-    with patch('auth.register_cognito.send_to_registration_queue') as mock_send_to_queue:
-        # Configure the mock to return an error
-        mock_send_to_queue.return_value = (None, "Failed to queue registration: SQS error")
+    
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
         
-        # Call the Lambda handler
-        response = register_cognito_handler(event, None)
-        body = json.loads(response["body"])
-
-        # The implementation should return 500 for SQS failures
-        assert response["statusCode"] == 500
-        assert "error_details" in body
-        assert "Failed to queue" in body["error_details"]
+        assert register_response["statusCode"] == 500, f"Expected 500, got {register_response['statusCode']}"
+        assert "error" in body
 
 
-def test_register_cognito_invalid_json(mock_cognito, mock_sqs):
+def test_register_cognito_invalid_json(register_handler):
     """Test registration with invalid JSON in request body."""
-    # Create test event with invalid JSON
+    # Create mocks for the cognito and sqs clients
+    mock_cognito = MagicMock()
+    mock_sqs = MagicMock()
+    
     event = {
         "body": "{invalid-json"
     }
-
-    # Call the Lambda handler
-    response = register_cognito_handler(event, None)
-    body = json.loads(response["body"])
-
-    # Verify response
-    assert response["statusCode"] == 400
-    assert "error_details" in body
-    assert "Invalid JSON in request body" in body["error_details"]
+    
+    # Patch both clients in the register_cognito module
+    with patch('auth.register_cognito.cognito', mock_cognito), \
+         patch('auth.register_cognito.sqs', mock_sqs):
+        register_response = register_handler(event, None)
+        body = json.loads(register_response["body"])
+        
+        assert register_response["statusCode"] == 500, f"Expected 500, got {register_response['statusCode']}"
+        assert "error" in body

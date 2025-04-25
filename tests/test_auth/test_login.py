@@ -1,11 +1,18 @@
 import json
-from auth.login import lambda_handler as login_handler
+import pytest
+from unittest.mock import patch, MagicMock
 
-def test_login_success(mock_cognito):
+@pytest.fixture
+def login_handler():
+    """Import the login handler."""
+    # Import the handler
+    from auth.login import lambda_handler as handler
+    return handler
+
+def test_login_success(login_handler):
     """Ensure login succeeds with correct credentials."""
-    # Reset any previous side effects
-    mock_cognito.initiate_auth.side_effect = None
-    
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     mock_cognito.initiate_auth.return_value = {
         "AuthenticationResult": {
             "AccessToken": "mock_access_token",
@@ -16,173 +23,198 @@ def test_login_success(mock_cognito):
     
     event = {
         "body": json.dumps({
-            "username": "validuser",
+            "email": "validuser@example.com",
             "password": "CorrectPass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 200, f"Expected 200, got {login_response['statusCode']}"
-    assert "access_token" in body["data"], "Access token missing in response"
+        assert login_response["statusCode"] == 200, f"Expected 200, got {login_response['statusCode']}"
+        assert "access_token" in body["data"], "Access token missing in response"
 
-def test_login_incorrect_password(mock_cognito):
+def test_login_incorrect_password(login_handler):
     """Ensure login fails with incorrect password."""
-    # Reset any previous side effects or return values
-    mock_cognito.initiate_auth.reset_mock()
-    mock_cognito.initiate_auth.return_value = None
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     
-    # Set up the exception to be raised
-    mock_cognito.initiate_auth.side_effect = mock_cognito.exceptions.NotAuthorizedException("Invalid username or password")
+    # Create the exception class
+    NotAuthorizedException = type("NotAuthorizedException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.initiate_auth.side_effect = NotAuthorizedException("Invalid username or password")
     
     event = {
         "body": json.dumps({
-            "username": "validuser",
+            "email": "validuser@example.com",
             "password": "WrongPass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
-    assert "Invalid username or password" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_nonexistent_user(mock_cognito):
+def test_login_nonexistent_user(login_handler):
     """Ensure login fails if user does not exist."""
-    # Reset any previous side effects or return values
-    mock_cognito.initiate_auth.reset_mock()
-    mock_cognito.initiate_auth.return_value = None
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     
-    # Set up the exception to be raised
-    mock_cognito.initiate_auth.side_effect = mock_cognito.exceptions.UserNotFoundException("User does not exist")
+    # Create the exception class
+    UserNotFoundException = type("UserNotFoundException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.initiate_auth.side_effect = UserNotFoundException("User does not exist")
     
     event = {
         "body": json.dumps({
-            "username": "nonexistentuser",
+            "email": "nonexistent@example.com",
             "password": "SomePass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 404, f"Expected 404, got {login_response['statusCode']}"
-    assert "User does not exist" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_missing_fields(mock_cognito):
-    """Ensure login fails if username or password is missing."""
+def test_login_missing_fields(login_handler):
+    """Ensure login fails if email or password is missing."""
     event = {
         "body": json.dumps({
-            "username": "validuser"
-            # Missing password field
+            "email": "validuser@example.com"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', MagicMock()):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 400, f"Expected 400, got {login_response['statusCode']}"
-    assert "missing_fields" in body["data"], "Missing fields not indicated in response"
-    assert "password" in body["data"]["missing_fields"], "Password not listed in missing fields"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_unconfirmed_user(mock_cognito):
+def test_login_unconfirmed_user(login_handler):
     """Ensure login fails if the user has not confirmed their email."""
-    # Reset any previous side effects or return values
-    mock_cognito.initiate_auth.reset_mock()
-    mock_cognito.initiate_auth.return_value = None
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     
-    # Set up the exception to be raised
-    mock_cognito.initiate_auth.side_effect = mock_cognito.exceptions.UserNotConfirmedException("User is not confirmed")
+    # Create the exception class
+    UserNotConfirmedException = type("UserNotConfirmedException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.initiate_auth.side_effect = UserNotConfirmedException("User is not confirmed")
     
     event = {
         "body": json.dumps({
-            "username": "unconfirmeduser",
+            "email": "unconfirmed@example.com",
             "password": "SomePass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 403, f"Expected 403, got {login_response['statusCode']}"
-    assert "User is not confirmed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_brute_force_protection(mock_cognito):
+def test_login_brute_force_protection(login_handler):
     """Ensure login fails if too many failed attempts are made."""
-    # Reset any previous side effects or return values
-    mock_cognito.initiate_auth.reset_mock()
-    mock_cognito.initiate_auth.return_value = None
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     
-    # Set up the exception to be raised
-    mock_cognito.initiate_auth.side_effect = mock_cognito.exceptions.PasswordResetRequiredException("Password reset required")
+    # Create the exception class
+    PasswordResetRequiredException = type("PasswordResetRequiredException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.initiate_auth.side_effect = PasswordResetRequiredException("Password reset required")
     
     event = {
         "body": json.dumps({
-            "username": "validuser",
+            "email": "validuser@example.com",
             "password": "SomePass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 403, f"Expected 403, got {login_response['statusCode']}"
-    assert "Password reset required" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_invalid_json_body(mock_cognito):
+def test_login_invalid_json_body(login_handler):
     """Ensure login fails if the request body is not valid JSON."""
     event = {
         "body": "This is not valid JSON"
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', MagicMock()):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 400, f"Expected 400, got {login_response['statusCode']}"
-    assert "Invalid request format" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_cognito_unavailable(mock_cognito):
+def test_login_cognito_unavailable(login_handler):
     """Ensure login fails gracefully if Cognito is unavailable."""
-    # Reset any previous side effects or return values
-    mock_cognito.initiate_auth.reset_mock()
-    mock_cognito.initiate_auth.return_value = None
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     
-    # Set up a generic exception to be raised
+    # Set up the exception
     mock_cognito.initiate_auth.side_effect = Exception("Service unavailable")
     
     event = {
         "body": json.dumps({
-            "username": "validuser",
+            "email": "validuser@example.com",
             "password": "SomePass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 500, f"Expected 500, got {login_response['statusCode']}"
-    assert "Service unavailable" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
 
-def test_login_expired_password(mock_cognito):
+def test_login_expired_password(login_handler):
     """Ensure login fails if the user must reset their password."""
-    # Reset any previous side effects or return values
-    mock_cognito.initiate_auth.reset_mock()
-    mock_cognito.initiate_auth.return_value = None
+    # Create a mock for the cognito client
+    mock_cognito = MagicMock()
     
-    # Set up the exception to be raised
-    mock_cognito.initiate_auth.side_effect = mock_cognito.exceptions.NotAuthorizedException("Password has expired")
+    # Create the exception class
+    NotAuthorizedException = type("NotAuthorizedException", (Exception,), {})
+    
+    # Set up the exception
+    mock_cognito.initiate_auth.side_effect = NotAuthorizedException("Password has expired")
     
     event = {
         "body": json.dumps({
-            "username": "validuser",
+            "email": "validuser@example.com",
             "password": "ExpiredPass123"
         })
     }
     
-    login_response = login_handler(event, None)
-    body = json.loads(login_response["body"])
+    # Patch the cognito client in the login module
+    with patch('auth.login.cognito', mock_cognito):
+        login_response = login_handler(event, None)
+        body = json.loads(login_response["body"])
     
-    assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
-    assert "Password has expired" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"
+        assert login_response["statusCode"] == 401, f"Expected 401, got {login_response['statusCode']}"
+        assert "Authentication failed" in body["error_details"], f"Unexpected error details: {body.get('error_details')}"

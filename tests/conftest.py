@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import pytest
+import boto3
 from dotenv import load_dotenv
 load_dotenv()
 from sqlalchemy import create_engine
