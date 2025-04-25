@@ -80,8 +80,7 @@ scripts/payloads/
 /.mypy_cache
 /.pytest_cache
 
-# Templates
-template.yaml
+
 
 /terraform/networking/.terraform/
 /terraform/networking/terraform.tfvars
