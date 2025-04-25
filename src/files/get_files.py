@@ -11,6 +11,8 @@ from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_u
 from utils import response
 from models.file import File
 from models.claim import Claim
+from utils.access_control import has_permission
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 import uuid
 
 logger = get_logger(__name__)
@@ -25,7 +27,7 @@ if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
-    Lambda handler to retrieve files for the authenticated user's household.
+    Lambda handler to retrieve files for the authenticated user based on permissions.
     Can optionally filter by claim_id if provided in path parameters.
     
     Args:
@@ -64,22 +66,66 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 
             claim_id = result
             
-            # Verify claim exists and belongs to user's household
-            claim = db_session.query(Claim).filter(
-                Claim.id == claim_id,
-                Claim.household_id == user.household_id
-            ).first()
+            # Verify claim exists and user has permission to access it
+            claim = db_session.query(Claim).filter(Claim.id == claim_id).first()
             
             if not claim:
-                logger.info("Claim not found or access denied: %s", claim_id)
-                return response.api_response(404, error_details="Claim not found or access denied")
+                logger.info("Claim not found: %s", claim_id)
+                return response.api_response(404, error_details="Claim not found")
+                
+            # Check if user has permission to access this claim
+            if not has_permission(
+                user=user,
+                resource_type=ResourceTypeEnum.CLAIM,
+                resource_id=claim_id,
+                action=PermissionAction.READ,
+                db=db_session
+            ):
+                logger.info("User %s does not have permission to access claim %s", user.id, claim_id)
+                return response.api_response(403, error_details="You do not have permission to access this claim")
         
-        # Query files for the user's household
-        files_query = db_session.query(File).filter(File.household_id == user.household_id)
-        
-        # Apply claim_id filter if provided
+        # Query files based on permissions
         if claim_id:
-            files_query = files_query.filter(File.claim_id == claim_id)
+            # If claim_id is provided, we've already checked permissions on the claim
+            # Get all files associated with this claim
+            files_query = db_session.query(File).filter(File.claim_id == claim_id)
+        else:
+            # If no claim_id, we need to get all files the user has access to
+            # This is more complex as we need to consider:
+            # 1. Files with direct permissions
+            # 2. Files associated with claims the user has access to
+            
+            # Get all claims the user has access to
+            accessible_claims = []
+            claims = db_session.query(Claim.id).all()
+            for claim in claims:
+                if has_permission(
+                    user=user,
+                    resource_type=ResourceTypeEnum.CLAIM,
+                    resource_id=claim.id,
+                    action=PermissionAction.READ,
+                    db=db_session
+                ):
+                    accessible_claims.append(claim.id)
+            
+            # Get files associated with accessible claims or with direct permissions
+            files_query = db_session.query(File)
+            
+            # Filter to only include files:
+            # 1. Associated with claims the user has access to, OR
+            # 2. Files the user has direct permission to access
+            if accessible_claims:
+                files_query = files_query.filter(
+                    (File.claim_id.in_(accessible_claims)) | 
+                    (File.claim_id.is_(None))  # Files not associated with any claim
+                )
+            else:
+                # If user has no accessible claims, only show files not associated with claims
+                files_query = files_query.filter(File.claim_id.is_(None))
+                
+            # For files not associated with claims, we need to filter further
+            # to only include those the user has direct permission to access
+            # This will be done after we get the initial results
             
         # Filter by specific file IDs if provided
         if file_ids:
@@ -90,11 +136,32 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 logger.warning("Invalid file ID format in query: %s", file_ids)
                 return response.api_response(400, error_details="Invalid file ID format")
 
-        # Get total count for pagination
-        total_count = files_query.count()
-
-        # Apply pagination
-        files = files_query.order_by(File.created_at.desc()).offset(offset).limit(limit).all()
+        # Get the files
+        files = files_query.order_by(File.created_at.desc()).all()
+        
+        # For files not associated with claims, filter to only include those
+        # the user has direct permission to access
+        accessible_files = []
+        for file in files:
+            if file.claim_id:
+                # Already checked claim permission above
+                accessible_files.append(file)
+            else:
+                # Check direct file permission
+                if has_permission(
+                    user=user,
+                    resource_type=ResourceTypeEnum.FILE,
+                    resource_id=file.id,
+                    action=PermissionAction.READ,
+                    db=db_session
+                ):
+                    accessible_files.append(file)
+        
+        # Get total count for pagination after permission filtering
+        total_count = len(accessible_files)
+        
+        # Apply pagination to the filtered list
+        paginated_files = accessible_files[offset:offset+limit]
 
         # Get S3 client
         s3_client = get_s3_client()
@@ -103,7 +170,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         file_data = []
         s3_failure = False
 
-        for file in files:
+        for file in paginated_files:
             file_info = {
                 "id": str(file.id),
                 "file_name": file.file_name,
@@ -145,7 +212,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if s3_failure:
             response_data["warning"] = "Some file URLs could not be generated"
             
-        logger.info("Retrieved %s files for household %s", len(file_data), user.household_id)
+        logger.info("Retrieved %s files for user %s", len(file_data), user.id)
         return response.api_response(200, data=response_data)
         
     except SQLAlchemyError as e:

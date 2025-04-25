@@ -612,7 +612,8 @@ def seed_file(test_db, seed_user_and_group):
         file_size=1024,
         status=FileStatus.PROCESSED,
         uploaded_by=user_id,
-        group_id=group_id
+        group_id=group_id,
+        file_hash=f"single_file_hash_{uuid.uuid4()}"  # Unique file hash
     )
     test_db.add(file)
     test_db.commit()
@@ -693,7 +694,8 @@ def seed_file_with_claim(test_db, seed_claim):
         status=FileStatus.PROCESSED,
         uploaded_by=user_id,
         group_id=group_id,
-        claim_id=claim_id
+        claim_id=claim_id,
+        file_hash=f"claim_file_hash_single_{uuid.uuid4()}"  # Unique file hash
     )
     test_db.add(file)
     test_db.commit()
@@ -704,4 +706,79 @@ def seed_file_with_claim(test_db, seed_claim):
         "user_id": user_id,
         "group_id": group_id,
         "claim_id": claim_id
+    }
+
+@pytest.fixture
+def seed_files_with_claim(test_db, seed_claim):
+    """Seeds multiple files associated with a claim for testing."""
+    user_id = seed_claim["user_id"]
+    group_id = seed_claim["group_id"]
+    claim_id = seed_claim["claim_id"]
+    
+    # Create multiple files associated with the claim
+    file_ids = []
+    files = []
+    
+    for i in range(5):
+        file_id = uuid.uuid4()
+        file = File(
+            id=file_id,
+            file_name=f"claim_file_{i}.jpg",
+            s3_key=f"files/{file_id}.jpg",
+            content_type="image/jpeg",
+            file_size=1024,
+            status=FileStatus.PROCESSED,
+            uploaded_by=user_id,
+            group_id=group_id,
+            claim_id=claim_id,
+            file_hash=f"claim_file_hash_{uuid.uuid4()}"  # Unique file hash for each file
+        )
+        test_db.add(file)
+        file_ids.append(file_id)
+        files.append(file)
+    
+    test_db.commit()
+    
+    return {
+        "file_ids": file_ids,
+        "files": files,
+        "claim_id": claim_id,
+        "user_id": user_id,
+        "group_id": group_id
+    }
+
+@pytest.fixture
+def seed_files(test_db, seed_user_and_group):
+    """Seeds multiple files for testing."""
+    user_id = seed_user_and_group["user_id"]
+    group_id = seed_user_and_group["group_id"]
+    
+    # Create multiple files
+    file_ids = []
+    files = []
+    
+    for i in range(5):
+        file_id = uuid.uuid4()
+        file = File(
+            id=file_id,
+            file_name=f"test_file_{i}.jpg",
+            s3_key=f"files/{file_id}.jpg",
+            content_type="image/jpeg",
+            file_size=1024,
+            status=FileStatus.PROCESSED,
+            uploaded_by=user_id,
+            group_id=group_id,
+            file_hash=f"file_hash_{uuid.uuid4()}"  # Unique file hash for each file
+        )
+        test_db.add(file)
+        file_ids.append(file_id)
+        files.append(file)
+    
+    test_db.commit()
+    
+    return {
+        "file_ids": file_ids,
+        "files": files,
+        "user_id": user_id,
+        "group_id": group_id
     }
