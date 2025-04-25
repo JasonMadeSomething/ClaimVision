@@ -12,9 +12,3 @@ variable "process_uploaded_file_lambda_arn" {
   description = "ARN of the process_uploaded_file Lambda function"
   default     = ""
 }
-
-variable "process_uploaded_file_lambda_name" {
-  type        = string
-  description = "Name of the process_uploaded_file Lambda function"
-  default     = ""
-}

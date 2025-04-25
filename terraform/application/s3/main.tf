@@ -105,6 +105,7 @@ resource "aws_s3_bucket_policy" "reports_bucket_policy" {
 
 # S3 Event Notification for uploaded files
 resource "aws_s3_bucket_notification" "file_upload_notification" {
+  count  = var.process_uploaded_file_lambda_arn != "" ? 1 : 0
   bucket = aws_s3_bucket.claimvision_bucket.id
   
   lambda_function {
@@ -116,9 +117,10 @@ resource "aws_s3_bucket_notification" "file_upload_notification" {
 
 # Permission for S3 to invoke Lambda
 resource "aws_lambda_permission" "allow_s3_invoke_lambda" {
+  count         = var.process_uploaded_file_lambda_arn != "" ? 1 : 0
   statement_id  = "AllowExecutionFromS3"
   action        = "lambda:InvokeFunction"
-  function_name = var.process_uploaded_file_lambda_name
+  function_name = var.process_uploaded_file_lambda_arn
   principal     = "s3.amazonaws.com"
   source_arn    = aws_s3_bucket.claimvision_bucket.arn
 }
