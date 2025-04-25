@@ -338,6 +338,56 @@ def generate_presigned_url(s3_client, bucket_name: str, s3_key: str, expiration:
         return None
 
 
+@s3_operation
+def generate_presigned_upload_url(s3_client, bucket_name: str, s3_key: str, content_type: str = None, expiration: int = 3600) -> dict:
+    """
+    Generate a pre-signed URL for uploading a file to S3 with proper error handling.
+    
+    Args:
+        s3_client: The boto3 S3 client
+        bucket_name: S3 bucket name
+        s3_key: The S3 object key
+        content_type: The content type of the file being uploaded
+        expiration: Time in seconds before the URL expires
+        
+    Returns:
+        dict: Contains the pre-signed URL and any additional fields needed for the upload
+    """
+    try:
+        logger.debug(f"Generating presigned PUT URL for bucket: {bucket_name}, key: {s3_key}")
+        
+        params = {
+            'Bucket': bucket_name,
+            'Key': s3_key
+        }
+        
+        if content_type:
+            params['ContentType'] = content_type
+        
+        url = s3_client.generate_presigned_url(
+            'put_object',
+            Params=params,
+            ExpiresIn=expiration,
+            HttpMethod='PUT'
+        )
+        
+        logger.debug("Presigned PUT URL generated successfully")
+        
+        return {
+            'url': url,
+            'method': 'PUT',
+            's3_key': s3_key,
+            'bucket': bucket_name,
+            'expires_in': expiration
+        }
+    except ClientError as e:
+        logger.error(f"Failed to generate presigned PUT URL: {str(e)}")
+        return None
+    except Exception as e:
+        logger.exception(f"Unexpected error generating presigned PUT URL: {str(e)}")
+        return None
+
+
 def get_s3_client():
     """
     Get a boto3 S3 client with standardized configuration.
