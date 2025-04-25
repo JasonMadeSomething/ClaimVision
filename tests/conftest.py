@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 import pytest
 from dotenv import load_dotenv
+load_dotenv()
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
@@ -16,7 +17,9 @@ from models.claim import Claim
 from models.item import Item
 from utils.vocab_enums import GroupTypeEnum, GroupRoleEnum, GroupIdentityEnum, MembershipStatusEnum, PermissionAction, ResourceTypeEnum
 
-load_dotenv()
+print(">>> conftest.py LOADED <<<")
+
+
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../src")))
 
 
