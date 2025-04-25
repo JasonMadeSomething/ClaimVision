@@ -30,7 +30,7 @@
  - Presigned S3 Uploads
  - Group ID -> Access policy abstraction
  - Claim Workbench endpoint (Load all resources on one pull)
- - Have the Web UI be ***less*** shit
+ - Have the Web UI be ***less*** shit -> might be irrelevant now
  - iPhone App -> ~~Buy a mac~~
  - Android App
  - Improve logging (who cares other than me though?)
@@ -55,3 +55,7 @@
  - Multiple group support (ie. Household, Adjuster, etc.)
  - CICD when I feel like an adult
  - Group invite by invite code (need a new table for this)
+ - Invite User to Household
+ - Invite Adjuster to view claim
+ - Harden registration process (stop login spam)
+ - Cross Machine CI Pipeline (Makefile(s))
