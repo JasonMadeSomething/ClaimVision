@@ -1,5 +1,5 @@
 """
-Lambda handler triggered by S3 events when files are uploaded.
+Lambda handler triggered by SQS events containing S3 notifications when files are uploaded.
 
 This module processes files after they've been uploaded to S3 and sends them to an SQS queue
 for asynchronous processing. It handles special cases like ZIP files by moving them to EFS
@@ -270,80 +270,96 @@ def create_file_record(db_session, file_info):
 
 def lambda_handler(event, context):
     """
-    Process S3 events triggered when files are uploaded.
+    Process SQS events containing S3 notifications when files are uploaded.
     
     Args:
-        event (dict): S3 event notification
+        event (dict): SQS event containing S3 notifications
         context (dict): Lambda execution context
         
     Returns:
         dict: Processing result
     """
-    logger.info("Processing S3 upload event")
+    logger.info("Processing SQS event with S3 upload notifications")
     
     try:
         # Initialize clients
         s3_client = get_s3_client()
         sqs_client = get_sqs_client()
         
-        # Process each record in the event
+        # Process each SQS message in the event
         results = []
         for record in event.get('Records', []):
             try:
-                # Extract S3 event information
-                bucket = record['s3']['bucket']['name']
-                s3_key = record['s3']['object']['key']
-                object_size = record['s3']['object'].get('size', 0)
+                # Extract the S3 event from the SQS message body
+                message_body = json.loads(record['body'])
                 
-                logger.info(f"Processing uploaded file: {s3_key} in bucket {bucket}")
+                # Check if this is an S3 event notification
+                if 'Records' not in message_body:
+                    logger.warning(f"Received non-S3 event message: {message_body}")
+                    continue
                 
-                # Extract metadata from the S3 key
-                metadata = extract_metadata_from_s3_key(s3_key)
-                if not metadata:
-                    logger.error(f"Could not extract metadata from S3 key: {s3_key}")
-                    results.append({
-                        "status": "error",
+                # Process each S3 record in the message
+                for s3_record in message_body.get('Records', []):
+                    if s3_record.get('eventSource') != 'aws:s3':
+                        continue
+                        
+                    # Extract S3 event information
+                    bucket = s3_record['s3']['bucket']['name']
+                    s3_key = s3_record['s3']['object']['key']
+                    object_size = s3_record['s3']['object'].get('size', 0)
+                    
+                    logger.info(f"Processing uploaded file: {s3_key} in bucket {bucket}")
+                    
+                    # Extract metadata from the S3 key
+                    metadata = extract_metadata_from_s3_key(s3_key)
+                    if not metadata:
+                        logger.error(f"Could not extract metadata from S3 key: {s3_key}")
+                        results.append({
+                            "status": "error",
+                            "s3_key": s3_key,
+                            "error": "Invalid S3 key format"
+                        })
+                        continue
+                    
+                    # Add file size to metadata
+                    metadata['file_size'] = object_size
+                    
+                    # Determine content type
+                    content_type, _ = mimetypes.guess_type(metadata['file_name'])
+                    metadata['content_type'] = content_type
+                    
+                    # Check if this is a ZIP file
+                    if is_zip_file(metadata['file_name']):
+                        # Process ZIP file
+                        zip_results = process_zip_file(s3_client, bucket, s3_key, metadata)
+                        results.extend(zip_results)
+                        continue
+                    
+                    # For regular files, queue for processing
+                    file_info = {
+                        "file_id": metadata['file_id'],
+                        "file_name": metadata['file_name'],
                         "s3_key": s3_key,
-                        "error": "Invalid S3 key format"
-                    })
-                    continue
-                
-                # Add file size to metadata
-                metadata['file_size'] = object_size
-                
-                # Determine content type
-                content_type, _ = mimetypes.guess_type(metadata['file_name'])
-                metadata['content_type'] = content_type
-                
-                # Check if this is a ZIP file
-                if is_zip_file(metadata['file_name']):
-                    # Process ZIP file
-                    zip_results = process_zip_file(s3_client, bucket, s3_key, metadata)
-                    results.extend(zip_results)
-                    continue
-                
-                # For regular files, queue for processing
-                file_info = {
-                    "file_id": metadata['file_id'],
-                    "file_name": metadata['file_name'],
-                    "s3_key": s3_key,
-                    "claim_id": metadata['claim_id'],
-                    "file_size": object_size,
-                    "content_type": content_type
-                }
-                
-                # TODO: Get user_id and group_id from metadata or database
-                # For now, we'll need to implement this part
-                
-                # Queue the file for processing
-                queue_result = queue_file_for_processing(file_info, s3_client, sqs_client)
-                results.append(queue_result)
-                
-                # TODO: Create database record for the file
-                # This requires a database session and additional metadata
-                
+                        "claim_id": metadata['claim_id'],
+                        "file_size": object_size,
+                        "content_type": content_type
+                    }
+                    
+                    # Queue the file for processing
+                    queue_result = queue_file_for_processing(file_info, s3_client, sqs_client)
+                    results.append(queue_result)
+                    
+                    # Create database record for the file
+                    try:
+                        with get_db_session() as db_session:
+                            file_record = create_file_record(db_session, file_info)
+                            logger.info(f"Created file record with ID: {file_record.id}")
+                    except Exception as db_error:
+                        logger.error(f"Error creating database record: {str(db_error)}")
+                        # Continue processing even if database record creation fails
+            
             except Exception as e:
-                logger.error(f"Error processing record: {str(e)}")
+                logger.error(f"Error processing SQS record: {str(e)}")
                 results.append({
                     "status": "error",
                     "error": str(e)
@@ -352,7 +368,7 @@ def lambda_handler(event, context):
         return {
             "statusCode": 200,
             "body": json.dumps({
-                "message": f"Processed {len(event.get('Records', []))} records",
+                "message": f"Processed {len(results)} files",
                 "results": results
             })
         }
@@ -361,7 +377,7 @@ def lambda_handler(event, context):
         return {
             "statusCode": 500,
             "body": json.dumps({
-                "message": "Error processing S3 event",
+                "message": "Error processing SQS event",
                 "error": str(e)
             })
         }
