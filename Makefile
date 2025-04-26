@@ -20,7 +20,7 @@ cognito_deploy:
 	sam deploy \
 		--stack-name ClaimVision-cognito-dev \
 		--template-file cognito-template.yaml \
-		--capabilities CAPABILITY_IAM
+		--capabilities CAPABILITY_IAM || true
 	sleep 5
 
 samconfig:
@@ -30,7 +30,7 @@ sam_build:
 	sam build
 
 sam_deploy:
-	sam deploy --no-confirm-changeset --config-file samconfig.toml
+	sam deploy --no-confirm-changeset --config-file samconfig.toml || true
 
 deploy: plan apply terraform_outputs cognito_deploy samconfig sam_build sam_deploy
 
