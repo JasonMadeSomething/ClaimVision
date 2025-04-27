@@ -1,5 +1,6 @@
 # Root Makefile for ClaimVision project
 
+ENV ?= dev
 TF_DIR=terraform
 TF_OUTPUT_FILE=terraform_outputs.json
 
@@ -17,20 +18,20 @@ terraform_outputs:
 	cd $(TF_DIR) && terraform output -json > ../$(TF_OUTPUT_FILE)
 
 cognito_deploy:
-	sam deploy \
+	-sam deploy \
 		--stack-name ClaimVision-cognito-dev \
 		--template-file cognito-template.yaml \
-		--capabilities CAPABILITY_IAM || true
-	sleep 5
+		--capabilities CAPABILITY_IAM \
+		--config-file samconfig.cognito.toml
 
 samconfig:
-	python3 scripts/generate_samconfig.py
+	python scripts/generate_samconfig.py --env $(ENV)
 
 sam_build:
 	sam build
 
 sam_deploy:
-	sam deploy --no-confirm-changeset --config-file samconfig.toml || true
+	-sam deploy --no-confirm-changeset --config-file samconfig.toml
 
 deploy: plan apply terraform_outputs cognito_deploy samconfig sam_build sam_deploy
 
