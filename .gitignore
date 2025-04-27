@@ -104,3 +104,4 @@ terraform/.terraform.lock.hcl
 scripts/config.json
 terraform/tfplan
 scripts/init_database.py
+scripts/secrets.json
