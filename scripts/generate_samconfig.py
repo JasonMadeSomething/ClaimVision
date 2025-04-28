@@ -23,7 +23,7 @@ REPLACEMENT_SOURCES = {
     "{{RDS_ENDPOINT_SSM_PATH}}": ("terraform", "rds_endpoint_ssm_path", lambda d: d["value"]),
     "{{DB_ENDPOINT}}": ("terraform", "rds_endpoint", lambda d: d["value"]),
     "{{VPC_ID}}": ("terraform", "vpc_id", lambda d: d["value"]),
-    "{{SUBNET_IDS}}": ("terraform", "subnet_ids", lambda v: ",".join(v)),
+    "{{SUBNET_IDS}}": ("terraform", "subnet_ids", lambda d: ",".join(d["value"])),
     "{{SECURITY_GROUP_IDS}}": ("terraform", "rds_security_group_id", lambda d: d["value"]),
     "{{PUBLIC_SUBNET_1}}": ("terraform", "public_subnet_1", lambda d: d["value"]),
     "{{PUBLIC_SUBNET_2}}": ("terraform", "public_subnet_2", lambda d: d["value"]),
