@@ -87,29 +87,34 @@ def lambda_handler(event, context, db_session):
             ResourceType.id.in_(["claim", "file", "item"])
         ).all()
         resource_map = {r.id: r for r in resource_types}
+        
+        logger.info("Resource types loaded: %s", resource_map)
 
         permissions = []
 
         # Claim permissions
         for action in [PermissionAction.READ, PermissionAction.WRITE, PermissionAction.DELETE]:
+            logger.info("Creating permission with action %s for user %s on claim %s", action, user.id, new_claim.id)
             permissions.append(Permission(
                 subject_type="user",
                 subject_id=user.id,
                 action=action,
-                resource_type=resource_map["claim"],
+                resource_type_id=resource_map["claim"].id,
                 resource_id=new_claim.id
             ))
 
         # File and Item creation permissions scoped to the claim
         for resource_id in ["file", "item"]:
+            logger.info("Creating file/item permission for resource %s", resource_id)
             permissions.append(Permission(
                 subject_type="user",
                 subject_id=user.id,
                 action=PermissionAction.WRITE,
-                resource_type=resource_map[resource_id],
+                resource_type_id=resource_map[resource_id].id,
                 resource_id=new_claim.id
             ))
 
+        logger.info("Adding %d permissions to the database", len(permissions))
         db_session.add_all(permissions)
         db_session.commit()
         # Prepare response data
