@@ -1,5 +1,4 @@
 from models.claim import Claim
-from models.permissions import Permission
 from utils.vocab_enums import PermissionAction, ResourceTypeEnum
 from utils.lambda_utils import standard_lambda_handler
 from utils.auth_utils import extract_user_id, get_authenticated_user
@@ -7,7 +6,6 @@ from utils import response
 from sqlalchemy.exc import SQLAlchemyError
 from utils.logging_utils import get_logger
 from utils.access_control import has_permission, AccessDeniedError
-from sqlalchemy import or_
 
 logger = get_logger(__name__)
 
@@ -29,7 +27,7 @@ def lambda_handler(event, context, db_session):
         
         # Get all claims from the database
         all_claims = db_session.query(Claim).filter(
-            Claim.deleted_at.is_(None)
+            Claim.deleted.is_(False)
         ).all()
         
         # Filter claims based on permissions

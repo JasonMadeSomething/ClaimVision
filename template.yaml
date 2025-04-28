@@ -309,6 +309,7 @@ Resources:
                   - sqs:ChangeMessageVisibility
                 Resource:
                   - !Ref FileUploadQueueARN
+                  - !Ref S3UploadNotificationQueueARN
               - Effect: Allow
                 Action:
                   - sqs:SendMessage

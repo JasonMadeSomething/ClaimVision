@@ -6,7 +6,6 @@ ensuring proper authorization and data access.
 """
 from sqlalchemy.exc import IntegrityError, OperationalError
 
-from database.database import get_db_session
 from models import Claim
 from utils import response
 from utils.access_control import has_permission
@@ -46,7 +45,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             return response.api_response(404, error_details="Claim not found")
         
         # Check if claim is soft-deleted
-        if claim.deleted_at:
+        if claim.deleted:
             return response.api_response(404, error_details="Claim not found")
         
         if not has_permission(user, action=PermissionAction.READ, resource_type=ResourceTypeEnum.CLAIM, resource_id=claim.id, db=db_session):
