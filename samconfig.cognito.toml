@@ -1,0 +1,7 @@
+version = 0.1
+[cognito.deploy.parameters]
+stack_name = "ClaimVision-cognito-dev"
+template_file = "cognito-template.yaml"
+capabilities = "CAPABILITY_NAMED_IAM"
+region = "us-east-1"
+confirm_changeset = true
