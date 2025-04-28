@@ -28,30 +28,6 @@ resource "aws_ssm_parameter" "rds_security_group_id" {
   }
 }
 
-resource "aws_secretsmanager_secret" "db_secret" {
-  name        = "ClaimVisionDBPassword-${var.env}"
-  description = "Stores database credentials for ClaimVision"
-  force_overwrite_replica_secret = true
-  recovery_window_in_days = 0  # Allows immediate deletion and recreation
-  
-  lifecycle {
-    ignore_changes = [name, description]
-    prevent_destroy = true
-  }
-}
-
-resource "aws_secretsmanager_secret_version" "db_secret_version" {
-  secret_id     = aws_secretsmanager_secret.db_secret.id
-  secret_string = jsonencode({
-    username = var.db_username
-    password = var.db_password
-  })
-  
-  lifecycle {
-    ignore_changes = [secret_string]
-  }
-}
-
 resource "aws_ssm_parameter" "db_password" {
   name  = "/terraform/database/password"
   type  = "SecureString"

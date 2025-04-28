@@ -10,9 +10,11 @@ module "rds" {
 }
 
 module "sqs" {
-  source      = "./sqs"
-  env         = var.env
-  environment = var.env
+  source        = "./sqs"
+  env           = var.env
+  environment   = var.env
+  s3_bucket_id  = module.s3.s3_bucket_id
+  s3_bucket_arn = module.s3.s3_bucket_arn
 }
 
 module "s3" {

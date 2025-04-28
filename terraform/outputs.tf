@@ -11,6 +11,10 @@ output "public_subnet_2" {
   value = module.networking.public_subnet_2
 }
 
+output "subnet_ids" {
+  value = [module.networking.public_subnet_1, module.networking.public_subnet_2]
+}
+
 output "rds_security_group_id" {
   value = module.networking.rds_security_group_id
 }
@@ -58,9 +62,17 @@ output "user_registration_queue_url" {
   value = module.application.user_registration_queue_url
 }
 
+output "user_registration_queue_arn" {
+  value = module.application.user_registration_queue_arn
+}
+
 output "cognito_update_queue_url" {
   description = "The URL of the Cognito update queue"
   value       = module.application.cognito_update_queue_url
+}
+
+output "cognito_update_queue_arn" {
+  value = module.application.cognito_update_queue_arn
 }
 
 # Reporting Infrastructure Outputs
@@ -122,4 +134,12 @@ output "email_queue_arn" {
 output "email_queue_name" {
   description = "Name of the email queue"
   value       = module.application.email_queue_name
+}
+
+output "s3_upload_notification_queue_url" {
+  value = module.application.s3_upload_notification_queue_url
+}
+
+output "s3_upload_notification_queue_arn" {
+  value = module.application.s3_upload_notification_queue_arn
 }

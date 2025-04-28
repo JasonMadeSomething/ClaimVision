@@ -17,7 +17,23 @@ output "user_registration_queue_url" {
   value = module.sqs.user_registration_queue_url
 }
 
+output "user_registration_queue_arn" {
+  value = module.sqs.user_registration_queue_arn
+}
+
 output "cognito_update_queue_url" {
   description = "The URL of the Cognito update queue"
   value       = module.sqs.cognito_update_queue_url
+}
+
+output "cognito_update_queue_arn" {
+  value = module.sqs.cognito_update_queue_arn
+}
+
+output "s3_upload_notification_queue_url" {
+  value = module.sqs.s3_upload_notification_queue_url
+}
+
+output "s3_upload_notification_queue_arn" {
+  value = module.sqs.s3_upload_notification_queue_arn
 }
