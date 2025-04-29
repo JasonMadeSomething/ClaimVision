@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+﻿AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
@@ -1599,35 +1599,35 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
 
   # Replace File Function (PUT)
-  ReplaceFileFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: files.replace_file.lambda_handler
-      Runtime: python3.12
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
-      CodeUri: src/
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Architectures:
-        - x86_64
-      Environment:
-        Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
-          S3_BUCKET_NAME: !Ref S3BucketName
+  #ReplaceFileFunction:
+  #  Type: AWS::Serverless::Function
+  #  Properties:
+  #    Handler: files.replace_file.lambda_handler
+  #    Runtime: python3.12
+  #    VpcConfig: !If 
+  #      - HasVpc
+  #      - SubnetIds: !Ref SubnetIds
+  #        SecurityGroupIds: !Ref SecurityGroupIds
+  #      - !Ref AWS::NoValue
+  #    CodeUri: src/
+  #    Role: !GetAtt LambdaExecutionRole.Arn
+  #    Architectures:
+  #      - x86_64
+  #    Environment:
+  #      Variables:
+  #        DB_USERNAME: !Ref DBUsername
+  #        DB_PASSWORD: !Ref DBPassword
+  #        DB_HOST: !Ref DBEndpoint
+  #        DB_NAME: claimvision
+  #        S3_BUCKET_NAME: !Ref S3BucketName
 
-      Events:
-        ReplaceFileAPI:
-          Type: Api
-          Properties:
-            Path: /files/{file_id}
-            Method: PUT
-            RestApiId: !Ref ClaimVisionAPI
+  #  Events:
+  #    ReplaceFileAPI:
+  #      Type: Api
+  #      Properties:
+  #        Path: /files/{file_id}
+  #        Method: PUT
+  #          RestApiId: !Ref ClaimVisionAPI
 
   # Delete File Function
   DeleteFileFunction:

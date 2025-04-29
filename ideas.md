@@ -53,9 +53,11 @@
  - Invite Adjuster to view claim
  - Admin onboarding for non houshold type users
  - Multiple group support (ie. Household, Adjuster, etc.)
- - CICD when I feel like an adult
+ - CI/CD when I feel like an adult (Did I already do this to the extent I need to?)
  - Group invite by invite code (need a new table for this)
  - Invite User to Household
  - Invite Adjuster to view claim
  - Harden registration process (stop login spam)
- - Cross Machine CI Pipeline (Makefile(s))
+ - ~~Cross Machine CI Pipeline (Makefile(s))~~
+ - Notes on files (new table)
+ - 
