@@ -26,13 +26,14 @@ if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
     logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
     S3_BUCKET_NAME = "claimvision-dev-bucket"
 
-def generate_s3_key(claim_id, file_name):
+def generate_s3_key(claim_id, file_name, user_id=None):
     """
     Generate a unique S3 key for the file.
     
     Args:
         claim_id (str): UUID of the claim this file belongs to
         file_name (str): Name of the file
+        user_id (str, optional): UUID of the user uploading the file
         
     Returns:
         str: S3 key for the file
@@ -43,8 +44,11 @@ def generate_s3_key(claim_id, file_name):
     # Sanitize file name to prevent path traversal
     safe_file_name = os.path.basename(file_name)
     
-    # Generate S3 key using claim_id and file_id
-    return f"pending/{claim_id}/{file_id}/{safe_file_name}"
+    # Generate S3 key using claim_id, user_id, and file_id
+    if user_id:
+        return f"pending/{claim_id}/{user_id}/{file_id}/{safe_file_name}"
+    else:
+        return f"pending/{claim_id}/{file_id}/{safe_file_name}"
 
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
@@ -105,8 +109,8 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             
         # Check if the user has permission to upload files to this claim
         if not has_permission(
-            db_session=db_session,
-            user_id=user.id,
+            db=db_session,
+            user=user,
             resource_type=ResourceTypeEnum.CLAIM.value,
             resource_id=claim_id,
             action=PermissionAction.WRITE
@@ -126,6 +130,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             if not file_name:
                 logger.warning("File name not provided")
                 response_files.append({
+                    "name": file_name,
                     "status": "error",
                     "error": "File name is required"
                 })
@@ -136,7 +141,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 content_type, _ = mimetypes.guess_type(file_name)
             
             # Generate S3 key
-            s3_key = generate_s3_key(claim_id, file_name)
+            s3_key = generate_s3_key(claim_id, file_name, user_id=user.id)
             
             # Generate pre-signed URL
             presigned_data = generate_presigned_upload_url(
@@ -166,12 +171,25 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 "expires_in": presigned_data['expires_in'],
                 "claim_id": str(claim_id),
                 "room_id": str(room_id) if room_id else None,
-                "user_id": str(user.id),
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
         
+        # Determine the appropriate status code based on the results
+        has_success = any(file.get('status') == 'ready' for file in response_files)
+        has_error = any(file.get('status') == 'error' for file in response_files)
+        
+        if has_success and has_error:
+            # Mixed results - use 207 Multi-Status
+            status_code = 207
+        elif has_error and not has_success:
+            # All files failed - use 500 Server Error
+            status_code = 500
+        else:
+            # All files succeeded - use 200 OK
+            status_code = 200
+            
         # Return response with pre-signed URLs
-        return api_response(200, data={"files": response_files})
+        return api_response(status_code, data={"files": response_files})
         
     except Exception as e:
         logger.exception(f"Error generating pre-signed URLs: {str(e)}")
