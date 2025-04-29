@@ -7,6 +7,17 @@ This module provides standardized logging configuration that adapts based on the
 """
 import os
 import logging
+import json
+from enum import Enum
+from typing import Any, Dict
+
+class LogLevel(Enum):
+    """Enum for log levels to use with log_structured function."""
+    DEBUG = "debug"
+    INFO = "info"
+    WARNING = "warning"
+    ERROR = "error"
+    CRITICAL = "critical"
 
 def configure_logging():
     """
@@ -72,3 +83,49 @@ def get_logger(name):
         logger.addHandler(handler)
     
     return logger
+
+def log_structured(logger: logging.Logger, level: LogLevel, message: str, **kwargs: Any) -> None:
+    """
+    Log a structured message with additional context data.
+    
+    In development environments, this will log the full structured data.
+    In production, it will only log the message to reduce verbosity.
+    
+    Args:
+        logger (logging.Logger): The logger to use
+        level (LogLevel): Log level enum value
+        message (str): The log message
+        **kwargs: Additional context data to include in the structured log
+    """
+    # Get environment from Lambda environment variables
+    environment = os.environ.get("ENVIRONMENT", "dev").lower()
+    
+    # Create structured log data
+    log_data: Dict[str, Any] = {
+        "message": message,
+        **kwargs
+    }
+    
+    # Convert log level enum to string if it's an enum
+    if isinstance(level, LogLevel):
+        level_str = level.value
+    else:
+        level_str = str(level).lower()
+        # Warn about incorrect usage in development
+        if environment != "prod":
+            logger.warning(f"log_structured called with non-enum level: {level}. Please use LogLevel enum.")
+    
+    # Get the logging method
+    log_method = getattr(logger, level_str)
+    
+    if environment != "prod":
+        # In non-production, log the full structured data
+        try:
+            structured_message = f"{message} | Context: {json.dumps(log_data, default=str)}"
+            log_method(structured_message)
+        except Exception as e:
+            logger.warning(f"Failed to serialize log data: {str(e)}")
+            log_method(message)
+    else:
+        # In production, just log the message to reduce verbosity
+        log_method(message)

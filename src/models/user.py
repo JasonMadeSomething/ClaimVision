@@ -19,8 +19,8 @@ class User(Base):
     last_name: Mapped[str] = mapped_column(String, nullable=False)
     cognito_sub: Mapped[str] = mapped_column(String, unique=True, nullable=False)
 
-    memberships: Mapped[List["GroupMembership"]] = relationship("GroupMembership", back_populates="user")
-    claims_created: Mapped[List["Claim"]] = relationship("Claim", back_populates="creator")
+    memberships: Mapped[List["GroupMembership"]] = relationship("GroupMembership", back_populates="user") #noqa: F821
+    claims_created: Mapped[List["Claim"]] = relationship("Claim", back_populates="creator") #noqa: F821
 
     def to_dict(self):
         return {
