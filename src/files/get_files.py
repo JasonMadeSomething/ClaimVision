@@ -88,7 +88,10 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if claim_id:
             # If claim_id is provided, we've already checked permissions on the claim
             # Get all files associated with this claim
-            files_query = db_session.query(File).filter(File.claim_id == claim_id)
+            files_query = db_session.query(File).filter(
+                File.claim_id == claim_id,
+                ~File.deleted
+            )
         else:
             # If no claim_id, we need to get all files the user has access to
             # This is more complex as we need to consider:
@@ -109,7 +112,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                     accessible_claims.append(claim.id)
             
             # Get files associated with accessible claims or with direct permissions
-            files_query = db_session.query(File)
+            files_query = db_session.query(File).filter(~File.deleted)
             
             # Filter to only include files:
             # 1. Associated with claims the user has access to, OR

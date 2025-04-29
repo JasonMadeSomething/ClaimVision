@@ -6,6 +6,8 @@ from models.room import Room
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
 from utils.logging_utils import get_logger
+from utils.access_control import has_permission
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 
 logger = get_logger(__name__)
@@ -13,14 +15,14 @@ logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True, requires_body=True)
 def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None, body=None) -> dict:
     """
-    Handles updating metadata for a file, excluding labels.
+    Handles updating the room association for a file.
 
     Args:
         event (dict): API Gateway event containing authentication details, file ID, and update data.
         context/_context (dict): Lambda execution context (unused).
         db_session (Session, optional): Database session for testing.
         user (User): Authenticated user object (provided by decorator).
-        body (dict): Request body containing metadata to update.
+        body (dict): Request body containing room_id to update.
 
     Returns:
         dict: API response with updated file metadata or error.
@@ -37,26 +39,32 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
         return response.api_response(400, error_details='Empty request body')
         
     # Validate fields that can be updated
-    allowed_fields = ["room_id", "metadata", "description", "tags"]
+    allowed_fields = ["room_id"]
     invalid_fields = [field for field in body.keys() if field not in allowed_fields]
     if invalid_fields:
         return response.api_response(400, error_details=f"Invalid field(s): {', '.join(invalid_fields)}")
     
-    # Retrieve the file, ensuring it belongs to user's household
+    # Retrieve the file
     file_data = db_session.query(File).filter(
-        File.id == file_id,
-        File.household_id == user.household_id
+        File.id == file_id
     ).first()
 
     if not file_data:
         return response.api_response(404, error_details="File not found")
     
-    # Update file metadata
-    metadata = file_data.file_metadata or {}
+    # Check if user has edit permission on the claim
+    if not has_permission(
+        user=user,
+        action=PermissionAction.WRITE,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        db=db_session,
+        resource_id=file_data.claim_id
+    ):
+        return response.api_response(403, error_details="You do not have permission to update files in this claim")
     
     # Handle room_id field
     if "room_id" in body:
-        room_id = body.pop("room_id")
+        room_id = body["room_id"]
         # If room_id is None or empty string, remove room association
         if room_id is None or room_id == "":
             file_data.room_id = None
@@ -67,8 +75,7 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
                 # Verify room exists and belongs to the claim
                 room = db_session.query(Room).filter_by(
                     id=room_uuid, 
-                    claim_id=file_data.claim_id, 
-                    household_id=user.household_id
+                    claim_id=file_data.claim_id
                 ).first()
                 if not room:
                     return response.api_response(404, error_details='Room not found or not associated with this claim.')
@@ -76,12 +83,8 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
             except ValueError:
                 return response.api_response(400, error_details='Invalid room ID format. Expected UUID.')
     
-    # Update remaining fields in metadata
-    metadata.update(body)
-    
     # Update the file record
     try:
-        file_data.file_metadata = metadata
         file_data.updated_at = datetime.now(timezone.utc)
         db_session.commit()
         
@@ -105,9 +108,9 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
             "metadata": file_data.file_metadata or {}
         }
         
-        return response.api_response(200, success_message="File metadata updated successfully", data=file_response)
+        return response.api_response(200, success_message="File room updated successfully", data=file_response)
         
     except SQLAlchemyError as e:
-        logger.error("Database error updating file metadata: %s", str(e))
+        logger.error("Database error updating file room: %s", str(e))
         db_session.rollback()
-        return response.api_response(500, error_details="Failed to update file metadata")
+        return response.api_response(500, error_details="Failed to update file room")

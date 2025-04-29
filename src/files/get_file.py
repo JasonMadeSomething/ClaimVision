@@ -42,7 +42,8 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
     try:
         # First, retrieve the file to check if it's associated with a claim
         file_data = db_session.query(File).filter(
-            File.id == file_id
+            File.id == file_id,
+            ~File.deleted
         ).first()
 
         if not file_data:

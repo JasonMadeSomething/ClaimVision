@@ -119,7 +119,7 @@ def lambda_handler(event, context):
                         existing_label = db_session.query(Label).filter_by(
                             label_text=label_name,
                             is_ai_generated=True,
-                            household_id=file.household_id
+                            group_id=file.group_id
                         ).first()
                         print("existing_label: %s" % existing_label)
                         if not existing_label:
@@ -128,7 +128,7 @@ def lambda_handler(event, context):
                                     id=uuid.uuid4(),
                                     label_text=label_name,
                                     is_ai_generated=True,
-                                    household_id=file.household_id
+                                    group_id=file.group_id
                                 )
                                 db_session.add(existing_label)
                                 db_session.flush()  # Try to write it
@@ -139,7 +139,7 @@ def lambda_handler(event, context):
                                 existing_label = db_session.query(Label).filter_by(
                                     label_text=label_name,
                                     is_ai_generated=True,
-                                    household_id=file.household_id
+                                    group_id=file.group_id
                                 ).first()
                                 if not existing_label:
                                     logger.error(f"Label {label_name} could not be recovered after rollback")
@@ -148,7 +148,8 @@ def lambda_handler(event, context):
                         # Create file-label association
                         file_label = FileLabel(
                             file_id=file_id,
-                            label_id=existing_label.id
+                            label_id=existing_label.id,
+                            group_id=file.group_id
                         )
                         db_session.add(file_label)
                     

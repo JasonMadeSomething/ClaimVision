@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 from models import File
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from utils.logging_utils import get_logger
+from utils.access_control import has_permission
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 
 logger = get_logger(__name__)
 
 
 # Configure logging
-logger = get_logger(__name__)
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None) -> dict:
     """
@@ -38,14 +38,23 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
         
     file_id = result
     
-    # Retrieve the file, ensuring it belongs to user's household
+    # Retrieve the file
     file_data = db_session.query(File).filter(
-        File.id == file_id,
-        File.household_id == user.household_id
+        File.id == file_id
     ).first()
 
     if not file_data:
         return response.api_response(404, error_details="File not found")
+    
+    # Check if user has edit permission on the claim
+    if not has_permission(
+        user=user,
+        action=PermissionAction.WRITE,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        db=db_session,
+        resource_id=file_data.claim_id
+    ):
+        return response.api_response(403, error_details="You do not have permission to delete files in this claim")
     
     # Check if file is attached to a claim
     if file_data.claim_id is None:
