@@ -147,8 +147,11 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 # Already checked claim permission above
                 accessible_files.append(file)
             else:
-                # Check direct file permission
-                if has_permission(
+                # First check if user is in the same group as the file
+                if file.group_id and file.group_id == user.group_id:
+                    accessible_files.append(file)
+                # As a fallback, check direct file permission (though this is unlikely to be used)
+                elif has_permission(
                     user=user,
                     resource_type=ResourceTypeEnum.FILE,
                     resource_id=file.id,

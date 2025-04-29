@@ -1,6 +1,4 @@
 import os
-import json
-import boto3
 from utils.logging_utils import get_logger
 from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_url
 from utils.response import api_response
@@ -62,15 +60,21 @@ def lambda_handler(event: dict, context=None, _context=None, db_session=None, us
             ):
                 return api_response(403, error_details="You do not have permission to access this file")
         else:
-            # If file is not associated with a claim, check permissions on the file directly
-            if not has_permission(
-                user=user,
-                action=PermissionAction.READ,
-                resource_type=ResourceTypeEnum.FILE.value,
-                db=db_session,
-                resource_id=file_id
-            ):
-                return api_response(403, error_details="You do not have permission to access this file")
+            # If file is not associated with a claim, check if the user is in the same group
+            if file_data.group_id and user.group_id == file_data.group_id:
+                # User is in the same group as the file, allow access
+                pass
+            else:
+                # As a fallback, check direct file permission (though this is unlikely to be used)
+                logger.warning(f"File {file_id} has no claim_id and user is not in the same group, checking direct permissions")
+                if not has_permission(
+                    user=user,
+                    action=PermissionAction.READ,
+                    resource_type=ResourceTypeEnum.FILE.value,
+                    db=db_session,
+                    resource_id=file_id
+                ):
+                    return api_response(403, error_details="You do not have permission to access this file")
         
         # Generate pre-signed URL for S3 access
         s3_client = get_s3_client()
