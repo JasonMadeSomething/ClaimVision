@@ -315,6 +315,7 @@ Resources:
                   - sqs:SendMessage
                 Resource:
                   - !Ref FileAnalysisQueueARN
+                  - !Ref FileUploadQueueARN
         - PolicyName: S3Access
           PolicyDocument:
             Version: '2012-10-17'
