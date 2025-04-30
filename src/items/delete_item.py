@@ -5,6 +5,8 @@ from models.item_files import ItemFile
 from models.item_labels import ItemLabel
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.access_control import has_permission
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 # Configure logging
 logger = get_logger(__name__)
@@ -34,6 +36,16 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         item = db_session.query(Item).filter(Item.id == item_uuid).first()
         if not item:
             return response.api_response(404, error_details='Item not found.')
+            
+        # Check if user has permission to edit the claim this item belongs to
+        if not has_permission(
+            user=user,
+            action=PermissionAction.WRITE,
+            resource_type=ResourceTypeEnum.CLAIM.value,
+            db=db_session,
+            resource_id=item.claim_id
+        ):
+            return response.api_response(403, error_details='You do not have permission to delete items in this claim.')
 
         # Remove file associations (but keep files intact)
         db_session.query(ItemFile).filter(ItemFile.item_id == item_uuid).delete()

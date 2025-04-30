@@ -5,6 +5,8 @@ from models.item import Item
 from models.claim import Claim
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.access_control import has_permission
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 # Configure logging
 logger = get_logger(__name__)
@@ -29,14 +31,21 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         
     claim_uuid = result
     
-    # Verify the claim exists and belongs to the user's household
-    claim = db_session.query(Claim).filter(
-        Claim.id == claim_uuid,
-        Claim.household_id == user.household_id
-    ).first()
+    # Verify the claim exists
+    claim = db_session.query(Claim).filter(Claim.id == claim_uuid).first()
     
     if not claim:
         return response.api_response(404, error_details='Claim not found.')
+    
+    # Check if user has permission to view this claim
+    if not has_permission(
+        user=user,
+        action=PermissionAction.READ,
+        resource_type=ResourceTypeEnum.CLAIM.value,
+        db=db_session,
+        resource_id=claim_uuid
+    ):
+        return response.api_response(403, error_details='You do not have permission to access this claim.')
 
     # Get pagination parameters from query string
     query_params = event.get("queryStringParameters") or {}

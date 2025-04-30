@@ -8,6 +8,8 @@ from models.claim import Claim
 from models.user import User
 from models.room import Room
 from utils import response
+from utils.access_control import has_permission
+from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 # Configure logging
 logger = get_logger(__name__)
@@ -63,7 +65,6 @@ def lambda_handler(event, _context, db_session=None):
         if not item:
             return response.api_response(404, error_details='Item not found.')
             
-        # Authorization check - verify the user has access to this item
         # Get the claim associated with this item
         claim = db.query(Claim).filter(Claim.id == item.claim_id).first()
         if not claim:
@@ -74,9 +75,15 @@ def lambda_handler(event, _context, db_session=None):
         if not user:
             return response.api_response(404, error_details='User not found.')
             
-        # Check if the user's household matches the claim's household
-        if user.household_id != claim.household_id:
-            return response.api_response(404, error_details='Item not found.')
+        # Check if user has permission to edit this claim
+        if not has_permission(
+            user=user,
+            action=PermissionAction.WRITE,
+            resource_type=ResourceTypeEnum.CLAIM.value,
+            db=db,
+            resource_id=item.claim_id
+        ):
+            return response.api_response(403, error_details='You do not have permission to update items in this claim.')
             
         # Handle item property updates (name, description, etc.)
         item_updated = False

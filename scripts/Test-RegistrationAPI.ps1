@@ -5,11 +5,11 @@
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 # Initialize test results tracking
-$TestResults = @{
+$global:TestResults = @{
     Passed = @()
     Failed = @()
     Warnings = @()
-    TotalSteps = 11
+    TotalSteps = 12
     CompletedSteps = 0
 }
 
@@ -27,51 +27,60 @@ function Record-TestResult {
     )
     
     if ($Status -eq "Passed") {
-        $TestResults.Passed += @{Step = $StepName; Message = $Message}
+        $global:TestResults.Passed += @{
+            Step = $StepName
+            Message = $Message
+        }
         Write-Host "✅ $StepName - $Message" -ForegroundColor Green
     }
     elseif ($Status -eq "Failed") {
-        $TestResults.Failed += @{Step = $StepName; Message = $Message}
+        $global:TestResults.Failed += @{
+            Step = $StepName
+            Message = $Message
+        }
         Write-Host "❌ $StepName - $Message" -ForegroundColor Red
     }
     else {
-        $TestResults.Warnings += @{Step = $StepName; Message = $Message}
+        $global:TestResults.Warnings += @{
+            Step = $StepName
+            Message = $Message
+        }
         Write-Host "⚠️ $StepName - $Message" -ForegroundColor Yellow
     }
     
-    $TestResults.CompletedSteps++
+    $global:TestResults.CompletedSteps++
 }
 
 # Function to display test summary
 function Show-TestSummary {
-    $passCount = $TestResults.Passed.Count
-    $failCount = $TestResults.Failed.Count
-    $warnCount = $TestResults.Warnings.Count
+    $passCount = $global:TestResults.Passed.Count
+    $failCount = $global:TestResults.Failed.Count
+    $warnCount = $global:TestResults.Warnings.Count
     
     Write-Host "`n========== TEST SUMMARY ==========" -ForegroundColor Cyan
-    Write-Host "Total Steps: $($TestResults.TotalSteps)" -ForegroundColor White
-    Write-Host "Completed: $($TestResults.CompletedSteps)" -ForegroundColor White
+    Write-Host "Total Steps: $($global:TestResults.TotalSteps)" -ForegroundColor White
+    Write-Host "Completed: $($global:TestResults.CompletedSteps)" -ForegroundColor White
     Write-Host "Passed: $passCount" -ForegroundColor Green
     Write-Host "Failed: $failCount" -ForegroundColor Red
     Write-Host "Warnings: $warnCount" -ForegroundColor Yellow
     
     if ($passCount -gt 0) {
         Write-Host "`nPASSED STEPS:" -ForegroundColor Green
-        foreach ($result in $TestResults.Passed) {
+        foreach ($result in $global:TestResults.Passed) {
             Write-Host "  ✅ $($result.Step)" -ForegroundColor Green
         }
     }
     
     if ($failCount -gt 0) {
         Write-Host "`nFAILED STEPS:" -ForegroundColor Red
-        foreach ($result in $TestResults.Failed) {
+        foreach ($result in $global:TestResults.Failed) {
             Write-Host "  ❌ $($result.Step): $($result.Message)" -ForegroundColor Red
         }
     }
     
     if ($warnCount -gt 0) {
         Write-Host "`nWARNINGS:" -ForegroundColor Yellow
-        foreach ($result in $TestResults.Warnings) {
+        foreach ($result in $global:TestResults.Warnings) {
             Write-Host "  ⚠️ $($result.Step): $($result.Message)" -ForegroundColor Yellow
         }
     }
@@ -99,12 +108,11 @@ function Clean-TestDatabase {
         [string]$TestUserEmail
     )
     
-    Write-Host "`nPerforming comprehensive database cleanup..." -ForegroundColor Cyan
-    
-    # Set PGPASSWORD environment variable for psql authentication
+    # Set PGPASSWORD environment variable for passwordless connection
     $env:PGPASSWORD = $DbPassword
     
     try {
+        Write-Host "Performing comprehensive database cleanup..." -ForegroundColor Yellow
         Write-Host "Attempting to connect to database at $DbHost..." -ForegroundColor Yellow
         
         # First, check if we can connect to the database
@@ -120,71 +128,117 @@ function Clean-TestDatabase {
         
         Write-Host "Connected to database successfully." -ForegroundColor Green
         
-        # 1. Find the test user and their household
+        # Find test user by email
         if ($TestUserEmail) {
-            $getUserQuery = "SELECT id, household_id FROM users WHERE email = '$TestUserEmail';"
+            $getUserQuery = "SELECT id, cognito_sub FROM users WHERE email = '$TestUserEmail';"
             $psqlGetUserCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$getUserQuery`" -t"
             $userResult = Invoke-Expression $psqlGetUserCommand
             
             if ($userResult) {
-                # Parse the result (format: " id | household_id ")
+                # Parse the result (format: " id | cognito_sub ")
                 $userResult = $userResult.Trim()
                 if ($userResult -match "([a-f0-9-]+)\s*\|\s*([a-f0-9-]+)") {
                     $userId = $matches[1].Trim()
-                    $householdId = $matches[2].Trim()
+                    $cognitoSub = $matches[2].Trim()
                     
-                    Write-Host "Found test user with ID: $userId and household ID: $householdId" -ForegroundColor Green
+                    Write-Host "Found test user with ID: $userId" -ForegroundColor Green
                     
-                    # 2. Delete all files associated with this household
-                    Write-Host "Deleting files for household ID: $householdId" -ForegroundColor Yellow
-                    $deleteFilesQuery = "DELETE FROM files WHERE household_id = '$householdId';"
-                    $psqlDeleteFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteFilesQuery`""
-                    Invoke-Expression $psqlDeleteFilesCommand
+                    # 1. Find groups created by this user
+                    $getGroupsQuery = "SELECT id FROM groups WHERE created_by = '$userId';"
+                    $psqlGetGroupsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$getGroupsQuery`" -t"
+                    $groupsResult = Invoke-Expression $psqlGetGroupsCommand
                     
-                    # 3. Delete all claims associated with this household
-                    Write-Host "Deleting claims for household ID: $householdId" -ForegroundColor Yellow
-                    $deleteClaimsQuery = "DELETE FROM claims WHERE household_id = '$householdId';"
-                    $psqlDeleteClaimsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteClaimsQuery`""
-                    Invoke-Expression $psqlDeleteClaimsCommand
+                    if ($groupsResult) {
+                        $groupIds = $groupsResult -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                        
+                        foreach ($groupId in $groupIds) {
+                            Write-Host "Processing group ID: $groupId" -ForegroundColor Yellow
+                            
+                            # 2. Delete all files associated with this group
+                            Write-Host "Deleting files for group ID: $groupId" -ForegroundColor Yellow
+                            $deleteFilesQuery = "DELETE FROM files WHERE group_id = '$groupId';"
+                            $psqlDeleteFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteFilesQuery`""
+                            Invoke-Expression $psqlDeleteFilesCommand
+                            
+                            # 3. Delete all claims associated with this group
+                            Write-Host "Deleting claims for group ID: $groupId" -ForegroundColor Yellow
+                            $deleteClaimsQuery = "DELETE FROM claims WHERE group_id = '$groupId';"
+                            $psqlDeleteClaimsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteClaimsQuery`""
+                            Invoke-Expression $psqlDeleteClaimsCommand
+                            
+                            # 4. Delete all items associated with this group
+                            Write-Host "Deleting items for group ID: $groupId" -ForegroundColor Yellow
+                            $deleteItemsQuery = "DELETE FROM items WHERE group_id = '$groupId';"
+                            $psqlDeleteItemsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteItemsQuery`""
+                            Invoke-Expression $psqlDeleteItemsCommand
+                            
+                            # 5. Delete all labels associated with this group
+                            Write-Host "Deleting labels for group ID: $groupId" -ForegroundColor Yellow
+                            $deleteLabelsQuery = "DELETE FROM labels WHERE group_id = '$groupId';"
+                            $psqlDeleteLabelsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteLabelsQuery`""
+                            Invoke-Expression $psqlDeleteLabelsCommand
+                            
+                            # 6. Delete all group memberships for this group
+                            Write-Host "Deleting group memberships for group ID: $groupId" -ForegroundColor Yellow
+                            $deleteMembershipsQuery = "DELETE FROM group_memberships WHERE group_id = '$groupId';"
+                            $psqlDeleteMembershipsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteMembershipsQuery`""
+                            Invoke-Expression $psqlDeleteMembershipsCommand
+                            
+                            # 7. Delete permissions for this group
+                            Write-Host "Deleting permissions for group ID: $groupId" -ForegroundColor Yellow
+                            $deletePermissionsQuery = "DELETE FROM permissions WHERE group_id = '$groupId';"
+                            $psqlDeletePermissionsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deletePermissionsQuery`""
+                            Invoke-Expression $psqlDeletePermissionsCommand
+                            
+                            # 8. Delete the group itself
+                            Write-Host "Deleting group with ID: $groupId" -ForegroundColor Yellow
+                            $deleteGroupQuery = "DELETE FROM groups WHERE id = '$groupId';"
+                            $psqlDeleteGroupCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteGroupQuery`""
+                            Invoke-Expression $psqlDeleteGroupCommand
+                        }
+                    }
                     
-                    # 4. Delete the user
+                    # 9. Clean up any lingering permissions and group memberships
+                    Write-Host "Cleaning up lingering permissions and group memberships..." -ForegroundColor Yellow
+                    
+                    # Delete permissions for test users
+                    $deletePermissionsQuery = "DELETE FROM permissions WHERE user_id IN (SELECT id FROM users WHERE email = '$TestUserEmail');"
+                    $psqlDeletePermissionsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deletePermissionsQuery`""
+                    Invoke-Expression $psqlDeletePermissionsCommand
+                    
+                    # Delete group memberships for test users
+                    $deleteMembershipsQuery = "DELETE FROM group_memberships WHERE user_id IN (SELECT id FROM users WHERE email = '$TestUserEmail');"
+                    $psqlDeleteMembershipsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteMembershipsQuery`""
+                    Invoke-Expression $psqlDeleteMembershipsCommand
+                    
+                    # 10. Clean up any test files that might have been uploaded by other test runs
+                    # This is important to avoid conflicts with file hash uniqueness constraints
+                    Write-Host "Cleaning up test files from previous test runs..." -ForegroundColor Yellow
+                    
+                    # Delete files with test image names
+                    $testImageNames = @("test_image1.jpg", "test_image2.jpg", "test_image3.jpg", "Spoon.jpg", "dog.jpg", "outlet.jpg")
+                    foreach ($imageName in $testImageNames) {
+                        $deleteTestFilesQuery = "DELETE FROM files WHERE file_name = '$imageName';"
+                        $psqlDeleteTestFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteTestFilesQuery`""
+                        Invoke-Expression $psqlDeleteTestFilesCommand
+                    }
+                    
+                    # Delete items with test names
+                    $testItemNames = @("Test Item", "Spoon", "Outlet", "Dog")
+                    foreach ($itemName in $testItemNames) {
+                        $deleteTestItemsQuery = "DELETE FROM items WHERE name = '$itemName';"
+                        $psqlDeleteTestItemsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteTestItemsQuery`""
+                        Invoke-Expression $psqlDeleteTestItemsCommand
+                    }
+                    
+                    # 11. Delete the user
                     Write-Host "Deleting user with ID: $userId" -ForegroundColor Yellow
                     $deleteUserQuery = "DELETE FROM users WHERE id = '$userId';"
                     $psqlDeleteUserCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteUserQuery`""
                     Invoke-Expression $psqlDeleteUserCommand
-                    
-                    # 5. Delete the household
-                    Write-Host "Deleting household with ID: $householdId" -ForegroundColor Yellow
-                    $deleteHouseholdQuery = "DELETE FROM households WHERE id = '$householdId';"
-                    $psqlDeleteHouseholdCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteHouseholdQuery`""
-                    Invoke-Expression $psqlDeleteHouseholdCommand
                 }
             }
         }
-        
-        # 6. Clean up any test files that might have been uploaded by other test runs
-        # This is important to avoid conflicts with file hash uniqueness constraints
-        Write-Host "Cleaning up test files from previous test runs..." -ForegroundColor Yellow
-        
-        # Delete files with test image names
-        $testImageNames = @("test_image1.jpg", "test_image2.jpg", "test_image3.jpg", "Spoon.jpg", "dog.jpg", "outlet.jpg")
-        foreach ($imageName in $testImageNames) {
-            $deleteTestFilesQuery = "DELETE FROM files WHERE file_name = '$imageName';"
-            $psqlDeleteTestFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteTestFilesQuery`""
-            Invoke-Expression $psqlDeleteTestFilesCommand
-        }
-        
-        # 7. Clean up any test claims with "Test Claim" in the title
-        Write-Host "Cleaning up test claims from previous test runs..." -ForegroundColor Yellow
-        $deleteTestClaimsQuery = "DELETE FROM claims WHERE title LIKE 'Test Claim%';"
-        $psqlDeleteTestClaimsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteTestClaimsQuery`""
-        Invoke-Expression $psqlDeleteTestClaimsCommand
-        
-        # 8. Clean up any test items with "Test Item" as the name
-        Write-Host "Cleaning up test items from previous test runs..." -ForegroundColor Yellow
-        $deleteTestItemsQuery = "DELETE FROM items WHERE name = 'Test Item';"
-        $psqlDeleteTestItemsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteTestItemsQuery`""
-        Invoke-Expression $psqlDeleteTestItemsCommand
         
         Write-Host "Database cleanup completed successfully." -ForegroundColor Green
         
@@ -197,6 +251,174 @@ function Clean-TestDatabase {
             Remove-Item Env:\PGPASSWORD
         }
     }
+}
+
+# Function to check file processing status in the database
+function Check-FileProcessingStatus {
+    param (
+        [string]$DbHost,
+        [string]$DbUsername,
+        [string]$DbPassword,
+        [string]$DbName,
+        [array]$FileIds
+    )
+    
+    Write-Host "Checking file processing status in database..." -ForegroundColor Yellow
+    
+    # Set PGPASSWORD environment variable for passwordless connection
+    $env:PGPASSWORD = $DbPassword
+    
+    # First, check if we can connect to the database
+    $testConnectionQuery = "SELECT 1;"
+    $psqlTestCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$testConnectionQuery`" -t"
+    $testResult = Invoke-Expression $psqlTestCommand -ErrorAction SilentlyContinue
+    
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Cannot connect to database for file status check. This is expected if running outside the VPC." -ForegroundColor Yellow
+        Write-Host "Using a fixed delay instead..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 60
+        return $false
+    }
+    
+    Write-Host "Connected to database successfully for file status check." -ForegroundColor Green
+    
+    $allFilesProcessed = $false
+    $maxAttempts = 12  # Maximum number of attempts (12 * 10 seconds = 120 seconds total)
+    $attempt = 0
+    
+    while (-not $allFilesProcessed -and $attempt -lt $maxAttempts) {
+        $attempt++
+        $processedCount = 0
+        
+        foreach ($fileId in $FileIds) {
+            # Construct the query to check file status
+            $checkFileQuery = "SELECT status FROM files WHERE id = '$fileId';"
+            
+            # Execute the query in the same way as the database cleanup function
+            $psqlCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$checkFileQuery`" -t"
+            $result = Invoke-Expression $psqlCommand
+            
+            # Debug the raw output
+            Write-Host "Raw query result: '$result'" -ForegroundColor Gray
+            
+            # Trim any whitespace
+            $status = $result.Trim()
+            
+            Write-Host "File $fileId status: '$status'" -ForegroundColor Gray
+            
+            # Check if the file is processed (status is ANALYZED)
+            if ($status -and $status.ToUpper() -eq "ANALYZED") {
+                $processedCount++
+                Write-Host "File $fileId is processed with status: $status" -ForegroundColor Green
+            }
+            
+            # Add error handling in case the query fails
+            if (-not $status) {
+                Write-Host "No status returned for file: $fileId" -ForegroundColor Yellow
+            }
+        }
+        
+        if ($processedCount -eq $FileIds.Count) {
+            $allFilesProcessed = $true
+            Write-Host "All files processed successfully!" -ForegroundColor Green
+        } else {
+            Write-Host "Waiting for files to be processed... ($processedCount / $($FileIds.Count) ready, attempt $attempt of $maxAttempts)" -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
+        }
+    }
+    
+    return $allFilesProcessed
+}
+
+# Function to check file processing status via API
+function Test-FileProcessingStatusViaAPI {
+    param (
+        [string]$ApiBaseUrl,
+        [string]$ClaimId,
+        [hashtable]$Headers,
+        [array]$FileNames
+    )
+    
+    Write-Host "Checking file processing status via API..." -ForegroundColor Yellow
+    
+    $allFilesProcessed = $false
+    $maxAttempts = 12  # Maximum number of attempts (12 * 10 seconds = 120 seconds total)
+    $attempt = 0
+    
+    while (-not $allFilesProcessed -and $attempt -lt $maxAttempts) {
+        $attempt++
+        $processedCount = 0
+        
+        # Get all files for the claim
+        $getFilesUrl = "$ApiBaseUrl/claims/$ClaimId/files"
+        Write-Host "GET $getFilesUrl (Attempt $attempt of $maxAttempts)" -ForegroundColor Gray
+        
+        try {
+            $filesResponse = Invoke-RestMethod -Uri $getFilesUrl -Method Get -Headers $Headers -ErrorAction Stop
+            Write-Host "Files API Response:" -ForegroundColor Green
+            Write-Output ($filesResponse | ConvertTo-Json -Depth 10)
+            # Check if we have any files in the response
+            if ($filesResponse.data.files -and $filesResponse.data.files.Count -gt 0) {
+                Write-Host "Found $($filesResponse.data.files.Count) files in API response" -ForegroundColor Green
+                
+                # Check if all our uploaded files are in the response and processed
+                foreach ($fileName in $FileNames) {
+                    # Debug the files array
+                    Write-Host "Looking for file name: $fileName in response" -ForegroundColor Yellow
+                    
+                    # Check each file in the response
+                    $foundFile = $false
+                    foreach ($file in $filesResponse.data.files) {
+                        Write-Host $file | ConvertTo-Json -Depth 10
+                        Write-Host "Checking file with name: $($file.file_name)" -ForegroundColor Gray
+                        if ($file.file_name -eq $fileName) {
+                            Write-Host "File $fileName found in API response with status: $($file.status)" -ForegroundColor Green
+                            $processedCount++
+                            $foundFile = $true
+                            break
+                        }
+                    }
+                    
+                    if (-not $foundFile) {
+                        Write-Host "File $fileName not found in API response yet" -ForegroundColor Yellow
+                    }
+                }
+            } else {
+                Write-Host "No files found in API response yet" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "Error checking files via API:" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+        }
+        
+        if ($processedCount -eq $FileNames.Count) {
+            $allFilesProcessed = $true
+            Write-Host "All files found in API response!" -ForegroundColor Green
+        } else {
+            Write-Host "Waiting for files to appear in API... ($processedCount / $($FileNames.Count) found, attempt $attempt of $maxAttempts)" -ForegroundColor Yellow
+            Start-Sleep -Seconds 10
+        }
+    }
+    
+    # Return both the processing status and the correct file IDs from the API
+    $result = @{
+        Processed = $allFilesProcessed
+        FileIds = @()
+    }
+    
+    # If we found files in the API, collect their IDs
+    if ($filesResponse -and $filesResponse.data -and $filesResponse.data.files) {
+        foreach ($fileName in $FileNames) {
+            foreach ($file in $filesResponse.data.files) {
+                if ($file.name -eq $fileName) {
+                    $result.FileIds += $file.id
+                    break
+                }
+            }
+        }
+    }
+    
+    return $result
 }
 
 # Load configuration from config.json
@@ -220,10 +442,13 @@ $TestUser = @{
 }
 
 # Database connection information
-$DbHost = "claimvision-dev.czzwxwpwmndx.us-east-1.rds.amazonaws.com"
-$DbUsername = "testuser"
-$DbPassword = "YourStrongPassword123!"
-$DbName = "claimvision"
+$DbHost = $Config.DB.Host
+$DbUsername = $Config.DB.Username
+$DbPassword = $Config.DB.Password
+$DbName = $Config.DB.Name
+
+# S3 bucket information
+$S3_BUCKET_NAME = "claimvision-files-337214855826-dev"
 
 # Perform comprehensive database cleanup
 Clean-TestDatabase -DbHost $DbHost -DbUsername $DbUsername -DbPassword $DbPassword -DbName $DbName -TestUserEmail $TestUser.Email
@@ -256,7 +481,13 @@ try {
     $userId = Invoke-Expression $psqlCommand -ErrorAction SilentlyContinue
     
     # Only proceed with database operations if the command was successful
-    if ($LASTEXITCODE -eq 0 -and $userId) {
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Cannot connect to database. This is expected if running outside the VPC." -ForegroundColor Yellow
+        Write-Host "Skipping database operations." -ForegroundColor Yellow
+        exit 1
+    }
+    
+    if ($userId) {
         Write-Host "Type of userId: $($userId.GetType().FullName)" -ForegroundColor Yellow
         Write-Host "User ID: $userId" -ForegroundColor Yellow
         
@@ -267,45 +498,60 @@ try {
         
         Write-Host "User $($TestUser.Email) exists in database with ID: $userIdString, deleting..." -ForegroundColor Yellow
         
-        # First, delete any files associated with the user's household
-        $getHouseholdQuery = "SELECT household_id FROM users WHERE id = '$userIdString';"
-        $psqlGetHouseholdCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$getHouseholdQuery`" -t"
-        $householdId = Invoke-Expression $psqlGetHouseholdCommand
+        # First, delete any files associated with the user's group
+        $getGroupQuery = "SELECT id FROM groups WHERE created_by = '$userIdString';"
+        $psqlGetGroupCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$getGroupQuery`" -t"
+        $groupId = Invoke-Expression $psqlGetGroupCommand
         
-        if ($householdId) {
+        if ($groupId) {
             # Handle the array type by converting to string and cleaning it
-            $householdIdString = $householdId -join ""
-            $householdIdString = $householdIdString.Trim()
-            Write-Host "Cleaned Household ID: $householdIdString" -ForegroundColor Yellow
+            $groupIdString = $groupId -join ""
+            $groupIdString = $groupIdString.Trim()
+            Write-Host "Cleaned Group ID: $groupIdString" -ForegroundColor Yellow
             
-            Write-Host "Found household ID: $householdIdString" -ForegroundColor Yellow
+            Write-Host "Found group ID: $groupIdString" -ForegroundColor Yellow
             
             # Delete files associated with claims
-            $deleteFilesQuery = "DELETE FROM files WHERE household_id = '$householdIdString';"
+            $deleteFilesQuery = "DELETE FROM files WHERE group_id = '$groupIdString';"
             $psqlDeleteFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteFilesQuery`""
             Invoke-Expression $psqlDeleteFilesCommand
             
-            # Delete claims associated with the household
-            $deleteClaimsQuery = "DELETE FROM claims WHERE household_id = '$householdIdString';"
+            # Delete claims associated with the group
+            $deleteClaimsQuery = "DELETE FROM claims WHERE group_id = '$groupIdString';"
             $psqlDeleteClaimsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteClaimsQuery`""
             Invoke-Expression $psqlDeleteClaimsCommand
             
-            # Delete user from database
+            # Delete labels for this group
+            $deleteLabelsQuery = "DELETE FROM labels WHERE group_id = '$groupIdString';"
+            $psqlDeleteLabelsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteLabelsQuery`""
+            Invoke-Expression $psqlDeleteLabelsCommand
+            
+            # Delete group memberships for this group
+            $deleteMembershipsQuery = "DELETE FROM group_memberships WHERE group_id = '$groupIdString';"
+            $psqlDeleteMembershipsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteMembershipsQuery`""
+            Invoke-Expression $psqlDeleteMembershipsCommand
+            
+            # Delete permissions for this group
+            $deletePermissionsQuery = "DELETE FROM permissions WHERE group_id = '$groupIdString';"
+            $psqlDeletePermissionsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deletePermissionsQuery`""
+            Invoke-Expression $psqlDeletePermissionsCommand
+            
+            # Delete the group
+            $deleteGroupQuery = "DELETE FROM groups WHERE id = '$groupIdString';"
+            $psqlDeleteGroupCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteGroupQuery`""
+            Invoke-Expression $psqlDeleteGroupCommand
+            
+            # Delete the user
             $deleteUserQuery = "DELETE FROM users WHERE id = '$userIdString';"
             $psqlDeleteCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteUserQuery`""
             Invoke-Expression $psqlDeleteCommand
             
-            # Delete the household
-            $deleteHouseholdQuery = "DELETE FROM households WHERE id = '$householdIdString';"
-            $psqlDeleteHouseholdCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteHouseholdQuery`""
-            Invoke-Expression $psqlDeleteHouseholdCommand
-            
-            Write-Host "Household and associated data deleted" -ForegroundColor Green
+            Write-Host "Group and associated data deleted" -ForegroundColor Green
         }
         
         Write-Host "User deleted from database" -ForegroundColor Green
     } else {
-        Write-Host "User $($TestUser.Email) does not exist in database or could not connect to database" -ForegroundColor Green
+        Write-Host "User $($TestUser.Email) does not exist in database" -ForegroundColor Green
     }
 } catch {
     Write-Host "Error checking database: $_" -ForegroundColor Red
@@ -334,7 +580,10 @@ try {
     $registerResponse = Invoke-RestMethod -Uri $registerUrl -Method Post -Body $registerBody -ContentType "application/json" -ErrorAction Stop
     Write-Host "Registration API Response:" -ForegroundColor Green
     Write-Output ($registerResponse | ConvertTo-Json -Depth 10)
-    Record-TestResult -StepName "User Registration" -Status "Passed" -Message "User registered successfully"
+    $global:TestResults.Passed += @{
+        Step = "User Registration"
+        Message = "User registered successfully"
+    }
     
 } catch {
     Write-Host "Error registering user via API:" -ForegroundColor Red
@@ -342,7 +591,10 @@ try {
     if ($_.ErrorDetails.Message) {
         Write-Host $_.ErrorDetails.Message -ForegroundColor Red
     }
-    Record-TestResult -StepName "User Registration" -Status "Failed" -Message $_.Exception.Message
+    $global:TestResults.Failed += @{
+        Step = "User Registration"
+        Message = $_.Exception.Message
+    }
     Show-TestSummary
     exit 1
 }
@@ -354,11 +606,17 @@ Write-Host "Running: $confirmCommand" -ForegroundColor Gray
 try {
     Invoke-Expression $confirmCommand | Out-Null
     Write-Host "User confirmed in Cognito" -ForegroundColor Green
-    Record-TestResult -StepName "User Confirmation" -Status "Passed" -Message "User confirmed in Cognito"
+    $global:TestResults.Passed += @{
+        Step = "User Confirmation"
+        Message = "User confirmed in Cognito"
+    }
 } catch {
     Write-Host "Error confirming user in Cognito:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Record-TestResult -StepName "User Confirmation" -Status "Failed" -Message $_.Exception.Message
+    $global:TestResults.Failed += @{
+        Step = "User Confirmation"
+        Message = $_.Exception.Message
+    }
     Show-TestSummary
     exit 1
 }
@@ -369,7 +627,7 @@ $loginUrl = "$apiBaseUrl/auth/login"
 Write-Host "POST $loginUrl" -ForegroundColor Gray
 
 $loginBody = @{
-    username = $TestUser.Email
+    email = $TestUser.Email
     password = $TestUser.Password
 } | ConvertTo-Json
 
@@ -388,7 +646,10 @@ try {
     Write-Host "Access Token: $($accessToken.Substring(0, [Math]::Min(20, $accessToken.Length)))..." -ForegroundColor Gray
     Write-Host "Refresh Token: $($refreshToken.Substring(0, [Math]::Min(20, $refreshToken.Length)))..." -ForegroundColor Gray
     
-    Record-TestResult -StepName "User Login" -Status "Passed" -Message "Login successful, tokens received"
+    $global:TestResults.Passed += @{
+        Step = "User Login"
+        Message = "Login successful, tokens received"
+    }
     
     # Fix the Authorization header format
     # The issue is with how PowerShell handles the token string and how API Gateway processes it
@@ -416,321 +677,465 @@ try {
     
     # Step 4: Create a claim
     Write-Host "`nStep 4: Creating a claim..." -ForegroundColor Blue
+
+    # Now create a claim
     $createClaimUrl = "$apiBaseUrl/claims"
     Write-Host "POST $createClaimUrl" -ForegroundColor Gray
-    
+
+    # Set up headers with the access token
+    $headers = @{
+        "Authorization" = $authHeader
+        "Content-Type" = "application/json"
+    }
+
+    # Create a claim without specifying group_id - the API will infer it
     $claimBody = @{
-        title = "Test Claim $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')"
-        description = "This is a test claim created by the registration test script"
+        title = "Test Claim $(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        description = "This is a test claim created by the automated test script"
         date_of_loss = (Get-Date).AddDays(-7).ToString("yyyy-MM-dd")
-        status = "Open"
     } | ConvertTo-Json
-    
+
     try {
-        $claimResponse = Invoke-RestMethod -Uri $createClaimUrl -Method Post -Headers $uploadHeaders -Body $claimBody -ErrorAction Stop
+        $claimResponse = Invoke-RestMethod -Uri $createClaimUrl -Method Post -Headers $headers -Body $claimBody -ErrorAction Stop
         Write-Host "Create Claim API Response:" -ForegroundColor Green
         Write-Output ($claimResponse | ConvertTo-Json -Depth 10)
         
+        # Extract claim ID for future API calls
         $claimId = $claimResponse.data.id
-        Write-Host "Successfully created claim with ID: $claimId" -ForegroundColor Green
-        Record-TestResult -StepName "Create Claim" -Status "Passed" -Message "Claim created with ID: $claimId"
         
-        # Step 5: Upload files to the claim
-        Write-Host "`nStep 5: Uploading files to the claim..." -ForegroundColor Blue
-        $uploadFileUrl = "$apiBaseUrl/files"
-        Write-Host "POST $uploadFileUrl" -ForegroundColor Gray
-        
-        # Use images from the scripts/images directory
-        $imagesDir = Join-Path $ScriptDir "images"
-        if (-not (Test-Path $imagesDir)) {
-            Write-Host "Images directory not found: $imagesDir" -ForegroundColor Red
-            Record-TestResult -StepName "Upload Files" -Status "Failed" -Message "Images directory not found: $imagesDir"
-            Show-TestSummary
-            exit 1
-        }
-        
-        # Get all image files from the directory
-        $imageFiles = Get-ChildItem -Path $imagesDir -Filter "*.jpg"
-        if ($imageFiles.Count -eq 0) {
-            Write-Host "No image files found in directory: $imagesDir" -ForegroundColor Red
-            Record-TestResult -StepName "Upload Files" -Status "Failed" -Message "No image files found in directory: $imagesDir"
-            Show-TestSummary
-            exit 1
-        }
-        
-        Write-Host "Found $($imageFiles.Count) images in $imagesDir" -ForegroundColor Green
-        
-        try {
-            # Prepare the files for upload
-            $filesToUpload = @()
-            
-            foreach ($file in $imageFiles) {
-                Write-Host "Reading file: $($file.FullName)" -ForegroundColor Gray
-                $fileBytes = [System.IO.File]::ReadAllBytes($file.FullName)
-                $fileBase64 = [System.Convert]::ToBase64String($fileBytes)
-                
-                $filesToUpload += @{
-                    file_name = $file.Name
-                    file_data = $fileBase64
-                }
+        if ($claimId) {
+            $global:TestResults.Passed += @{
+                Step = "Create Claim"
+                Message = "Successfully created claim with ID: $claimId"
             }
             
-            # Create the request body with multiple files
-            $uploadBody = @{
-                files = $filesToUpload
-                claim_id = $claimId
-            } | ConvertTo-Json -Depth 10
-            
-            Write-Host "Request body size: $($uploadBody.Length) characters" -ForegroundColor Gray
-            
-            # Fix the Authorization header format
-            # The issue is likely with how PowerShell handles the token string
-            # Make sure there are no extra spaces or line breaks in the token
-            $cleanIdToken = $idToken.Trim()
-            
-            # Remove any potential carriage returns or line breaks that might be in the token
-            $cleanIdToken = $cleanIdToken -replace "`r", "" -replace "`n", ""
-            
-            # Debug: Show token length and first/last few characters
-            Write-Host "Token length: $($cleanIdToken.Length) characters" -ForegroundColor Yellow
-            Write-Host "Token start: $($cleanIdToken.Substring(0, [Math]::Min(20, $cleanIdToken.Length)))..." -ForegroundColor Yellow
-            Write-Host "Token end: ...$($cleanIdToken.Substring([Math]::Max(0, $cleanIdToken.Length - 20)))" -ForegroundColor Yellow
-            
-            $uploadHeaders = @{
-                "Authorization" = "Bearer $cleanIdToken"
-                "Content-Type" = "application/json"
-            }
-            
-            try {
-                $uploadResponse = Invoke-RestMethod -Uri $uploadFileUrl -Method Post -Headers $uploadHeaders -Body $uploadBody -ErrorAction Stop
-                Write-Host "Upload File API Response:" -ForegroundColor Green
-                Write-Output ($uploadResponse | ConvertTo-Json -Depth 10)
-                
-                $fileNames = $uploadResponse.data.files_queued | ForEach-Object { $_.file_name }
-                Write-Host "Successfully uploaded files to claim!" -ForegroundColor Green
-                Record-TestResult -StepName "Upload Files" -Status "Passed" -Message "Successfully uploaded $($fileNames.Count) files"
-                
-                # Wait for files to be processed
-                Write-Host "`nWaiting for files to be processed..." -ForegroundColor Blue
-                $filesProcessed = $false
-                $attempt = 0
-                $maxAttempts = 10
-                $fileIds = @()
-                
-                # Get all files for the household to find our files
-                $getFilesUrl = "$apiBaseUrl/files"
-                
-                while (-not $filesProcessed -and $attempt -lt $maxAttempts) {
-                    $attempt++
-                    Write-Host "Checking file status (attempt $attempt of $maxAttempts)..." -ForegroundColor Gray
-                    Start-Sleep -Seconds 5
+            # Step 5: Upload files to the claim
+            Write-Host "`nStep 5: Uploading files..." -ForegroundColor Blue
                     
-                    try {
-                        # Make sure we're using the correct authorization headers
-                        $getFilesHeaders = @{
-                            "Authorization" = "Bearer $idToken"
-                            "Content-Type" = "application/json"
+            # Get test images from the scripts/images folder
+            $imagesDir = Join-Path $ScriptDir "images"
+            if (-not (Test-Path $imagesDir)) {
+                Write-Host "Images directory not found: $imagesDir" -ForegroundColor Red
+                $global:TestResults.Failed += @{
+                    Step = "Upload Files"
+                    Message = "Images directory not found"
+                }
+            } else {
+                $imageFiles = Get-ChildItem -Path $imagesDir -Filter "*.jpg"
+                Write-Host "Found $($imageFiles.Count) test images in $imagesDir" -ForegroundColor Green
+            }
+                    
+            if ($imageFiles -and $imageFiles.Count -gt 0) {
+                try {
+                    # Step 5.1: Get pre-signed URLs for file uploads
+                    $getUploadUrlsUrl = "$apiBaseUrl/claims/$claimId/upload-url"
+                    Write-Host "POST $getUploadUrlsUrl" -ForegroundColor Gray
+                    
+                    # Prepare file info for pre-signed URL request
+                    $filesToUpload = @()
+                    foreach ($file in $imageFiles) {
+                        # Get MIME type based on file extension
+                        $contentType = switch ($file.Extension.ToLower()) {
+                            ".jpg"  { "image/jpeg" }
+                            ".jpeg" { "image/jpeg" }
+                            ".png"  { "image/png" }
+                            ".gif"  { "image/gif" }
+                            ".pdf"  { "application/pdf" }
+                            default { "application/octet-stream" }
                         }
                         
-                        $getFilesResponse = Invoke-RestMethod -Uri $getFilesUrl -Method Get -Headers $getFilesHeaders -ErrorAction Stop
-                        
-                        # Check if our files exist and have been processed
-                        $processedFiles = $getFilesResponse.data.files | Where-Object { $fileNames -contains $_.file_name }
-                        
-                        if ($processedFiles -and $processedFiles.Count -eq $imageFiles.Count) {
-                            $filesProcessed = $true
-                            $fileIds = $processedFiles | ForEach-Object { $_.id }
-                            Write-Host "Files have been processed successfully!" -ForegroundColor Green
-                            Write-Host "File IDs: $($fileIds -join ', ')" -ForegroundColor Green
-                            Record-TestResult -StepName "File Processing" -Status "Passed" -Message "All files processed successfully"
+                        $filesToUpload += @{
+                            name = $file.Name
+                            content_type = $contentType
                         }
-                    } catch {
-                        Write-Host "Error checking file status:" -ForegroundColor Red
-                        Write-Host $_.Exception.Message -ForegroundColor Red
                     }
-                }
-                
-                if (-not $filesProcessed) {
-                    Write-Host "Files were not processed within the expected time." -ForegroundColor Yellow
-                    Record-TestResult -StepName "File Processing" -Status "Warning" -Message "Files were not processed within the expected time"
-                }
-                
-                # Step 6: Create an item
-                if ($fileIds -and $fileIds.Count -gt 0) {
-                    Write-Host "`nStep 6: Creating an item..." -ForegroundColor Blue
-                    $createItemUrl = "$apiBaseUrl/claims/$claimId/items"
-                    Write-Host "POST $createItemUrl" -ForegroundColor Gray
                     
-                    $itemBody = @{
-                        name = "Test Item"
-                        description = "This is a test item created by the registration test script"
-                        unit_cost = 100.50
-                        condition = "Good"
-                        file_id = $fileIds[0]  # Associate with the first file
+                    $uploadUrlsBody = @{
+                        files = $filesToUpload
                     } | ConvertTo-Json
                     
-                    try {
-                        $itemResponse = Invoke-RestMethod -Uri $createItemUrl -Method Post -Headers $uploadHeaders -Body $itemBody -ErrorAction Stop
-                        Write-Host "Create Item API Response:" -ForegroundColor Green
-                        Write-Output ($itemResponse | ConvertTo-Json -Depth 10)
-                        
-                        $itemId = $itemResponse.data.id
-                        Write-Host "Successfully created an item!" -ForegroundColor Green
-                        Record-TestResult -StepName "Create Item" -Status "Passed" -Message "Item created with ID: $itemId"
-                        
-                        # Step 7: Add manual labels to the files
-                        Write-Host "`nStep 7: Adding manual labels to the files..." -ForegroundColor Blue
-                        $labelSuccess = $true
-                        
-                        foreach ($fileId in $fileIds) {
-                            $createLabelUrl = "$apiBaseUrl/files/$fileId/labels"
-                            Write-Host "POST $createLabelUrl" -ForegroundColor Gray
+                    # Set up headers with the access token
+                    #$headers = @{
+                    #    "Authorization" = $authHeader
+                    #    "Content-Type" = "application/json"
+                    #}
+                    
+                    # Request pre-signed URLs
+                    $uploadUrlsResponse = Invoke-RestMethod -Uri $getUploadUrlsUrl -Method Post -Headers $headers -Body $uploadUrlsBody -ErrorAction Stop
+                    Write-Host "Get Upload URLs Response:" -ForegroundColor Green
+                    Write-Output ($uploadUrlsResponse | ConvertTo-Json -Depth 10)
+                    
+                    # Step 5.2: Upload files using pre-signed URLs
+                    $fileIds = @()
+                    $s3Keys = @()
+                    
+                    foreach ($fileInfo in $uploadUrlsResponse.data.files) {
+                        if ($fileInfo.status -eq "ready") {
+                            # Find the corresponding file
+                            $file = $imageFiles | Where-Object { $_.Name -eq $fileInfo.name } | Select-Object -First 1
                             
-                            $labelBody = @{
-                                labels = @("TestLabel", "Important", "Insurance")
+                            if ($file) {
+                                $uploadUrl = $fileInfo.upload_url
+                                Write-Host "Uploading file $($file.Name) to pre-signed URL..." -ForegroundColor Gray
+                                
+                                try {
+                                    # Read file content as bytes
+                                    $fileContent = [System.IO.File]::ReadAllBytes($file.FullName)
+                                    
+                                    # Upload directly to S3 using pre-signed URL
+                                    # Note: We use Invoke-WebRequest instead of Invoke-RestMethod for better control
+                                    $uploadResponse = Invoke-WebRequest -Uri $uploadUrl -Method PUT -Body $fileContent -ContentType $fileInfo.content_type -ErrorAction Stop
+                                    
+                                    if ($uploadResponse.StatusCode -eq 200) {
+                                        Write-Host "Successfully uploaded file $($file.Name)" -ForegroundColor Green
+                                        # Store S3 key for later use
+                                        $s3Keys += $fileInfo.s3_key
+                                        
+                                        # Wait a moment for the S3 event to trigger processing
+                                        Start-Sleep -Seconds 2
+                                        
+                                        # Extract file ID from S3 key
+                                        # S3 key format: pending/{claim_id}/{user_id}/{file_id}/{filename}
+                                        $s3KeyParts = $fileInfo.s3_key -split '/'
+                                        if ($s3KeyParts.Count -ge 4) {
+                                            $fileId = $s3KeyParts[3]  # Extract file_id from the path
+                                            $fileIds += $fileId
+                                            Write-Host "Extracted file ID: $fileId" -ForegroundColor Green
+                                        }
+                                    }
+                                } catch {
+                                    Write-Host "Error uploading file to S3:" -ForegroundColor Red
+                                    Write-Host $_.Exception.Message -ForegroundColor Red
+                                    if ($_.Exception.Response) {
+                                        $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                                        $reader.BaseStream.Position = 0
+                                        $reader.DiscardBufferedData()
+                                        $responseBody = $reader.ReadToEnd()
+                                        Write-Host "Response body: $responseBody" -ForegroundColor Red
+                                    }
+                                }
+                            }
+                        } else {
+                            Write-Host "Error getting pre-signed URL for $($fileInfo.name): $($fileInfo.error)" -ForegroundColor Red
+                        }
+                    }
+                    
+                    if ($fileIds.Count -gt 0) {
+                        $global:TestResults.Passed += @{
+                            Step = "Upload Files"
+                            Message = "Successfully uploaded $($fileIds.Count) files"
+                        }
+                        
+                        # Wait for files to be processed before proceeding
+                        $fileResult = Test-FileProcessingStatusViaAPI -ApiBaseUrl $apiBaseUrl -ClaimId $claimId -Headers $headers -FileNames $imageFiles.Name
+                        
+                        if (-not $fileResult.Processed) {
+                            Write-Host "Warning: Not all files were processed within the timeout period. Proceeding anyway..." -ForegroundColor Yellow
+                        }
+                        
+                        # Get the correct file IDs from the API response
+                        $apiFileIds = $fileResult.FileIds
+                        Write-Host "Using file IDs from API: $($apiFileIds -join ', ')" -ForegroundColor Green
+                        
+                        # Step 6: Create items using two different approaches
+                        Write-Host "`nStep 6: Creating items..." -ForegroundColor Blue
+                        $createItemUrl = "$apiBaseUrl/claims/$claimId/items"
+                        
+                        # Approach 1: Create an item WITHOUT a file
+                        Write-Host "Approach 1: Creating an item without a file..." -ForegroundColor Cyan
+                        $itemBody1 = @{
+                            name = "Test Item Without File"
+                            description = "This is a test item created by the automated test script"
+                        } | ConvertTo-Json
+                        
+                        try {
+                            $itemResponse1 = Invoke-RestMethod -Uri $createItemUrl -Method Post -Headers $headers -ContentType "application/json" -Body $itemBody1 -ErrorAction Stop
+                            Write-Host "Create Item (No File) API Response:" -ForegroundColor Green
+                            Write-Output ($itemResponse1 | ConvertTo-Json -Depth 10)
+                            
+                            # Extract item ID for future API calls
+                            $itemId1 = $itemResponse1.data.id
+                            
+                            if ($itemId1) {
+                                $global:TestResults.Passed += @{
+                                    Step = "Create Item (No File)"
+                                    Message = "Successfully created item with ID: $itemId1"
+                                }
+                                
+                                # Now add a file to this item
+                                if ($apiFileIds.Count -gt 0) {
+                                    $addFileUrl = "$apiBaseUrl/items/$itemId1/files"
+                                    $addFileBody = @{
+                                        file_ids = @($apiFileIds[0])
+                                    } | ConvertTo-Json
+                                    
+                                    try {
+                                        $addFileResponse = Invoke-RestMethod -Uri $addFileUrl -Method Post -Headers $headers -ContentType "application/json" -Body $addFileBody -ErrorAction Stop
+                                        Write-Host "Add File to Item API Response:" -ForegroundColor Green
+                                        Write-Output ($addFileResponse | ConvertTo-Json -Depth 10)
+                                        $global:TestResults.Passed += @{
+                                            Step = "Add File to Item"
+                                            Message = "Successfully added file to item"
+                                        }
+                                    } catch {
+                                        Write-Host "Error adding file to item:" -ForegroundColor Red
+                                        Write-Host $_.Exception.Message -ForegroundColor Red
+                                        $global:TestResults.Failed += @{
+                                            Step = "Add File to Item"
+                                            Message = $_.Exception.Message
+                                        }
+                                    }
+                                }
+                            } else {
+                                $global:TestResults.Failed += @{
+                                    Step = "Create Item (No File)"
+                                    Message = "Did not receive item ID in response"
+                                }
+                            }
+                        } catch {
+                            Write-Host "Error creating item without file:" -ForegroundColor Red
+                            Write-Host $_.Exception.Message -ForegroundColor Red
+                            $global:TestResults.Failed += @{
+                                Step = "Create Item (No File)"
+                                Message = $_.Exception.Message
+                            }
+                        }
+                        
+                        # Approach 2: Create an item WITH a file
+                        if ($apiFileIds.Count -gt 1) {
+                            Write-Host "Approach 2: Creating an item with a file..." -ForegroundColor Cyan
+                            $itemBody2 = @{
+                                name = "Test Item With File"
+                                description = "This item was created with a file attachment"
+                                file_ids = @($apiFileIds[1])  # Use the second file ID from API
                             } | ConvertTo-Json
                             
                             try {
-                                $labelResponse = Invoke-RestMethod -Uri $createLabelUrl -Method Post -Headers $uploadHeaders -Body $labelBody -ErrorAction Stop
-                                Write-Host "Create Label API Response:" -ForegroundColor Green
-                                Write-Output ($labelResponse | ConvertTo-Json -Depth 10)
-                                Write-Host "Successfully added labels to file $fileId!" -ForegroundColor Green
+                                $itemResponse2 = Invoke-RestMethod -Uri $createItemUrl -Method Post -Headers $headers -ContentType "application/json" -Body $itemBody2 -ErrorAction Stop
+                                Write-Host "Create Item (With File) API Response:" -ForegroundColor Green
+                                Write-Output ($itemResponse2 | ConvertTo-Json -Depth 10)
+                                
+                                # Extract item ID for future API calls
+                                $itemId2 = $itemResponse2.data.id
+                                
+                                if ($itemId2) {
+                                    $global:TestResults.Passed += @{
+                                        Step = "Create Item (With File)"
+                                        Message = "Successfully created item with ID: $itemId2"
+                                    }
+                                    
+                                    # Now add another file to this item
+                                    if ($apiFileIds.Count -gt 2) {
+                                        $addFileUrl = "$apiBaseUrl/items/$itemId2/files"
+                                        $addFileBody = @{
+                                            file_ids = @($apiFileIds[2])  # Use the third file ID from API
+                                        } | ConvertTo-Json
+                                        
+                                        try {
+                                            $addFileResponse = Invoke-RestMethod -Uri $addFileUrl -Method Post -Headers $headers -ContentType "application/json" -Body $addFileBody -ErrorAction Stop
+                                            Write-Host "Add Second File to Item API Response:" -ForegroundColor Green
+                                            Write-Output ($addFileResponse | ConvertTo-Json -Depth 10)
+                                            $global:TestResults.Passed += @{
+                                                Step = "Add Second File to Item"
+                                                Message = "Successfully added second file to item"
+                                            }
+                                        } catch {
+                                            Write-Host "Error adding second file to item:" -ForegroundColor Red
+                                            Write-Host $_.Exception.Message -ForegroundColor Red
+                                            $global:TestResults.Failed += @{
+                                                Step = "Add Second File to Item"
+                                                Message = $_.Exception.Message
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    $global:TestResults.Failed += @{
+                                        Step = "Create Item (With File)"
+                                        Message = "Did not receive item ID in response"
+                                    }
+                                }
                             } catch {
-                                Write-Host "Error adding labels to file:" -ForegroundColor Red
+                                Write-Host "Error creating item with file:" -ForegroundColor Red
                                 Write-Host $_.Exception.Message -ForegroundColor Red
-                                $labelSuccess = $false
+                                $global:TestResults.Failed += @{
+                                    Step = "Create Item (With File)"
+                                    Message = $_.Exception.Message
+                                }
                             }
                         }
-                        
-                        if ($labelSuccess) {
-                            Record-TestResult -StepName "Add Labels" -Status "Passed" -Message "Labels added to all files"
-                        } else {
-                            Record-TestResult -StepName "Add Labels" -Status "Warning" -Message "Some labels could not be added"
-                        }
-                        
-                        # Step 8: Get the labels for the files
-                        Write-Host "`nStep 8: Getting the labels for the files..." -ForegroundColor Blue
-                        $getLabelsSuccess = $true
-                        
-                        foreach ($fileId in $fileIds) {
-                            $getLabelsUrl = "$apiBaseUrl/files/$fileId/labels"
-                            Write-Host "GET $getLabelsUrl" -ForegroundColor Gray
-                            
-                            try {
-                                $getLabelsResponse = Invoke-RestMethod -Uri $getLabelsUrl -Method Get -Headers $uploadHeaders -ErrorAction Stop
-                                Write-Host "Get Labels API Response:" -ForegroundColor Green
-                                Write-Output ($getLabelsResponse | ConvertTo-Json -Depth 10)
-                                Write-Host "Successfully retrieved labels for file $fileId!" -ForegroundColor Green
-                            } catch {
-                                Write-Host "Error getting labels for file:" -ForegroundColor Red
-                                Write-Host $_.Exception.Message -ForegroundColor Red
-                                $getLabelsSuccess = $false
-                            }
-                        }
-                        
-                        if ($getLabelsSuccess) {
-                            Record-TestResult -StepName "Get Labels" -Status "Passed" -Message "Retrieved labels for all files"
-                        } else {
-                            Record-TestResult -StepName "Get Labels" -Status "Warning" -Message "Could not retrieve labels for some files"
-                        }
-                        
-                        # Step 9: Teardown - Delete the item
-                        Write-Host "`nStep 9: Teardown - Deleting the item..." -ForegroundColor Blue
-                        $deleteItemUrl = "$apiBaseUrl/items/$itemId"
-                        Write-Host "DELETE $deleteItemUrl" -ForegroundColor Gray
-                        
-                        try {
-                            $deleteItemResponse = Invoke-RestMethod -Uri $deleteItemUrl -Method Delete -Headers $uploadHeaders -ErrorAction Stop
-                            Write-Host "Delete Item API Response:" -ForegroundColor Green
-                            Write-Output ($deleteItemResponse | ConvertTo-Json -Depth 10)
-                            Write-Host "Successfully deleted the item!" -ForegroundColor Green
-                            Record-TestResult -StepName "Delete Item" -Status "Passed" -Message "Item deleted successfully"
-                        } catch {
-                            Write-Host "Error deleting item:" -ForegroundColor Red
-                            Write-Host $_.Exception.Message -ForegroundColor Red
-                            Record-TestResult -StepName "Delete Item" -Status "Failed" -Message $_.Exception.Message
-                        }
-                    } catch {
-                        Write-Host "Error creating item:" -ForegroundColor Red
-                        Write-Host $_.Exception.Message -ForegroundColor Red
-                        Record-TestResult -StepName "Create Item" -Status "Failed" -Message $_.Exception.Message
                     }
-                } else {
-                    Record-TestResult -StepName "Create Item" -Status "Skipped" -Message "No file IDs available to create item"
-                }
-                
-                # Step 10: Teardown - Delete the files
-                Write-Host "`nStep 10: Teardown - Deleting the files..." -ForegroundColor Blue
-                $deleteFileSuccess = $true
-                
-                foreach ($fileId in $fileIds) {
-                    $deleteFileUrl = "$apiBaseUrl/files/$fileId"
-                    Write-Host "DELETE $deleteFileUrl" -ForegroundColor Gray
-                    
-                    try {
-                        $deleteFileResponse = Invoke-RestMethod -Uri $deleteFileUrl -Method Delete -Headers $uploadHeaders -ErrorAction Stop
-                        Write-Host "Delete File API Response:" -ForegroundColor Green
-                        Write-Output ($deleteFileResponse | ConvertTo-Json -Depth 10)
-                        Write-Host "Successfully deleted file $fileId!" -ForegroundColor Green
-                    } catch {
-                        Write-Host "Error deleting file:" -ForegroundColor Red
-                        Write-Host $_.Exception.Message -ForegroundColor Red
-                        $deleteFileSuccess = $false
-                    }
-                }
-                
-                if ($deleteFileSuccess) {
-                    Record-TestResult -StepName "Delete Files" -Status "Passed" -Message "All files deleted successfully"
-                } else {
-                    Record-TestResult -StepName "Delete Files" -Status "Warning" -Message "Some files could not be deleted"
-                }
-                
-                # Step 11: Teardown - Delete the claim
-                Write-Host "`nStep 11: Teardown - Deleting the claim..." -ForegroundColor Blue
-                $deleteClaimUrl = "$apiBaseUrl/claims/$claimId"
-                Write-Host "DELETE $deleteClaimUrl" -ForegroundColor Gray
-                
-                try {
-                    $deleteClaimResponse = Invoke-RestMethod -Uri $deleteClaimUrl -Method Delete -Headers $uploadHeaders -ErrorAction Stop
-                    Write-Host "Delete Claim API Response:" -ForegroundColor Green
-                    Write-Output ($deleteClaimResponse | ConvertTo-Json -Depth 10)
-                    Write-Host "Successfully deleted the claim!" -ForegroundColor Green
-                    Record-TestResult -StepName "Delete Claim" -Status "Passed" -Message "Claim deleted successfully"
                 } catch {
-                    Write-Host "Error deleting claim:" -ForegroundColor Red
+                    Write-Host "Error creating items:" -ForegroundColor Red
                     Write-Host $_.Exception.Message -ForegroundColor Red
-                    Record-TestResult -StepName "Delete Claim" -Status "Failed" -Message $_.Exception.Message
                 }
-                
-            } catch {
-                Write-Host "Error uploading files:" -ForegroundColor Red
-                Write-Host $_.Exception.Message -ForegroundColor Red
-                if ($_.Exception.Response) {
-                    $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
-                    $reader.BaseStream.Position = 0
-                    $reader.DiscardBufferedData()
-                    $responseBody = $reader.ReadToEnd()
-                    Write-Host $responseBody -ForegroundColor Red
+            } else {
+                $global:TestResults.Failed += @{
+                    Step = "Upload Files"
+                    Message = "No files were successfully uploaded"
                 }
-                Record-TestResult -StepName "Upload Files" -Status "Failed" -Message $_.Exception.Message
             }
-            
-        } catch {
-            Write-Host "Error preparing files for upload:" -ForegroundColor Red
-            Write-Host $_.Exception.Message -ForegroundColor Red
-            Record-TestResult -StepName "Upload Files" -Status "Failed" -Message "Error preparing files: $($_.Exception.Message)"
+        } else {
+            $global:TestResults.Skipped += @{
+                Step = "Upload Files"
+                Message = "No test images found"
+            }
         }
-        
     } catch {
-        Write-Host "Error creating claim:" -ForegroundColor Red
+        Write-Host "Error with claim creation:" -ForegroundColor Red
         Write-Host $_.Exception.Message -ForegroundColor Red
-        Record-TestResult -StepName "Create Claim" -Status "Failed" -Message $_.Exception.Message
+        $global:TestResults.Failed += @{
+            Step = "Claim Creation Process"
+            Message = $_.Exception.Message
+        }
     }
     
-} catch {
-    Write-Host "Error during login:" -ForegroundColor Red
+    if (-not $claimId) {
+        $global:TestResults.Failed += @{
+            Step = "Create Claim"
+            Message = "Did not receive claim ID in response"
+        }
+    }
+}
+
+# Add missing catch block for the login try statement
+catch {
+    Write-Host "Error during login process:" -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
-    Record-TestResult -StepName "User Login" -Status "Failed" -Message $_.Exception.Message
+    $global:TestResults.Failed += @{
+        Step = "User Login"
+        Message = $_.Exception.Message
+    }
+    exit 1
+}
+
+# Step 7: Get item details
+Write-Host "`nStep 7: Getting item details..." -ForegroundColor Blue
+                
+# Try to get details for the first item
+if ($itemId1) {
+    $getItemUrl = "$apiBaseUrl/items/$itemId1"
+    Write-Host "GET $getItemUrl" -ForegroundColor Gray
+    
+    try {
+        $itemDetailsResponse = Invoke-RestMethod -Uri $getItemUrl -Method Get -Headers $headers -ErrorAction Stop
+        Write-Host "Get Item API Response:" -ForegroundColor Green
+        Write-Output ($itemDetailsResponse | ConvertTo-Json -Depth 10)
+        $global:TestResults.Passed += @{
+            Step = "Get Item"
+            Message = "Successfully retrieved item details"
+        }
+    } catch {
+        Write-Host "Error getting item details:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $global:TestResults.Failed += @{
+            Step = "Get Item"
+            Message = $_.Exception.Message
+        }
+    }
+} elseif ($itemId2) {
+    # If first item creation failed, try with the second item
+    $getItemUrl = "$apiBaseUrl/items/$itemId2"
+    Write-Host "GET $getItemUrl" -ForegroundColor Gray
+    
+    try {
+        $itemDetailsResponse = Invoke-RestMethod -Uri $getItemUrl -Method Get -Headers $headers -ErrorAction Stop
+        Write-Host "Get Item API Response:" -ForegroundColor Green
+        Write-Output ($itemDetailsResponse | ConvertTo-Json -Depth 10)
+        $global:TestResults.Passed += @{
+            Step = "Get Item"
+            Message = "Successfully retrieved item details"
+        }
+    } catch {
+        Write-Host "Error getting item details:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $global:TestResults.Failed += @{
+            Step = "Get Item"
+            Message = $_.Exception.Message
+        }
+    }
+} else {
+    Write-Host "Skipping item details retrieval - no item IDs available" -ForegroundColor Yellow
+    $global:TestResults.Skipped += @{
+        Step = "Get Item"
+        Message = "No item IDs available to retrieve"
+    }
+}
+
+    
+# Step 10: Teardown - Clean up S3 objects and delete files
+Write-Host "`nStep 10: Cleaning up files and S3 objects..." -ForegroundColor Blue
+
+# First, clean up S3 objects
+if ($s3Keys -and $s3Keys.Count -gt 0) {
+    Write-Host "Cleaning up S3 objects..." -ForegroundColor Yellow
+    foreach ($s3Key in $s3Keys) {
+        Write-Host "Deleting S3 object: $s3Key" -ForegroundColor Gray
+        try {
+            # Use AWS CLI to delete the S3 object
+            $deleteS3Command = "aws s3 rm s3://$S3_BUCKET_NAME/$s3Key"
+            Write-Host "Running: $deleteS3Command" -ForegroundColor Gray
+            
+            # In PowerShell, we need to handle AWS CLI commands carefully
+            $result = Invoke-Expression $deleteS3Command 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "Warning: AWS CLI command returned exit code $LASTEXITCODE" -ForegroundColor Yellow
+                Write-Host $result -ForegroundColor Yellow
+            } else {
+                Write-Host "Successfully deleted S3 object: $s3Key" -ForegroundColor Green
+            }
+        } catch {
+            Write-Host "Error deleting S3 object: $s3Key" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+        }
+    }
+}
+
+# Then, delete file records from the database
+foreach ($fileId in $fileIds) {
+    $deleteFileUrl = "$apiBaseUrl/files/$fileId"
+    Write-Host "DELETE $deleteFileUrl" -ForegroundColor Gray
+    
+    try {
+        $deleteFileResponse = Invoke-RestMethod -Uri $deleteFileUrl -Method Delete -Headers $headers -ErrorAction Stop
+        Write-Host "Delete File API Response:" -ForegroundColor Green
+        Write-Output ($deleteFileResponse | ConvertTo-Json -Depth 10)
+        Write-Host "Successfully deleted file with ID: $fileId" -ForegroundColor Green
+    } catch {
+        Write-Host "Error deleting file:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+    }
+}
+
+# Step 11: Delete the claim
+Write-Host "`nStep 11: Deleting claim..." -ForegroundColor Blue
+# Only attempt to delete the claim if we have a valid claim ID
+if ($claimId) {
+    $deleteClaimUrl = "$apiBaseUrl/claims/$claimId"
+    Write-Host "DELETE $deleteClaimUrl" -ForegroundColor Gray
+    
+    try {
+        $deleteClaimResponse = Invoke-RestMethod -Uri $deleteClaimUrl -Method Delete -Headers $headers -ErrorAction Stop
+        Write-Host "Delete Claim API Response:" -ForegroundColor Green
+        Write-Output ($deleteClaimResponse | ConvertTo-Json -Depth 10)
+        Write-Host "Successfully deleted claim!" -ForegroundColor Green
+        $global:TestResults.Passed += @{
+            Step = "Delete Claim"
+            Message = "Successfully deleted claim"
+        }
+    } catch {
+        Write-Host "Error deleting claim:" -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+        $global:TestResults.Failed += @{
+            Step = "Delete Claim"
+            Message = $_.Exception.Message
+        }
+    }
+} else {
+    Write-Host "Skipping claim deletion - no claim ID available" -ForegroundColor Yellow
+    $global:TestResults.Skipped += @{
+        Step = "Delete Claim"
+        Message = "No claim ID available to delete"
+    }
 }
 
 # Display test summary
@@ -739,5 +1144,5 @@ Show-TestSummary
 # Export test results to a file
 $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
 $resultsFile = Join-Path $ScriptDir "test_results_$timestamp.json"
-$TestResults | ConvertTo-Json -Depth 10 | Out-File -FilePath $resultsFile
+$global:TestResults | ConvertTo-Json -Depth 10 | Out-File -FilePath $resultsFile
 Write-Host "Test results saved to: $resultsFile" -ForegroundColor Cyan
