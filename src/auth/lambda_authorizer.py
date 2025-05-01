@@ -1,3 +1,5 @@
+
+# TODO: Delete this file once I confirm it's not used
 # WARNING: This version skips signature verification for tokens.
 # This is acceptable for development/demos only and MUST be fixed before production.
 import json
