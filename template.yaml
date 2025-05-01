@@ -1260,11 +1260,11 @@ Resources:
 
 
   # Room Functions
-  # Create Room Function
-  CreateRoomFunction:
+  # Add Room Function
+  AddRoomFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: rooms.create_room.lambda_handler
+      Handler: rooms.add_room_to_claim.lambda_handler
       Runtime: python3.12
       VpcConfig: !If 
         - HasVpc
@@ -1280,18 +1280,18 @@ Resources:
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
       Events:
-        CreateRoomAPI:
+        AddRoomAPI:
           Type: Api
           Properties:
-            Path: /claims/{claim_id}/rooms
+            Path: /claims/{claim_id}/rooms/{room_id}
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
   # Get Rooms Function
-  GetRoomsFunction:
+  GetClaimRoomsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: rooms.get_rooms.lambda_handler
+      Handler: rooms.get_claim_rooms.lambda_handler
       Runtime: python3.12
       VpcConfig: !If 
         - HasVpc
@@ -1307,7 +1307,7 @@ Resources:
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
       Events:
-        GetRoomsAPI:
+        GetClaimRoomsAPI:
           Type: Api
           Properties:
             Path: /claims/{claim_id}/rooms
@@ -1315,67 +1315,67 @@ Resources:
             RestApiId: !Ref ClaimVisionAPI
 
 
-  # Get Room Function
-  GetRoomFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: rooms.get_room.lambda_handler
-      Runtime: python3.12
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
-      CodeUri: src/
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
-      Events:
-        GetRoomAPI:
-          Type: Api
-          Properties:
-            Path: /claims/{claim_id}/rooms/{room_id}
-            Method: GET
-            RestApiId: !Ref ClaimVisionAPI
+  # Get Room Function -> Maybe readd once we have a need for it
+#  GetRoomFunction:
+#    Type: AWS::Serverless::Function
+#    Properties:
+#      Handler: rooms.get_room.lambda_handler
+#      Runtime: python3.12
+#      VpcConfig: !If 
+#        - HasVpc
+#        - SubnetIds: !Ref SubnetIds
+#          SecurityGroupIds: !Ref SecurityGroupIds
+#        - !Ref AWS::NoValue
+#      CodeUri: src/
+#      Role: !GetAtt LambdaExecutionRole.Arn
+#      Environment:
+#        Variables:
+#          DB_USERNAME: !Ref DBUsername
+#          DB_PASSWORD: !Ref DBPassword
+#          DB_HOST: !Ref DBEndpoint
+#          DB_NAME: claimvision
+#      Events:
+#        GetRoomAPI:
+#          Type: Api
+#          Properties:
+#            Path: /claims/{claim_id}/rooms/{room_id}
+#            Method: GET
+#            RestApiId: !Ref ClaimVisionAPI
 
 
   # Update Room Function
-  UpdateRoomFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: rooms.update_room.lambda_handler
-      Runtime: python3.12
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
-      CodeUri: src/
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
-      Events:
-        UpdateRoomAPI:
-          Type: Api
-          Properties:
-            Path: /claims/{claim_id}/rooms/{room_id}
-            Method: PUT
-            RestApiId: !Ref ClaimVisionAPI
+#  UpdateRoomFunction:
+#    Type: AWS::Serverless::Function
+#    Properties:
+#      Handler: rooms.update_room.lambda_handler
+#      Runtime: python3.12
+#      VpcConfig: !If 
+#        - HasVpc
+#        - SubnetIds: !Ref SubnetIds
+#          SecurityGroupIds: !Ref SecurityGroupIds
+#        - !Ref AWS::NoValue
+#      CodeUri: src/
+#      Role: !GetAtt LambdaExecutionRole.Arn
+#      Environment:
+#        Variables:
+#          DB_USERNAME: !Ref DBUsername
+#          DB_PASSWORD: !Ref DBPassword
+#          DB_HOST: !Ref DBEndpoint
+#          DB_NAME: claimvision
+#      Events:
+#        UpdateRoomAPI:
+#          Type: Api
+#          Properties:
+#            Path: /claims/{claim_id}/rooms/{room_id}
+#            Method: PUT
+#            RestApiId: !Ref ClaimVisionAPI
 
 
   # Delete Room Function
-  DeleteRoomFunction:
+  RemoveRoomFromClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: rooms.delete_room.lambda_handler
+      Handler: rooms.remove_room_from_claim.lambda_handler
       Runtime: python3.12
       VpcConfig: !If 
         - HasVpc
@@ -1391,7 +1391,7 @@ Resources:
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
       Events:
-        DeleteRoomAPI:
+        RemoveRoomFromClaimAPI:
           Type: Api
           Properties:
             Path: /claims/{claim_id}/rooms/{room_id}

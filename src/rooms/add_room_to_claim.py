@@ -37,13 +37,25 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
             logger.warning("Missing claim ID in path parameters")
             return response.api_response(400, error_details="Claim ID is required in path parameters")
-            
+        
+        # Extract room ID from path parameters
+        if not event.get("pathParameters") or "room_id" not in event.get("pathParameters", {}):
+            logger.warning("Missing room ID in path parameters")
+            return response.api_response(400, error_details="Room ID is required in path parameters")
+
         # Extract and validate claim_id from path parameters
         success, result = extract_uuid_param(event, "claim_id")
         if not success:
             return result  # Return error response
             
         claim_id = result
+        
+        # Extract and validate room_id from path parameters
+        success, result = extract_uuid_param(event, "room_id")
+        if not success:
+            return result  # Return error response
+            
+        room_id = result
         
         # Verify claim exists
         claim = db_session.query(Claim).filter(
@@ -60,29 +72,6 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             logger.info("User %s does not have write access to claim %s", user.id, claim_id)
             return response.api_response(403, error_details="User does not have write access to claim")
         
-        # Parse request body
-        body_str = event.get("body", "{}")
-        try:
-            body = json.loads(body_str) if isinstance(body_str, str) else body_str
-        except json.JSONDecodeError:
-            logger.warning("Invalid JSON in request body")
-            return response.api_response(400, error_details="Invalid request body format")
-            
-        if not body:
-            logger.warning("Missing request body")
-            return response.api_response(400, error_details="Missing request body")
-            
-        # Extract room ID from request body
-        if "room_id" not in body:
-            logger.warning("Missing room ID in request body")
-            return response.api_response(400, error_details="Room ID is required in request body")
-            
-        try:
-            room_id = uuid.UUID(body["room_id"])
-        except (ValueError, AttributeError):
-            logger.warning("Invalid room ID format: %s", body.get("room_id"))
-            return response.api_response(400, error_details="Invalid room ID format")
-            
         # Verify room exists and is active
         room = db_session.query(Room).filter(
             Room.id == room_id,

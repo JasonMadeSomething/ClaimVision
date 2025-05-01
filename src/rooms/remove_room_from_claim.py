@@ -39,7 +39,6 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
             logger.warning("Missing claim ID in path parameters")
             return response.api_response(400, error_details="Claim ID is required in path parameters")
-            
         # Extract and validate claim_id from path parameters
         success, result = extract_uuid_param(event, "claim_id")
         if not success:
