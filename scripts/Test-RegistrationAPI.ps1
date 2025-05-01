@@ -85,6 +85,19 @@ function Show-TestSummary {
         }
     }
     
+    # Check if Skipped array exists
+    if ($null -ne $global:TestResults.Skipped) {
+        $skipCount = $global:TestResults.Skipped.Count
+        Write-Host "Skipped: $skipCount" -ForegroundColor Yellow
+        
+        if ($skipCount -gt 0) {
+            Write-Host "`nSKIPPED STEPS:" -ForegroundColor Yellow
+            foreach ($result in $global:TestResults.Skipped) {
+                Write-Host "  ⚠️ $($result.Step): $($result.Message)" -ForegroundColor Yellow
+            }
+        }
+    }
+    
     # Overall test result
     if ($failCount -eq 0) {
         if ($warnCount -eq 0) {
@@ -143,7 +156,30 @@ function Clean-TestDatabase {
                     
                     Write-Host "Found test user with ID: $userId" -ForegroundColor Green
                     
-                    # 1. Find groups created by this user
+                    # 1. Delete any items created by this user's claims
+                    Write-Host "Deleting items created in claims by this user..." -ForegroundColor Yellow
+                    $getClaimsQuery = "SELECT id FROM claims WHERE user_id = '$userId';"
+                    $psqlGetClaimsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$getClaimsQuery`" -t"
+                    $claimsResult = Invoke-Expression $psqlGetClaimsCommand
+                    
+                    if ($claimsResult) {
+                        $claimIds = $claimsResult -split "`n" | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+                        foreach ($claimId in $claimIds) {
+                            # Delete item_files associations
+                            $deleteItemFilesQuery = "DELETE FROM item_files WHERE item_id IN (SELECT id FROM items WHERE claim_id = '$claimId');"
+                            $psqlDeleteItemFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteItemFilesQuery`""
+                            Invoke-Expression $psqlDeleteItemFilesCommand
+                            
+                            # Delete items
+                            $deleteItemsQuery = "DELETE FROM items WHERE claim_id = '$claimId';"
+                            $psqlDeleteItemsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteItemsQuery`""
+                            Invoke-Expression $psqlDeleteItemsCommand
+                            
+                            Write-Host "Deleted items for claim ID: $claimId" -ForegroundColor Green
+                        }
+                    }
+                    
+                    # 2. Find groups created by this user
                     $getGroupsQuery = "SELECT id FROM groups WHERE created_by = '$userId';"
                     $psqlGetGroupsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$getGroupsQuery`" -t"
                     $groupsResult = Invoke-Expression $psqlGetGroupsCommand
@@ -154,43 +190,43 @@ function Clean-TestDatabase {
                         foreach ($groupId in $groupIds) {
                             Write-Host "Processing group ID: $groupId" -ForegroundColor Yellow
                             
-                            # 2. Delete all files associated with this group
+                            # 3. Delete all files associated with this group
                             Write-Host "Deleting files for group ID: $groupId" -ForegroundColor Yellow
                             $deleteFilesQuery = "DELETE FROM files WHERE group_id = '$groupId';"
                             $psqlDeleteFilesCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteFilesQuery`""
                             Invoke-Expression $psqlDeleteFilesCommand
                             
-                            # 3. Delete all claims associated with this group
+                            # 4. Delete all claims associated with this group
                             Write-Host "Deleting claims for group ID: $groupId" -ForegroundColor Yellow
                             $deleteClaimsQuery = "DELETE FROM claims WHERE group_id = '$groupId';"
                             $psqlDeleteClaimsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteClaimsQuery`""
                             Invoke-Expression $psqlDeleteClaimsCommand
                             
-                            # 4. Delete all items associated with this group
+                            # 5. Delete all items associated with this group
                             Write-Host "Deleting items for group ID: $groupId" -ForegroundColor Yellow
                             $deleteItemsQuery = "DELETE FROM items WHERE group_id = '$groupId';"
                             $psqlDeleteItemsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteItemsQuery`""
                             Invoke-Expression $psqlDeleteItemsCommand
                             
-                            # 5. Delete all labels associated with this group
+                            # 6. Delete all labels associated with this group
                             Write-Host "Deleting labels for group ID: $groupId" -ForegroundColor Yellow
                             $deleteLabelsQuery = "DELETE FROM labels WHERE group_id = '$groupId';"
                             $psqlDeleteLabelsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteLabelsQuery`""
                             Invoke-Expression $psqlDeleteLabelsCommand
                             
-                            # 6. Delete all group memberships for this group
+                            # 7. Delete all group memberships for this group
                             Write-Host "Deleting group memberships for group ID: $groupId" -ForegroundColor Yellow
                             $deleteMembershipsQuery = "DELETE FROM group_memberships WHERE group_id = '$groupId';"
                             $psqlDeleteMembershipsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteMembershipsQuery`""
                             Invoke-Expression $psqlDeleteMembershipsCommand
                             
-                            # 7. Delete permissions for this group
+                            # 8. Delete permissions for this group
                             Write-Host "Deleting permissions for group ID: $groupId" -ForegroundColor Yellow
                             $deletePermissionsQuery = "DELETE FROM permissions WHERE group_id = '$groupId';"
                             $psqlDeletePermissionsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deletePermissionsQuery`""
                             Invoke-Expression $psqlDeletePermissionsCommand
                             
-                            # 8. Delete the group itself
+                            # 9. Delete the group itself
                             Write-Host "Deleting group with ID: $groupId" -ForegroundColor Yellow
                             $deleteGroupQuery = "DELETE FROM groups WHERE id = '$groupId';"
                             $psqlDeleteGroupCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteGroupQuery`""
@@ -198,7 +234,7 @@ function Clean-TestDatabase {
                         }
                     }
                     
-                    # 9. Clean up any lingering permissions and group memberships
+                    # 10. Clean up any lingering permissions and group memberships
                     Write-Host "Cleaning up lingering permissions and group memberships..." -ForegroundColor Yellow
                     
                     # Delete permissions for test users
@@ -211,7 +247,7 @@ function Clean-TestDatabase {
                     $psqlDeleteMembershipsCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteMembershipsQuery`""
                     Invoke-Expression $psqlDeleteMembershipsCommand
                     
-                    # 10. Clean up any test files that might have been uploaded by other test runs
+                    # 11. Clean up any test files that might have been uploaded by other test runs
                     # This is important to avoid conflicts with file hash uniqueness constraints
                     Write-Host "Cleaning up test files from previous test runs..." -ForegroundColor Yellow
                     
@@ -231,7 +267,7 @@ function Clean-TestDatabase {
                         Invoke-Expression $psqlDeleteTestItemsCommand
                     }
                     
-                    # 11. Delete the user
+                    # 12. Delete the user
                     Write-Host "Deleting user with ID: $userId" -ForegroundColor Yellow
                     $deleteUserQuery = "DELETE FROM users WHERE id = '$userId';"
                     $psqlDeleteUserCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$deleteUserQuery`""
@@ -251,83 +287,6 @@ function Clean-TestDatabase {
             Remove-Item Env:\PGPASSWORD
         }
     }
-}
-
-# Function to check file processing status in the database
-function Check-FileProcessingStatus {
-    param (
-        [string]$DbHost,
-        [string]$DbUsername,
-        [string]$DbPassword,
-        [string]$DbName,
-        [array]$FileIds
-    )
-    
-    Write-Host "Checking file processing status in database..." -ForegroundColor Yellow
-    
-    # Set PGPASSWORD environment variable for passwordless connection
-    $env:PGPASSWORD = $DbPassword
-    
-    # First, check if we can connect to the database
-    $testConnectionQuery = "SELECT 1;"
-    $psqlTestCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$testConnectionQuery`" -t"
-    $testResult = Invoke-Expression $psqlTestCommand -ErrorAction SilentlyContinue
-    
-    if ($LASTEXITCODE -ne 0) {
-        Write-Host "Cannot connect to database for file status check. This is expected if running outside the VPC." -ForegroundColor Yellow
-        Write-Host "Using a fixed delay instead..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 60
-        return $false
-    }
-    
-    Write-Host "Connected to database successfully for file status check." -ForegroundColor Green
-    
-    $allFilesProcessed = $false
-    $maxAttempts = 12  # Maximum number of attempts (12 * 10 seconds = 120 seconds total)
-    $attempt = 0
-    
-    while (-not $allFilesProcessed -and $attempt -lt $maxAttempts) {
-        $attempt++
-        $processedCount = 0
-        
-        foreach ($fileId in $FileIds) {
-            # Construct the query to check file status
-            $checkFileQuery = "SELECT status FROM files WHERE id = '$fileId';"
-            
-            # Execute the query in the same way as the database cleanup function
-            $psqlCommand = "psql -h $DbHost -U $DbUsername -d $DbName -c `"$checkFileQuery`" -t"
-            $result = Invoke-Expression $psqlCommand
-            
-            # Debug the raw output
-            Write-Host "Raw query result: '$result'" -ForegroundColor Gray
-            
-            # Trim any whitespace
-            $status = $result.Trim()
-            
-            Write-Host "File $fileId status: '$status'" -ForegroundColor Gray
-            
-            # Check if the file is processed (status is ANALYZED)
-            if ($status -and $status.ToUpper() -eq "ANALYZED") {
-                $processedCount++
-                Write-Host "File $fileId is processed with status: $status" -ForegroundColor Green
-            }
-            
-            # Add error handling in case the query fails
-            if (-not $status) {
-                Write-Host "No status returned for file: $fileId" -ForegroundColor Yellow
-            }
-        }
-        
-        if ($processedCount -eq $FileIds.Count) {
-            $allFilesProcessed = $true
-            Write-Host "All files processed successfully!" -ForegroundColor Green
-        } else {
-            Write-Host "Waiting for files to be processed... ($processedCount / $($FileIds.Count) ready, attempt $attempt of $maxAttempts)" -ForegroundColor Yellow
-            Start-Sleep -Seconds 10
-        }
-    }
-    
-    return $allFilesProcessed
 }
 
 # Function to check file processing status via API
@@ -355,8 +314,6 @@ function Test-FileProcessingStatusViaAPI {
         
         try {
             $filesResponse = Invoke-RestMethod -Uri $getFilesUrl -Method Get -Headers $Headers -ErrorAction Stop
-            Write-Host "Files API Response:" -ForegroundColor Green
-            Write-Output ($filesResponse | ConvertTo-Json -Depth 10)
             # Check if we have any files in the response
             if ($filesResponse.data.files -and $filesResponse.data.files.Count -gt 0) {
                 Write-Host "Found $($filesResponse.data.files.Count) files in API response" -ForegroundColor Green
@@ -369,7 +326,6 @@ function Test-FileProcessingStatusViaAPI {
                     # Check each file in the response
                     $foundFile = $false
                     foreach ($file in $filesResponse.data.files) {
-                        Write-Host $file | ConvertTo-Json -Depth 10
                         Write-Host "Checking file with name: $($file.file_name)" -ForegroundColor Gray
                         if ($file.file_name -eq $fileName) {
                             Write-Host "File $fileName found in API response with status: $($file.status)" -ForegroundColor Green
@@ -1055,6 +1011,9 @@ if ($itemId1) {
     }
 } else {
     Write-Host "Skipping item details retrieval - no item IDs available" -ForegroundColor Yellow
+    if ($null -eq $global:TestResults.Skipped) {
+        $global:TestResults.Skipped = @()
+    }
     $global:TestResults.Skipped += @{
         Step = "Get Item"
         Message = "No item IDs available to retrieve"
@@ -1062,11 +1021,34 @@ if ($itemId1) {
 }
 
     
-# Step 10: Teardown - Clean up S3 objects and delete files
-Write-Host "`nStep 10: Cleaning up files and S3 objects..." -ForegroundColor Blue
+# Step 10: Teardown - Clean up items, S3 objects, and files
+Write-Host "`nStep 10: Cleaning up resources..." -ForegroundColor Blue
 
-# First, clean up S3 objects
-if ($s3Keys -and $s3Keys.Count -gt 0) {
+# First, delete any items created during the test
+$itemIds = @()
+if ($itemId1) { $itemIds += $itemId1 }
+if ($itemId2) { $itemIds += $itemId2 }
+
+if ($itemIds.Count -gt 0) {
+    Write-Host "Deleting items via API..." -ForegroundColor Yellow
+    foreach ($itemId in $itemIds) {
+        $deleteItemUrl = "$apiBaseUrl/items/$itemId"
+        Write-Host "DELETE $deleteItemUrl" -ForegroundColor Gray
+        
+        try {
+            $deleteItemResponse = Invoke-RestMethod -Uri $deleteItemUrl -Method Delete -Headers $headers -ErrorAction Stop
+            Write-Host "Delete Item API Response:" -ForegroundColor Green
+            Write-Output ($deleteItemResponse | ConvertTo-Json -Depth 10)
+            Write-Host "Successfully deleted item with ID: $itemId" -ForegroundColor Green
+        } catch {
+            Write-Host "Error deleting item:" -ForegroundColor Red
+            Write-Host $_.Exception.Message -ForegroundColor Red
+        }
+    }
+}
+
+# Next, clean up S3 objects
+if ($null -ne $s3Keys -and $s3Keys.Count -gt 0) {
     Write-Host "Cleaning up S3 objects..." -ForegroundColor Yellow
     foreach ($s3Key in $s3Keys) {
         Write-Host "Deleting S3 object: $s3Key" -ForegroundColor Gray
@@ -1132,6 +1114,9 @@ if ($claimId) {
     }
 } else {
     Write-Host "Skipping claim deletion - no claim ID available" -ForegroundColor Yellow
+    if ($null -eq $global:TestResults.Skipped) {
+        $global:TestResults.Skipped = @()
+    }
     $global:TestResults.Skipped += @{
         Step = "Delete Claim"
         Message = "No claim ID available to delete"
