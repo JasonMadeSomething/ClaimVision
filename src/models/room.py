@@ -17,7 +17,8 @@ class Room(Base):
     """
     Room model representing a physical room in a property.
     
-    Items and files can be assigned to rooms for better organization and tracking.
+    Rooms are stored as a static reference table. Claims can have multiple rooms
+    associated with them through the ClaimRoom join table.
     
     Attributes:
         id (UUID): Primary key for the room
@@ -35,8 +36,9 @@ class Room(Base):
     sort_order: Mapped[int] = mapped_column(default=0)
 
     # Relationships
-    items = relationship("Item", back_populates="room", cascade="all, delete-orphan")
+    items = relationship("Item", back_populates="room")
     files = relationship("File", back_populates="room")
+    claims = relationship("Claim", secondary="claim_rooms", back_populates="rooms")
 
     def to_dict(self):
         """
@@ -52,3 +54,27 @@ class Room(Base):
             "is_active": self.is_active,
             "sort_order": self.sort_order
         }
+
+
+class ClaimRoom(Base):
+    """
+    Join table for associating rooms with claims.
+    
+    This allows claims to have multiple rooms associated with them.
+    Items and files can reference a specific room within a claim.
+    
+    Attributes:
+        claim_id (UUID): Foreign key to the claim
+        room_id (UUID): Foreign key to the room
+    """
+    __tablename__ = "claim_rooms"
+    
+    claim_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("claims.id"), primary_key=True)
+    room_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("rooms.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    
+    # Define indexes for faster lookups
+    __table_args__ = (
+        Index("ix_claim_rooms_claim_id", "claim_id"),
+        Index("ix_claim_rooms_room_id", "room_id"),
+    )

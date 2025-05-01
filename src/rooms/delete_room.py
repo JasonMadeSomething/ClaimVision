@@ -1,3 +1,4 @@
+#TODO: Delte File once new rooms endpoints work
 """
 Lambda handler for deleting a room.
 

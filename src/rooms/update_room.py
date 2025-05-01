@@ -1,3 +1,4 @@
+#TODO: Delete file once new rooms work
 """
 Lambda handler for updating a room.
 

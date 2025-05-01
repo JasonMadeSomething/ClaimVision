@@ -1,3 +1,5 @@
+#TODO See if I can salvage this file once the other room files are implemented
+
 """
 Lambda handler for retrieving a room.
 

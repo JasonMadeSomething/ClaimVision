@@ -1,23 +1,23 @@
-#TODO: Detemine if this is redundant with get_claim_rooms
 """
-Lambda handler for retrieving all rooms for a claim.
+Lambda handler for retrieving all rooms associated with a claim.
 
-This module handles the retrieval of rooms from the ClaimVision system,
-ensuring proper authorization and data access.
+This module handles the retrieval of rooms associated with a claim in the ClaimVision system,
+ensuring proper authorization and data validation.
 """
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from models.room import Room
+from models.room import Room, ClaimRoom
 from models.claim import Claim
-
+from utils.access_control import has_permission
+from utils.vocab_enums import PermissionAction, ResourceTypeEnum
 logger = get_logger(__name__)
 
 @standard_lambda_handler(requires_auth=True)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
-    Handles retrieving all rooms for a claim in the authenticated user's household.
+    Handles retrieving all rooms associated with a claim for the authenticated user's household.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID
@@ -41,21 +41,26 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             
         claim_id = result
             
-        # Verify claim exists and belongs to user's household
+        # Verify claim exists
         claim = db_session.query(Claim).filter(
             Claim.id == claim_id,
-            Claim.household_id == user.household_id
+            Claim.deleted.is_(False)
         ).first()
         
         if not claim:
             logger.info("Claim not found or access denied: %s", claim_id)
             return response.api_response(404, error_details="Claim not found or access denied")
-            
-        # Query rooms for the claim
-        rooms = db_session.query(Room).filter(
-            Room.claim_id == claim_id,
-            Room.household_id == user.household_id,
-            Room.deleted.is_(False)
+
+        # Verify user has access to claim
+        if not has_permission(user, PermissionAction.READ, ResourceTypeEnum.CLAIM, db_session, claim_id, user.group_id):
+            logger.info("User %s does not have access to claim %s", user.id, claim_id)
+            return response.api_response(403, error_details="User does not have access to claim")
+
+        # Query rooms associated with the claim through the join table
+        rooms = db_session.query(Room).join(
+            ClaimRoom, Room.id == ClaimRoom.room_id
+        ).filter(
+            ClaimRoom.claim_id == claim_id
         ).all()
         
         # Convert rooms to dictionaries
@@ -65,8 +70,9 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         return response.api_response(200, data={"rooms": room_list})
         
     except SQLAlchemyError as e:
-        logger.error(f"Database error when retrieving rooms for claim {claim_id if 'claim_id' in locals() else 'unknown'}: {str(e)}")
+        logger.error("Database error when retrieving rooms for claim %s: %s", 
+                    claim_id if 'claim_id' in locals() else "unknown", str(e))
         return response.api_response(500, error_details="Database error when retrieving rooms")
     except Exception as e:
-        logger.exception(f"Unexpected error retrieving rooms: {str(e)}")
+        logger.exception("Unexpected error retrieving rooms: %s", str(e))
         return response.api_response(500, error_details="Internal server error")

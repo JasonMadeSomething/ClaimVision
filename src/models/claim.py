@@ -32,6 +32,7 @@ class Claim(Base):
     group = relationship("Group", back_populates="claims")
     files = relationship("File", back_populates="claim")
     items = relationship("Item", back_populates="claim", cascade="all, delete-orphan")
+    rooms = relationship("Room", secondary="claim_rooms", back_populates="claims")
     __table_args__ = (
         # Create a composite unique constraint on title and deleted per household
         # This allows the same title to exist if one is deleted and one is not
