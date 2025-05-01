@@ -5,17 +5,22 @@ This module handles incoming report requests, creates entries in the reports tab
 and sends messages to the report aggregation queue.
 """
 
-import os
 import json
 import logging
+import os
 import uuid
-import boto3
 from datetime import datetime, timezone
+
+import boto3
+from utils.access_control import has_permission
+from utils.vocab_enums import PermissionAction
+
 from database.database import get_db_session
-from models.report import Report, ReportStatus
 from models.claim import Claim
+from models.report import Report, ReportStatus
 from models.user import User
 from utils.response import api_response
+
 
 # Configure logging
 logger = logging.getLogger()
@@ -64,6 +69,8 @@ def lambda_handler(event, context):
         report_type = body.get('report_type', 'FULL')  # Default to FULL report
         email_address = body.get('email_address')  # Get email address from request
         
+        
+
         # Validate required parameters
         if not user_id:
             logger.warning(f"User ID not found in request: {auth_ctx}")
@@ -88,14 +95,15 @@ def lambda_handler(event, context):
             if not claim:
                 return api_response(404, error_details="Claim not found")
                 
-            # Verify user has access to claim (user's household matches claim's household)
-            if str(user.household_id) != str(claim.household_id):
-                return api_response(403, error_details="User does not have access to this claim")
+            # Verify user has export access to claim
+            success, error_response = has_permission(user, PermissionAction.EXPORT, "claim", session, resource_id=claim.id)
+            if not success:
+                return error_response
                 
             # Create new report record
             report = Report(
                 user_id=uuid.UUID(user_id),
-                household_id=user.household_id,
+                group_id=user.group_id,
                 claim_id=uuid.UUID(claim_id),
                 report_type=report_type,
                 email_address=email_address,  # Store email address in the Report model
@@ -110,7 +118,7 @@ def lambda_handler(event, context):
                 'report_id': str(report.id),
                 'user_id': user_id,
                 'claim_id': claim_id,
-                'household_id': str(user.household_id),
+                'group_id': str(user.group_id),
                 'report_type': report_type,
                 'email_address': email_address,  # Include email address in the message
                 'timestamp': datetime.now(timezone.utc).isoformat()

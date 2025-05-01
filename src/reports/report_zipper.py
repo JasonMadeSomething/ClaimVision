@@ -184,7 +184,7 @@ def lambda_handler(event, context):
                     
                     try:
                         # Upload zip file to S3
-                        s3_key = f"reports/{report.household_id}/{report.claim_id}/{zip_filename}"
+                        s3_key = f"reports/{report.group_id}/{report.claim_id}/{zip_filename}"
                         logger.info("Uploading zip file to S3 at %s", s3_key)
                         
                         if not REPORTS_BUCKET_NAME:
