@@ -16,5 +16,12 @@ from .group_roles import GroupRole
 from .membership_statuses import MembershipStatus
 from .permissions import Permission
 from .resource_types import ResourceType
+from .claim_rooms import ClaimRoom
 
-__all__ = ['Base', 'File', 'Claim', 'User', 'Room', 'Label', 'Item', 'FileLabel', 'ItemLabel', 'ItemFile', 'Report', 'ReportStatus', 'Group', 'GroupType', 'GroupIdentity', 'GroupRole', 'MembershipStatus', 'Permission', 'ResourceType']
+__all__ = ['Base', 'File', 'Claim',
+ 'User', 'Room', 'Label', 'Item',
+  'FileLabel', 'ItemLabel', 'ItemFile',
+   'Report', 'ReportStatus', 'Group',
+    'GroupType', 'GroupIdentity', 'GroupRole',
+     'MembershipStatus', 'Permission', 'ResourceType',
+      'ClaimRoom']
