@@ -62,7 +62,11 @@
  - Notes on claims -> rollup file notes
  - Notes on rooms -> rollup items notes?
  - Notes on claims -> rollup room notes?
+ - Use the resource enums for Note types (ie. File, Item, Claim, Room). If I keep it updated, I can have arbitrary notes on any resource.
+ - First Time Tutorial -> Additional Endpoint(s)
 
+
+  ## Feature Table
  | Feature | Table | Field(s) | Endpoint(s) | Notes |
  | --- | --- | --- | --- | --- |
  | My Resources | Resources | Various | GET /resources | This should exist on the group level. Is this just a high level notes function?|
@@ -71,9 +75,10 @@
  | File Documentation Types| Files | Documentation Type | GET /files/{file_id} | Kind of like an expansion of above, but allows for things like waterlines or pre-disaster photos |
  | File Notes | Notes | Various | GET /files/{file_id}/notes | Might need to generalize this to items, claims, and rooms |
  | Item Notes | Notes | Various | GET /items/{item_id}/notes | Do I want to rollup file notes or have item notes a seprate entity? |
- | Rooms as lookup | Claim_Rooms | Various | GET /claim/{claim_id}/rooms -> POST /claim/{claim_id}/rooms | |
+ | ~~Rooms as lookup~~ | Claim_Rooms | Various | GET /claim/{claim_id}/rooms -> POST /claim/{claim_id}/rooms | |
  | AI Confidence Slider | User Settings | AI Confidence | PUT /users/{user_id}/settings | |
  | User Training Consent | User Settings | Training Consent | PUT /users/{user_id}/settings | |
  | Invite to Claim | Claim_Invite | Various | POST /claim_invites | |
  | Invite to group | Group_Invite | Various | POST /group_invites | |
  | Invites | Invites | Various | POST /invites | Maybe this is the polymorphic invite table?|
+ | First Time Tutorial | User Settings | First Time Tutorial | GET /users/{user_id}/settings |  |
