@@ -1,5 +1,6 @@
-from sqlalchemy import Column, String, UUID, Boolean, ForeignKey, UniqueConstraint
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy import Column, String, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.orm import relationship, Mapped
 import uuid
 from models.base import Base
 
@@ -7,11 +8,11 @@ class Label(Base):
     """✅ Represents a shared label that can be linked to multiple files."""
     __tablename__ = "labels"
 
-    id: Mapped[uuid.UUID] = Column(UUID, primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     label_text: Mapped[str] = Column(String, nullable=False, )  
     is_ai_generated: Mapped[bool] = Column(Boolean, nullable=False, default=False)
     deleted: Mapped[bool] = Column(Boolean, nullable=False, default=False)
-    group_id: Mapped[uuid.UUID] = Column(UUID, ForeignKey("groups.id"), nullable=False)
+    group_id: Mapped[uuid.UUID] = Column(PG_UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False)
     group = relationship("Group")
 
     files = relationship("File", secondary="file_labels", back_populates="labels")
@@ -24,5 +25,6 @@ class Label(Base):
             "id": str(self.id),
             "label_text": self.label_text,
             "is_ai_generated": self.is_ai_generated,
-            "deleted": self.deleted
+            "deleted": self.deleted,
+            "group_id": str(self.group_id),
         }

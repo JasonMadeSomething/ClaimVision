@@ -1,4 +1,5 @@
 from sqlalchemy import Column, String, ForeignKey, Boolean, Integer, DateTime, Numeric
+from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 from models.base import Base
@@ -33,7 +34,7 @@ class Item(Base):
     # Monetary values use Decimal to avoid float rounding issues
     unit_cost = Column(Numeric(10, 2), nullable=False, default=0)
     deleted = Column(Boolean, default=False, nullable=False, index=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), 
                         onupdate=lambda: datetime.now(timezone.utc), nullable=False)
     

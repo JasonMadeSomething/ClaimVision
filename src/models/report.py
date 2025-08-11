@@ -1,5 +1,7 @@
-from sqlalchemy import String, ForeignKey, UUID, DateTime, Enum
+from sqlalchemy import String, ForeignKey, DateTime, Enum
 from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.sql import text
 import uuid
 from datetime import datetime, timezone
 import enum
@@ -20,50 +22,45 @@ class ReportStatus(enum.Enum):
 class Report(Base):
     """
     Represents a report generated for a claim.
-    
+
     Reports are requested by users and can be associated with specific claims.
     The report tracks its status through the generation process and stores
     information about where the final report file is located.
     """
     __tablename__ = "reports"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    user_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False, index=True)
-    group_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("groups.id"), nullable=False, index=True)
-    claim_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("claims.id"), nullable=False, index=True)
-    
-    status: Mapped[str] = mapped_column(
-        Enum(ReportStatus, native_enum=False), 
-        default=ReportStatus.REQUESTED.value,
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False, index=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False, index=True)
+    claim_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True)
+
+    status: Mapped[ReportStatus] = mapped_column(
+        Enum(ReportStatus, values_callable=lambda x: [e.value for e in x], native_enum=False),
+        default=ReportStatus.REQUESTED,
         nullable=False,
         index=True
     )
-    
+
     report_type: Mapped[str] = mapped_column(String, nullable=False)
     email_address: Mapped[str] = mapped_column(String, nullable=False)  # Email address for report delivery
     s3_key: Mapped[str | None] = mapped_column(String, nullable=True)
     error_message: Mapped[str | None] = mapped_column(String, nullable=True)
-    
+
     # Tracking fields
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, 
-        default=lambda: datetime.now(timezone.utc), 
-        nullable=False,
-        index=True
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=text('now()'), nullable=False, index=True)
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, 
-        default=lambda: datetime.now(timezone.utc), 
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
         nullable=False
     )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    
+
     # Relationships
     user = relationship("User", backref="reports")
     group = relationship("Group", backref="reports")
     claim = relationship("Claim", backref="reports")
-    
+
     def to_dict(self):
         """
         Convert the report object to a dictionary representation.
@@ -73,7 +70,7 @@ class Report(Base):
             "user_id": str(self.user_id),
             "group_id": str(self.group_id),
             "claim_id": str(self.claim_id),
-            "status": self.status,
+            "status": self.status.value if isinstance(self.status, ReportStatus) else self.status,
             "report_type": self.report_type,
             "email_address": self.email_address,
             "s3_key": self.s3_key,
@@ -82,18 +79,19 @@ class Report(Base):
             "updated_at": self.updated_at.isoformat() if hasattr(self, 'updated_at') else None,
             "completed_at": self.completed_at.isoformat() if self.completed_at else None
         }
-    
+
     def update_status(self, new_status: ReportStatus, error_message: str = None):
         """
         Update the status of the report and set the error message if provided.
         If the status is changed to COMPLETED, also set the completed_at timestamp.
         """
-        self.status = new_status.value
-        
+        # Store the enum value consistently as the Enum instance; SQLAlchemy will persist the value per column config
+        self.status = new_status
+
         if error_message:
             self.error_message = error_message
-            
+
         if new_status == ReportStatus.COMPLETED:
             self.completed_at = datetime.now(timezone.utc)
-            
+
         self.updated_at = datetime.now(timezone.utc)

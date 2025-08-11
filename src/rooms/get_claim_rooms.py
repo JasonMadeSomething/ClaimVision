@@ -34,20 +34,20 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
             logger.warning("Missing claim ID in path parameters")
             return response.api_response(400, error_details="Claim ID is required in path parameters")
-            
+
         # Extract and validate claim_id from path parameters
         success, result = extract_uuid_param(event, "claim_id")
         if not success:
             return result  # Return error response
-            
+
         claim_id = result
-            
+
         # Verify claim exists
         claim = db_session.query(Claim).filter(
             Claim.id == claim_id,
             Claim.deleted.is_(False)
         ).first()
-        
+
         if not claim:
             logger.info("Claim not found or access denied: %s", claim_id)
             return response.api_response(404, error_details="Claim not found or access denied")
@@ -63,14 +63,14 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         ).filter(
             ClaimRoom.claim_id == claim_id
         ).all()
-        
+
         # Convert rooms to dictionaries
         room_list = [room.to_dict() for room in rooms]
-        
+
         logger.info("Retrieved %s rooms for claim %s", len(room_list), claim_id)
         return response.api_response(200, data={"rooms": room_list})
-        
+
     except SQLAlchemyError as e:
-        logger.error("Database error when retrieving rooms for claim %s: %s", 
+        logger.error("Database error when retrieving rooms for claim %s: %s",
                     claim_id if 'claim_id' in locals() else "unknown", str(e))
         return response.api_response(500, error_details="Database error when retrieving rooms")

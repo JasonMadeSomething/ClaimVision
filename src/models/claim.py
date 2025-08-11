@@ -1,7 +1,7 @@
 from sqlalchemy import String, ForeignKey, DateTime, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship, Mapped, mapped_column, joinedload
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.sql import func
+from sqlalchemy.sql import text
 import uuid
 from datetime import datetime, timezone
 from models.base import Base  
@@ -23,7 +23,7 @@ class Claim(Base):
     # Use callable for default (never call at import time)
     date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=text('now()'), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_by: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)

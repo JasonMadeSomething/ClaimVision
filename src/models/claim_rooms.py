@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import DateTime, ForeignKey, Index
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.sql import func
 from sqlalchemy.orm import Mapped, mapped_column
 from models.base import Base
 
@@ -18,9 +19,9 @@ class ClaimRoom(Base):
     """
     __tablename__ = "claim_rooms"
     
-    claim_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("claims.id"), primary_key=True)
-    room_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("rooms.id"), primary_key=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    claim_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("claims.id"), primary_key=True)
+    room_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rooms.id"), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
     
     # Define indexes for faster lookups
     __table_args__ = (
