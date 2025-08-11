@@ -2,7 +2,6 @@ import os
 import random
 import json
 import time
-import re
 from datetime import datetime
 
 def lambda_handler(event, context):
@@ -32,10 +31,9 @@ def lambda_handler(event, context):
             port_suffix = f":{port}" if port else ""
             allowed_origins.append(f"http://localhost{port_suffix}")
             allowed_origins.append(f"http://127.0.0.1{port_suffix}")
-        if re.match(r"^https://[^/]+$", origin):
-            # Add made-something.com subdomains
-            allowed_origins.append("https://*.made-something.com")
-            allowed_origins.append("https://made-something.com")
+        # Add made-something.com base and wildcard (multi-level subdomains)
+        allowed_origins.append("https://*.made-something.com")
+        allowed_origins.append("https://made-something.com")
         
     # Log the request for debugging
     print(f"Preflight request received from: {origin} for path: {path}")
@@ -52,10 +50,9 @@ def lambda_handler(event, context):
             # Check for wildcard matches (for subdomains)
             for allowed in allowed_origins:
                 if allowed.startswith("https://*.") and origin.startswith("https://"):
-                    # Convert wildcard pattern to regex
-                    pattern = allowed.replace("https://*.", "https://[^.]+\\.")
-                    pattern = pattern.replace(".", "\\.")
-                    if re.match(pattern, origin):
+                    # Allow any subdomain depth: ensure the origin ends with the base domain
+                    base_domain = allowed.replace("https://*.", "")
+                    if origin.endswith(f".{base_domain}"):
                         access_control_origin = origin
                         break
     
@@ -76,7 +73,7 @@ def lambda_handler(event, context):
             "Access-Control-Allow-Origin": access_control_origin,
             "Access-Control-Allow-Methods": "OPTIONS,POST,GET,PUT,DELETE,PATCH",
             "Access-Control-Allow-Headers": "Content-Type,Authorization,X-Amz-Date,X-Api-Key,X-Amz-Security-Token",
-            "Access-Control-Allow-Credentials": access_control_origin != "*",
+            "Access-Control-Allow-Credentials": "true" if access_control_origin != "*" else "false",
             "Access-Control-Max-Age": "7200",  # Cache preflight response for 2 hours
             "X-Preflight-Time": f"{processing_time:.6f}s",  # Just for fun
             "X-Powered-By": "ClaimVision CORS Magic"

@@ -8,6 +8,7 @@ This script creates all the necessary database tables and populates them with in
 import os
 import sys
 import uuid
+import json
 from datetime import datetime, timezone
 
 # Add the src directory to the Python path
@@ -32,16 +33,42 @@ def get_database_url():
     str
         The database URL.
     """
-    # Try to get individual components first
+    # 1) Prefer full DATABASE_URL if provided
+    full_url = os.getenv("DATABASE_URL")
+    if full_url:
+        print("Using DATABASE_URL from environment")
+        return full_url
+
+    # 2) Next, try scripts/config.json (if present)
+    try:
+        cfg_path = os.path.join(os.path.dirname(__file__), "config.json")
+        if os.path.isfile(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            db_cfg = (cfg or {}).get("DB", {})
+            c_host = db_cfg.get("Host")
+            c_user = db_cfg.get("Username")
+            c_pass = db_cfg.get("Password")
+            c_name = db_cfg.get("Name", "claimvision")
+            if c_user and c_pass and c_host:
+                print(f"Using DB config from scripts/config.json (host={c_host}, db={c_name})")
+                return f"postgresql://{c_user}:{c_pass}@{c_host}:5432/{c_name}"
+    except Exception:
+        # Non-fatal, fall through to env components
+        pass
+
+    # 3) Construct from individual components (env)
     username = os.getenv("DB_USERNAME")
     password = os.getenv("DB_PASSWORD")
     host = os.getenv("DB_HOST")
     name = os.getenv("DB_NAME", "claimvision")
-    # If all components are available, construct the URL
-    return f"postgresql://{username}:{password}@{host}:5432/{name}"
-    
-    # Fall back to the full DATABASE_URL if available
-    return os.getenv("DATABASE_URL", "postgresql://user:password@localhost:5432/testdb")
+    if username and password and host:
+        print(f"Composed DB URL from env components (host={host}, db={name})")
+        return f"postgresql://{username}:{password}@{host}:5432/{name}"
+
+    # 4) Fallback to a local default for dev
+    print("Falling back to default local DATABASE_URL")
+    return "postgresql://user:password@localhost:5432/testdb"
 
 def drop_tables(engine):
     """Drop all tables in the database."""
@@ -58,10 +85,10 @@ def create_tables(engine):
 def seed_vocab(session) -> None:
     vocab_data = {
         GroupType: [
-            {"id": "household", "label": "Household", "description": "A residential group or policyholder"},
-            {"id": "firm", "label": "Firm", "description": "Public adjusting or restoration company"},
-            {"id": "partner", "label": "Partner", "description": "Integration or business partner"},
-            {"id": "other", "label": "Other", "description": "Miscellaneous group type"},
+            {"id": "household", "name": "Household", "description": "A residential group or policyholder"},
+            {"id": "firm", "name": "Firm", "description": "Public adjusting or restoration company"},
+            {"id": "partner", "name": "Partner", "description": "Integration or business partner"},
+            {"id": "other", "name": "Other", "description": "Miscellaneous group type"},
         ],
         GroupIdentity: [
             {"id": "homeowner", "label": "Homeowner"},
@@ -80,12 +107,12 @@ def seed_vocab(session) -> None:
             {"id": "revoked", "label": "Revoked"},
         ],
         ResourceType: [
-            {"id": "claim", "label": "Claim"},
-            {"id": "file", "label": "File"},
-            {"id": "item", "label": "Item"},
-            {"id": "label", "label": "Label"},
-            {"id": "room", "label": "Room"},
-            {"id": "report", "label": "Report"},
+            {"id": "claim", "label": "Claim", "description": "Insurance claim", "is_active": True},
+            {"id": "file", "label": "File", "description": "File attachment", "is_active": True},
+            {"id": "item", "label": "Item", "description": "Claim item", "is_active": True},
+            {"id": "label", "label": "Label", "description": "Item label", "is_active": True},
+            {"id": "room", "label": "Room", "description": "Room in a property", "is_active": True},
+            {"id": "report", "label": "Report", "description": "Generated report", "is_active": True},
         ],
     }
 

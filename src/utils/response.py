@@ -53,6 +53,8 @@ def api_response(
     missing_fields: Optional[List[str]] = None,
     error_details: Optional[str] = None,
     success_message: Optional[str] = None,
+    event: Optional[Dict[str, Any]] = None,
+    origin: Optional[str] = None,
 ) -> Dict[str, Union[int, str, Dict[str, Any], List[Any]]]:
     """
     Generates a standardized API response for HTTP endpoints.
@@ -117,15 +119,56 @@ def api_response(
         body = json.dumps({"error": "Internal Server Error"})
 
     env = os.getenv("ENV")
-    access_control_origin = os.getenv("FRONTEND_ORIGIN") if env == "prod" else os.getenv("FRONTEND_ORIGIN_DEV", "http://localhost:3000")
+    # Resolve caller origin from event if provided
+    req_headers: Dict[str, Any] = {}
+    if event and isinstance(event, dict):
+        req_headers = event.get("headers", {}) or {}
+    request_origin = origin or req_headers.get("origin") or req_headers.get("Origin")
+
+    # Build allowed origins list
+    configured_frontend = os.getenv("FRONTEND_ORIGIN") or ""
+    allowed: List[str] = []
+    if configured_frontend:
+        allowed.append(configured_frontend)
+    if env != "prod":
+        # Localhosts
+        for port in ["3000", "3001", "3002", "8000", "8080", ""]:
+            suffix = f":{port}" if port else ""
+            allowed.append(f"http://localhost{suffix}")
+            allowed.append(f"http://127.0.0.1{suffix}")
+        # Dev domains
+        allowed.append("https://*.made-something.com")
+        allowed.append("https://made-something.com")
+
+    # Default fallback if nothing matches
+    fallback_origin = configured_frontend or os.getenv("FRONTEND_ORIGIN_DEV") or "http://localhost:3000"
+
+    # Determine Access-Control-Allow-Origin value
+    access_control_origin = fallback_origin
+    if request_origin:
+        if request_origin in allowed:
+            access_control_origin = request_origin
+        else:
+            for pat in allowed:
+                if pat.startswith("https://*.") and request_origin.startswith("https://"):
+                    base = pat.replace("https://*.", "")
+                    if request_origin.endswith(f".{base}"):
+                        access_control_origin = request_origin
+                        break
 
     headers = {
         "Content-Type": "application/json",
         "Access-Control-Allow-Methods": "GET,OPTIONS,POST,PUT,DELETE,PATCH",
         "Access-Control-Allow-Origin": access_control_origin,
-        "Access-Control-Allow-Credentials": True,
+        "Access-Control-Allow-Credentials": "true" if access_control_origin and access_control_origin != "*" else "false",
     }
-    logging.info("[INFO] Returning response: %s, with headers: %s", body, headers)
+    logging.info(
+        "[INFO] Returning response: %s, env=%s, request_origin=%s, resolved_origin=%s",
+        body,
+        env,
+        request_origin,
+        headers.get("Access-Control-Allow-Origin"),
+    )
     return {
         "statusCode": status_code,
         "headers": headers,

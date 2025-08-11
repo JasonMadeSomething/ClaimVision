@@ -8,6 +8,7 @@ This script creates all the necessary database tables and populates them with in
 import os
 import sys
 import uuid
+import json
 from datetime import datetime, timezone
 
 # Add the src directory to the Python path
@@ -33,13 +34,43 @@ def get_database_url():
     str
         The database URL.
     """
-    # Try to get individual components first
+    # 1) Prefer full DATABASE_URL if provided
+    full_url = os.getenv("DATABASE_URL")
+    if full_url:
+        print("Using DATABASE_URL from environment")
+        return full_url
+
+    # 2) Next, try scripts/config.json (if present)
+    try:
+        cfg_path = os.path.join(os.path.dirname(__file__), "config.json")
+        if os.path.isfile(cfg_path):
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            db_cfg = (cfg or {}).get("DB", {})
+            c_host = db_cfg.get("Host")
+            c_user = db_cfg.get("Username")
+            c_pass = db_cfg.get("Password")
+            c_name = db_cfg.get("Name", "claimvision")
+            if c_user and c_pass and c_host:
+                print(f"Using DB config from scripts/config.json (host={c_host}, db={c_name})")
+                return f"postgresql://{c_user}:{c_pass}@{c_host}:5432/{c_name}"
+    except Exception as _e:
+        # Non-fatal, fall through to env components
+        pass
+
+    # 3) Construct from individual components (env)
     username = os.getenv("DB_USERNAME")
     password = os.getenv("DB_PASSWORD")
     host = os.getenv("DB_HOST")
     name = os.getenv("DB_NAME", "claimvision")
-    # If all components are available, construct the URL
-    return f"postgresql://testuser:YourStrongPassword123!@claimvision-dev.czzwxwpwmndx.us-east-1.rds.amazonaws.com:5432/claimvision"
+
+    if username and password and host:
+        print(f"Composed DB URL from env components (host={host}, db={name})")
+        return f"postgresql://{username}:{password}@{host}:5432/{name}"
+
+    # 4) Fallback to a local default for dev
+    print("Falling back to default local DATABASE_URL")
+    return "postgresql://user:password@localhost:5432/testdb"
 
 def drop_tables(engine):
     """Drop all tables in the database."""

@@ -2,6 +2,7 @@ import boto3
 import os
 import uuid
 import json
+from utils import response
 
 sqs = boto3.client("sqs")
 cognito = boto3.client("cognito-idp")
@@ -11,7 +12,7 @@ COGNITO_USER_POOL_ID = os.environ["COGNITO_USER_POOL_ID"]
 
 def lambda_handler(event, context):
     try:
-        body = json.loads(event["body"])
+        body = json.loads(event.get("body", "{}"))
         email = body["email"].lower()
         password = body["password"]
         first_name = body.get("first_name") or "New"
@@ -46,16 +47,12 @@ def lambda_handler(event, context):
             })
         )
 
-        return {
-            "statusCode": 200,
-            "body": json.dumps({
-                "message": "Registration initiated",
-                "cognito_sub": sub
-            })
-        }
+        return response.api_response(
+            status_code=200,
+            success_message="Registration initiated",
+            data={"cognito_sub": sub},
+            event=event,
+        )
 
     except Exception as e:
-        return {
-            "statusCode": 500,
-            "body": json.dumps({"error": str(e)})
-        }
+        return response.api_response(status_code=500, error_details=str(e), event=event)
