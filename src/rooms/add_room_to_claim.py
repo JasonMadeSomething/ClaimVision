@@ -10,7 +10,8 @@ from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from models.room import Room, ClaimRoom
+from models.room import Room
+from models.claim_rooms import ClaimRoom
 from models.claim import Claim
 from datetime import datetime, timezone
 from utils.access_control import has_permission
@@ -68,7 +69,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             return response.api_response(404, error_details="Claim not found")
             
         # Verify user has write access to claim
-        if not has_permission(user, PermissionAction.WRITE, ResourceTypeEnum.CLAIM, db_session, claim_id, user.group_id):
+        if not has_permission(user, PermissionAction.WRITE, ResourceTypeEnum.CLAIM.value, db_session, claim_id, user.group_id):
             logger.info("User %s does not have write access to claim %s", user.id, claim_id)
             return response.api_response(403, error_details="User does not have write access to claim")
         

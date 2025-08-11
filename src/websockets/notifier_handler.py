@@ -141,7 +141,7 @@ def lambda_handler(event, context):
                 'messageId': record.get('messageId'),
                 'error': str(e)
             })
-    
+
     return {
         'statusCode': 200,
         'body': json.dumps({

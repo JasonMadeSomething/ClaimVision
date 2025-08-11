@@ -4,9 +4,9 @@ from uuid import UUID
 
 from models import User, Claim, File, Item, Label, Report
 from models.group_membership import GroupMembership
-from models.permissions import Permission, PermissionAction
-from utils.vocab_enums import MembershipStatusEnum
-from database.database import Session
+from models.permissions import Permission
+from utils.vocab_enums import MembershipStatusEnum, PermissionAction
+from sqlalchemy.orm import Session
 import logging
 logger = logging.getLogger(__name__)
 
@@ -39,14 +39,16 @@ def load_resource(resource_type: str, resource_id: UUID, db: Session):
 def can_access(user: User, resource: Any, action: str, db: Session) -> bool:
     # 1. User belongs to the owning group
     if hasattr(resource, "group_id") and resource.group_id:
-        membership = db.query(GroupMembership).filter(
-            user_id=user.id, group_id=resource.group_id, status="active"
+        membership = db.query(GroupMembership).filter_by(
+            user_id=user.id,
+            group_id=resource.group_id,
+            status_id=MembershipStatusEnum.ACTIVE.value,
         ).first()
         if membership:
             return True
 
     # 2. Group-level permission
-    group_ids = [m.group_id for m in user.memberships if m.status == "active"]
+    group_ids = [m.group_id for m in user.memberships if m.status_id == MembershipStatusEnum.ACTIVE.value]
     if group_ids:
         group_perm = db.query(Permission).filter(
             subject_type="group",

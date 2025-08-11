@@ -1,4 +1,5 @@
-from sqlalchemy import Column, String, UUID, Float, ForeignKey, Boolean, Integer, DateTime
+from sqlalchemy import Column, String, ForeignKey, Boolean, Integer, DateTime, Numeric
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import relationship
 from models.base import Base
 import uuid
@@ -13,14 +14,14 @@ class Item(Base):
     """
     __tablename__ = "items"
 
-    id = Column(UUID, primary_key=True, default=uuid.uuid4)
-    claim_id = Column(UUID, ForeignKey("claims.id"), nullable=False, index=True)
+    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    claim_id = Column(PG_UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True)
     name = Column(String, nullable=False, index=True)
     description = Column(String, nullable=True)
     condition = Column(String, nullable=True)  # (New, Good, Average, Bad, etc.)
     is_ai_suggested = Column(Boolean, default=False)
-    room_id = Column(UUID, ForeignKey("rooms.id"), nullable=True)
-    group_id = Column(UUID, ForeignKey("groups.id"), nullable=False, index=True)
+    room_id = Column(PG_UUID(as_uuid=True), ForeignKey("rooms.id"), nullable=True)
+    group_id = Column(PG_UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False, index=True)
     
     # Additional fields for reporting
     brand_manufacturer = Column(String, nullable=True)
@@ -29,7 +30,8 @@ class Item(Base):
     quantity = Column(Integer, default=1, nullable=False)
     age_years = Column(Integer, nullable=True)
     age_months = Column(Integer, nullable=True)
-    unit_cost = Column(Float, nullable=True)  # Cost to replace pre-tax (each)
+    # Monetary values use Decimal to avoid float rounding issues
+    unit_cost = Column(Numeric(10, 2), nullable=False, default=0)
     deleted = Column(Boolean, default=False, nullable=False, index=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), 
@@ -58,7 +60,8 @@ class Item(Base):
             "quantity": self.quantity,
             "age_years": self.age_years,
             "age_months": self.age_months,
-            "unit_cost": self.unit_cost,
+            # Serialize Decimal as string to preserve precision for clients
+            "unit_cost": str(self.unit_cost) if self.unit_cost is not None else None,
             "created_at": self.created_at.isoformat() if hasattr(self, 'created_at') else None,
             "updated_at": self.updated_at.isoformat() if hasattr(self, 'updated_at') else None,
         }

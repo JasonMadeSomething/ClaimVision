@@ -2,7 +2,7 @@
 Batch Tracker Lambda Handler
 
 This module processes events from the batch tracking queue and updates DynamoDB with file/report status per batch.
-When all items in a batch are marked complete, it sends a 'batch_complete' event to the notifier Lambda.
+When all items in a batch are marked complete, it sends a 'batch_completed' event to the notifier Lambda.
 """
 
 import os
@@ -36,6 +36,7 @@ EVENT_ANALYSIS_COMPLETED = 'analysis_completed'
 EVENT_EXPORT_STARTED = 'export_started'
 EVENT_EXPORT_COMPLETED = 'export_completed'
 EVENT_BATCH_COMPLETED = 'batch_completed'
+EVENT_FILE_ANALYSIS_QUEUED = 'file_analysis_queued'
 
 # Item status
 STATUS_PENDING = 'pending'
@@ -71,6 +72,20 @@ def lambda_handler(event, context):
         'batch_completed': 0
     }
     
+    # Validate required environment configuration
+    if not BATCH_TRACKING_TABLE:
+        logger.error("BATCH_TRACKING_TABLE environment variable not set")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'Server misconfiguration: missing BATCH_TRACKING_TABLE'})
+        }
+    if not OUTBOUND_QUEUE_URL:
+        logger.error("OUTBOUND_QUEUE_URL environment variable not set")
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'Server misconfiguration: missing OUTBOUND_QUEUE_URL'})
+        }
+
     # Get the batch tracking table
     table = dynamodb.Table(BATCH_TRACKING_TABLE)
     
@@ -196,6 +211,8 @@ def determine_status(event_type: str, data: Dict[str, Any]) -> str:
     elif event_type == EVENT_FILE_PROCESSED:
         return STATUS_COMPLETED if data.get('success') else STATUS_FAILED
     elif event_type == EVENT_ANALYSIS_STARTED:
+        return STATUS_PROCESSING
+    elif event_type == EVENT_FILE_ANALYSIS_QUEUED:
         return STATUS_PROCESSING
     elif event_type == EVENT_ANALYSIS_COMPLETED:
         return STATUS_COMPLETED if data.get('success') else STATUS_FAILED

@@ -1,13 +1,12 @@
-from sqlalchemy import String, ForeignKey, UUID, DateTime, Boolean, UniqueConstraint
-from sqlalchemy.orm import relationship, Mapped, mapped_column
+from sqlalchemy import String, ForeignKey, DateTime, Boolean, UniqueConstraint
+from sqlalchemy.orm import relationship, Mapped, mapped_column, joinedload
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+from sqlalchemy.sql import func
 import uuid
-import os
-import csv
 from datetime import datetime, timezone
 from models.base import Base  
 from models.item import Item
 from models.file import File
-from models.room import Room
 class Claim(Base):
     """
     Represents an insurance claim filed by a household.
@@ -17,19 +16,21 @@ class Claim(Base):
     """
     __tablename__ = "claims"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID, primary_key=True, default=uuid.uuid4)
-    group_id: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("groups.id"), nullable=False)
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    group_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False)
     title: Mapped[str] = mapped_column(String, nullable=False)
     description: Mapped[str | None] = mapped_column(String, nullable=True)
-    date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=datetime.now(timezone.utc), index=True)  # Added index for date queries
+    # Use callable for default (never call at import time)
+    date_of_loss: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc), index=True)
     deleted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, index=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    created_by: Mapped[uuid.UUID] = mapped_column(UUID, ForeignKey("users.id"), nullable=False)
+    created_by: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
 
-    creator: Mapped["User"] = relationship("User", back_populates="claims_created") #noqa F821
+    creator: Mapped["User"] = relationship("User", back_populates="claims_created") # noqa: F821
     group = relationship("Group", back_populates="claims")
+    # NOTE: deleting a claim will not auto-delete files; intentional?
     files = relationship("File", back_populates="claim")
     items = relationship("Item", back_populates="claim", cascade="all, delete-orphan")
     rooms = relationship("Room", secondary="claim_rooms", back_populates="claims")
@@ -80,18 +81,14 @@ class Claim(Base):
         }
         
         # Get all items associated with the claim
-        items = session.query(Item).filter(
+        items = session.query(Item).options(joinedload(Item.room)).filter(
             Item.claim_id == self.id,
             Item.deleted.is_(False)
         ).all()
         
         # Process items
         for i, item in enumerate(items, 1):
-            room_name = 'N/A'
-            if item.room_id:
-                room = session.query(Room).filter(Room.id == item.room_id).first()
-                if room:
-                    room_name = room.name
+            room_name = item.room.name if getattr(item, 'room', None) else 'N/A'
                     
             # Create room entry if it doesn't exist
             if room_name != 'N/A' and room_name not in report_data['rooms']:

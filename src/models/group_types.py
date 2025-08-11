@@ -7,7 +7,7 @@ class GroupType(Base):
     name: Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    groups: Mapped[list["Group"]] = relationship("Group", back_populates="group_type") #noqa: F821
+    groups: Mapped[list["Group"]] = relationship("Group", back_populates="group_type") # noqa: F821
     
     def to_dict(self):
         return {
@@ -16,4 +16,3 @@ class GroupType(Base):
             "description": self.description,
             "is_active": self.is_active
         }
-    is_active: Mapped[bool] = mapped_column(default=True)

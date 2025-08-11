@@ -55,7 +55,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 return response.api_response(404, error_details="Claim not found")
                 
             # Verify user has access to claim
-            if not has_permission(user, PermissionAction.READ, ResourceTypeEnum.CLAIM, db_session, claim_id, user.group_id):
+            if not has_permission(user, PermissionAction.READ, ResourceTypeEnum.CLAIM.value, db_session, claim_id, user.group_id):
                 logger.info("User %s does not have access to claim %s", user.id, claim_id)
                 return response.api_response(403, error_details="User does not have access to claim")
 

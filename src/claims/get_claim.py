@@ -48,7 +48,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         if claim.deleted:
             return response.api_response(404, error_details="Claim not found")
         
-        if not has_permission(user, action=PermissionAction.READ, resource_type=ResourceTypeEnum.CLAIM, resource_id=claim.id, db=db_session):
+        if not has_permission(user, action=PermissionAction.READ, resource_type=ResourceTypeEnum.CLAIM.value, resource_id=claim.id, db=db_session):
             logger.warning("User %s does not have permission to read claim %s", user.id, claim.id)
             return response.api_response(403, error_details="You do not have access to this claim")
         
@@ -75,6 +75,4 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     except OperationalError as e:
         logger.error("Database operational error when retrieving claim %s: %s", str(claim_id), str(e))
         return response.api_response(500, error_details="Database operational error when retrieving claim")
-    except Exception as e:
-        logger.error("Error retrieving claim: %s", str(e))
-        return response.api_response(500, error_details="Internal server error")
+    # Allow unanticipated exceptions to propagate to the standard handler

@@ -1,14 +1,15 @@
 """
 Lambda handler for retrieving all rooms associated with a claim.
 
-This module handles the retrieval of rooms associated with a claim in the ClaimVision system,
-ensuring proper authorization and data validation.
+This module handles retrieving rooms for a claim in the ClaimVision
+system, ensuring proper authorization and data validation.
 """
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from models.room import Room, ClaimRoom
+from models.room import Room
+from models.claim_rooms import ClaimRoom
 from models.claim import Claim
 from utils.access_control import has_permission
 from utils.vocab_enums import PermissionAction, ResourceTypeEnum
@@ -52,7 +53,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             return response.api_response(404, error_details="Claim not found or access denied")
 
         # Verify user has access to claim
-        if not has_permission(user, PermissionAction.READ, ResourceTypeEnum.CLAIM, db_session, claim_id, user.group_id):
+        if not has_permission(user, PermissionAction.READ, ResourceTypeEnum.CLAIM.value, db_session, claim_id, user.group_id):
             logger.info("User %s does not have access to claim %s", user.id, claim_id)
             return response.api_response(403, error_details="User does not have access to claim")
 
@@ -73,6 +74,3 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         logger.error("Database error when retrieving rooms for claim %s: %s", 
                     claim_id if 'claim_id' in locals() else "unknown", str(e))
         return response.api_response(500, error_details="Database error when retrieving rooms")
-    except Exception as e:
-        logger.exception("Unexpected error retrieving rooms: %s", str(e))
-        return response.api_response(500, error_details="Internal server error")

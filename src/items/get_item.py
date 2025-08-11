@@ -1,4 +1,5 @@
 from utils.logging_utils import get_logger
+from sqlalchemy.orm import joinedload
 from models.item import Item
 from models.item_labels import ItemLabel
 from models.label import Label
@@ -30,8 +31,13 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         
     item_uuid = result
     
-    # Fetch the item
-    item = db_session.query(Item).filter(Item.id == item_uuid).first()
+    # Fetch the item with eager-loaded files to avoid N+1
+    item = (
+        db_session.query(Item)
+        .options(joinedload(Item.files))
+        .filter(Item.id == item_uuid)
+        .first()
+    )
     
     if not item:
         return response.api_response(404, error_details='Item not found.')
@@ -46,8 +52,16 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     ):
         return response.api_response(403, error_details='You do not have permission to access this item.')
 
-    # Fetch associated labels
-    item_labels = db_session.query(Label).join(ItemLabel, Label.id == ItemLabel.label_id).filter(ItemLabel.item_id == item_uuid).all()
+    # Fetch associated labels (exclude soft-deleted)
+    item_labels = (
+        db_session.query(Label)
+        .join(ItemLabel, Label.id == ItemLabel.label_id)
+        .filter(
+            ItemLabel.item_id == item_uuid,
+            ItemLabel.deleted.is_(False)
+        )
+        .all()
+    )
     
     # Get associated file IDs
     file_ids = [str(file.id) for file in item.files]

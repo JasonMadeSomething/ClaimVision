@@ -76,7 +76,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             # Check if user has permission to access this claim
             if not has_permission(
                 user=user,
-                resource_type=ResourceTypeEnum.CLAIM,
+                resource_type=ResourceTypeEnum.CLAIM.value,
                 resource_id=claim_id,
                 action=PermissionAction.READ,
                 db=db_session
@@ -90,7 +90,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             # Get all files associated with this claim
             files_query = db_session.query(File).filter(
                 File.claim_id == claim_id,
-                ~File.deleted
+                File.deleted.is_(False)
             )
         else:
             # If no claim_id, we need to get all files the user has access to
@@ -104,7 +104,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             for claim in claims:
                 if has_permission(
                     user=user,
-                    resource_type=ResourceTypeEnum.CLAIM,
+                    resource_type=ResourceTypeEnum.CLAIM.value,
                     resource_id=claim.id,
                     action=PermissionAction.READ,
                     db=db_session
@@ -112,7 +112,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                     accessible_claims.append(claim.id)
             
             # Get files associated with accessible claims or with direct permissions
-            files_query = db_session.query(File).filter(~File.deleted)
+            files_query = db_session.query(File).filter(File.deleted.is_(False))
             
             # Filter to only include files:
             # 1. Associated with claims the user has access to, OR
@@ -156,7 +156,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 # As a fallback, check direct file permission (though this is unlikely to be used)
                 elif has_permission(
                     user=user,
-                    resource_type=ResourceTypeEnum.FILE,
+                    resource_type=ResourceTypeEnum.FILE.value,
                     resource_id=file.id,
                     action=PermissionAction.READ,
                     db=db_session

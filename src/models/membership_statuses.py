@@ -13,4 +13,4 @@ class MembershipStatus(Base):
     label: Mapped[str] = mapped_column(nullable=False)
     description: Mapped[str] = mapped_column(nullable=True)
     is_active: Mapped[bool] = mapped_column(default=True)
-    group_memberships: Mapped[list["GroupMembership"]] = relationship("GroupMembership", back_populates="status") #noqa: F821
+    group_memberships: Mapped[list["GroupMembership"]] = relationship("GroupMembership", back_populates="status")  # noqa: F821

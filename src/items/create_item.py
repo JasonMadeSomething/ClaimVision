@@ -135,8 +135,8 @@ def lambda_handler(event, _context, db_session: Session = None):
                 if file.claim_id != claim_uuid:
                     return response.api_response(400, error_details='File must belong to the same claim as the item.')
                     
-                # Create the file-item association
-                db.add(ItemFile(item_id=new_item.id, file_id=file_id))
+                # Create the file-item association with group_id
+                db.add(ItemFile(item_id=new_item.id, file_id=file_id, group_id=new_item.group_id))
         
         # For backward compatibility, also handle single file_id if provided
         file_id_str = body.get("file_id")
@@ -153,8 +153,8 @@ def lambda_handler(event, _context, db_session: Session = None):
                 if file.claim_id != claim_uuid:
                     return response.api_response(400, error_details='File must belong to the same claim as the item.')
                     
-                # Create the file-item association
-                db.add(ItemFile(item_id=new_item.id, file_id=file_id))
+                # Create the file-item association with group_id
+                db.add(ItemFile(item_id=new_item.id, file_id=file_id, group_id=new_item.group_id))
             except ValueError:
                 return response.api_response(400, error_details='Invalid file ID format.')
         

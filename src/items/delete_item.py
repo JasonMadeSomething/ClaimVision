@@ -58,7 +58,7 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         db_session.commit()
 
         logger.info(f"Deleted item {item_uuid} and cleared file/label associations.")
-        return response.api_response(204, success_message='Item deleted successfully.')
+        return response.api_response(200, success_message='Item deleted successfully.', data={"item_id": str(item_uuid)})
 
     except SQLAlchemyError as e:
         db_session.rollback()

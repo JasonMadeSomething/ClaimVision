@@ -79,10 +79,24 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
             
             # If seed_labels is True, proceed with label seeding even if association exists
             if not seed_labels:
-                return response.api_response(200, success_message="File is already associated with this item")
+                # Return current label count and already_associated flag for better UX
+                current_label_count = db_session.query(ItemLabel).filter(
+                    ItemLabel.item_id == item_id,
+                    ItemLabel.deleted.is_(False)
+                ).count()
+                return response.api_response(
+                    200,
+                    success_message="File is already associated with this item",
+                    data={
+                        "item_id": str(item_id),
+                        "file_id": str(file_id),
+                        "already_associated": True,
+                        "label_count": current_label_count,
+                    },
+                )
         else:
             # Create the association
-            db_session.add(ItemFile(item_id=item_id, file_id=file_id))
+            db_session.add(ItemFile(item_id=item_id, file_id=file_id, group_id=item.group_id))
             logger.info("Created association between file %s and item %s", file_id, item_id)
         
         # If seed_labels is True, copy labels from file to item
@@ -106,7 +120,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
                 
                 if not existing_item_label:
                     # Create new association
-                    db_session.add(ItemLabel(item_id=item_id, label_id=label.id))
+                    db_session.add(ItemLabel(item_id=item_id, label_id=label.id, group_id=item.group_id))
                     labels_added += 1
                 elif existing_item_label.deleted:
                     # Reactivate deleted association
@@ -124,7 +138,8 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
                 data={
                     "file_id": str(file_id),
                     "item_id": str(item_id),
-                    "labels_added": labels_added
+                    "labels_added": labels_added,
+                    "already_associated": bool(existing_association),
                 }
             )
         

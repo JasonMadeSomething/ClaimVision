@@ -1,4 +1,5 @@
 from utils.logging_utils import get_logger
+from sqlalchemy.orm import joinedload
 from sqlalchemy import desc
 
 from models.item import Item
@@ -64,8 +65,16 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     # Fetch total count of items for the claim
     total_items = db_session.query(Item).filter(Item.claim_id == claim_uuid).count()
     
-    # Fetch paginated items for the claim - sort by id instead of created_at
-    items = db_session.query(Item).filter(Item.claim_id == claim_uuid).order_by(desc(Item.id)).offset(offset).limit(limit).all()
+    # Fetch paginated items for the claim with eager-loaded files to avoid N+1
+    items = (
+        db_session.query(Item)
+        .options(joinedload(Item.files))
+        .filter(Item.claim_id == claim_uuid)
+        .order_by(desc(Item.id))
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     
     items_data = []
     for item in items:
