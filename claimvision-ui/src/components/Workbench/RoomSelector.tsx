@@ -21,18 +21,18 @@ type DraggedItem = { type: 'ITEM'; id: string };
 type DraggedEntity = DraggedPhoto | DraggedItem;
 
 // Room button with drop target
-const RoomButton = ({ 
-  room, 
-  isSelected, 
-  onClick, 
+const RoomButton = ({
+  room,
+  isSelected,
+  onClick,
   onPhotoDrop,
   onItemDrop,
   onDelete,
   isEmpty
-}: { 
-  room: Room; 
-  isSelected: boolean; 
-  onClick: () => void; 
+}: {
+  room: Room;
+  isSelected: boolean;
+  onClick: () => void;
   onPhotoDrop: (photoId: string) => void;
   onItemDrop: (itemId: string) => void;
   onDelete?: () => void;
@@ -44,21 +44,21 @@ const RoomButton = ({
     drop: (item: DraggedEntity) => {
       console.warn("Item dropped on room:", item);
       console.warn(`Item type: ${item.type}, Item ID: ${item.id}, Room ID: ${room.id}`);
-      
+
       // Check if the item has a type property
       if (!item.type) {
         console.error("Dropped item has no type property:", item);
         return { dropped: true };
       }
-      
+
       if (item.type === 'PHOTO') {
         onPhotoDrop(item.id);
       } else if (item.type === 'ITEM') {
         onItemDrop(item.id);
       } else {
-        console.warn(`Unknown item type: ${item.type}`);
+        console.warn(`Unknown item type`);
       }
-      
+
       return { dropped: true };
     },
     collect: (monitor) => ({
@@ -77,20 +77,20 @@ const RoomButton = ({
       const roomNameLower = room.name.toLowerCase();
       const typeNameLower = type.name.toLowerCase();
       const typeIdLower = type.id.toLowerCase();
-      
+
       // Try to match by exact name first
       if (roomNameLower === typeNameLower) {
         return true;
       }
-      
+
       // Then try partial matches
-      if (roomNameLower.includes(typeIdLower) || 
+      if (roomNameLower.includes(typeIdLower) ||
           typeIdLower.includes(roomNameLower) ||
           roomNameLower.includes(typeNameLower) ||
           typeNameLower.includes(roomNameLower)) {
         return true;
       }
-      
+
       return false;
     }
   ) || PREDEFINED_ROOM_TYPES[PREDEFINED_ROOM_TYPES.length - 1]; // Default to "Other"
@@ -119,15 +119,15 @@ const RoomButton = ({
               {room.fileIds.length} files
             </span>
           )}
-          {(!room.itemIds || room.itemIds.length === 0) && 
+          {(!room.itemIds || room.itemIds.length === 0) &&
            (!room.fileIds || room.fileIds.length === 0) && (
             <span>Empty</span>
           )}
         </span>
       </button>
-      
+
       {isEmpty && onDelete && (
-        <button 
+        <button
           onClick={(e) => {
             e.stopPropagation();
             onDelete();
@@ -143,14 +143,14 @@ const RoomButton = ({
 };
 
 // Main workbench button with drop target
-const MainWorkbenchButton = ({ 
-  isSelected, 
-  onClick, 
+const MainWorkbenchButton = ({
+  isSelected,
+  onClick,
   onPhotoDrop,
   onItemDrop
-}: { 
-  isSelected: boolean; 
-  onClick: () => void; 
+}: {
+  isSelected: boolean;
+  onClick: () => void;
   onPhotoDrop: (photoId: string) => void;
   onItemDrop: (itemId: string) => void;
 }) => {
@@ -192,11 +192,11 @@ const MainWorkbenchButton = ({
   );
 };
 
-export default function RoomSelector({ 
-  rooms, 
-  selectedRoom, 
-  onSelectRoom, 
-  onMovePhotoToRoom, 
+export default function RoomSelector({
+  rooms,
+  selectedRoom,
+  onSelectRoom,
+  onMovePhotoToRoom,
   onMoveItemToRoom,
   onCreateRoom,
   onDeleteRoom,
@@ -213,20 +213,20 @@ export default function RoomSelector({
       const roomNameLower = room.name.toLowerCase();
       const typeNameLower = roomType.name.toLowerCase();
       const typeIdLower = roomType.id.toLowerCase();
-      
+
       // Check for exact name match
       if (roomNameLower === typeNameLower) {
         return true;
       }
-      
+
       // Check for partial matches
-      if (roomNameLower.includes(typeIdLower) || 
+      if (roomNameLower.includes(typeIdLower) ||
           typeIdLower.includes(roomNameLower) ||
           roomNameLower.includes(typeNameLower) ||
           typeNameLower.includes(roomNameLower)) {
         return true;
       }
-      
+
       return false;
     });
   });
@@ -259,10 +259,10 @@ export default function RoomSelector({
 
   const handleDeleteRoom = async (roomId: string) => {
     if (!onDeleteRoom) return;
-    
+
     setIsLoading(true);
     setError(null);
-    
+
     try {
       await onDeleteRoom(roomId);
       // If the deleted room was selected, go back to main workbench
@@ -342,7 +342,7 @@ export default function RoomSelector({
               </option>
             ))}
           </select>
-          
+
           <div className="flex space-x-2 mt-2">
             <button
               onClick={handleAddRoom}
@@ -373,11 +373,11 @@ export default function RoomSelector({
           onPhotoDrop={handleDropOnMainWorkbench}
           onItemDrop={handleDropItemOnMainWorkbench}
         />
-        
+
         {rooms.map((room) => {
           // Check if room is empty (no items or files)
           const isEmpty = !room.itemIds || room.itemIds.length === 0;
-          
+
           return (
             <RoomButton
               key={room.id}
