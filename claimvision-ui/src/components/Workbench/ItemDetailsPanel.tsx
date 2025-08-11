@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import Image from 'next/image';
 import { XMarkIcon, ArrowPathIcon, TagIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Item, Photo, Room } from "@/types/workbench";
 
@@ -137,6 +138,8 @@ const validateValue = (value: string) => {
   return null;
 };
 
+type EditableValue = string | number;
+
 export default function ItemDetailsPanel({
   item,
   photos,
@@ -146,9 +149,9 @@ export default function ItemDetailsPanel({
   onRemovePhoto,
   onChangeThumbnail,
   onMoveToRoom,
-  onAddPhoto,
+  onAddPhoto: _onAddPhoto,
   onDeleteItem,
-  onDeletePhoto
+  onDeletePhoto: _onDeletePhoto
 }: ItemDetailsPanelProps) {
   const [error, setError] = useState<string | null>(null);
   const [selectedLabels, setSelectedLabels] = useState<string[]>([]);
@@ -168,7 +171,7 @@ export default function ItemDetailsPanel({
       )
     : photos;
 
-  const handleUpdateField = async (field: keyof Item, value: any) => {
+  const handleUpdateField = async (field: keyof Item, value: EditableValue) => {
     try {
       await onUpdate({
         ...item,
@@ -231,10 +234,13 @@ export default function ItemDetailsPanel({
         <div className="mb-6 relative">
           {thumbnailPhoto ? (
             <div className="relative rounded-lg overflow-hidden h-48">
-              <img
+              <Image
                 src={thumbnailPhoto.url}
                 alt={item.name}
-                className="w-full h-full object-cover"
+                fill
+                sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                className="object-cover"
+                unoptimized
               />
               <button
                 onClick={onChangeThumbnail}
@@ -453,13 +459,16 @@ export default function ItemDetailsPanel({
             {filteredPhotos.map((photo) => (
               <div
                 key={photo.id}
-                className="relative rounded-lg overflow-hidden"
+                className="relative rounded-lg overflow-hidden h-24"
                 data-testid="photo-item"
               >
-                <img
+                <Image
                   src={photo.url}
                   alt={photo.fileName}
-                  className="w-full h-24 object-cover"
+                  fill
+                  sizes="(max-width: 768px) 50vw, (max-width: 1024px) 33vw, 25vw"
+                  className="object-cover"
+                  unoptimized
                 />
                 {photo.labels && photo.labels.length > 0 && (
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 p-1">
@@ -502,11 +511,11 @@ export default function ItemDetailsPanel({
                     >
                       <ArrowPathIcon className="h-4 w-4 text-gray-700" />
                     </button>
-                    {onDeletePhoto && (
+                    {_onDeletePhoto && (
                       <button
                         onClick={() => {
                           if (window.confirm('Are you sure you want to delete this photo?')) {
-                            onDeletePhoto(photo.id);
+                            _onDeletePhoto(photo.id);
                           }
                         }}
                         className="p-1 bg-white rounded-full shadow-md hover:bg-red-100"

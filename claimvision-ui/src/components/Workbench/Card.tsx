@@ -1,4 +1,5 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 import { Photo, Item } from '@/types/workbench';
 import { useDrag, useDrop } from 'react-dnd';
 import { Menu } from '@headlessui/react';
@@ -72,7 +73,7 @@ const Card: React.FC<CardProps> = ({
         index,
         type: type.toUpperCase()
       };
-      console.log("Dragging item with type:", dragItem.type);
+      console.warn("Dragging item with type:", dragItem.type);
       return dragItem;
     },
     end: () => {
@@ -132,28 +133,9 @@ const Card: React.FC<CardProps> = ({
     return thumbnailPhoto?.url || '/placeholder-image.jpg';
   })() : '/placeholder-image.jpg');
 
-  useEffect(() => {
-    // Function to fetch file URL if needed
-    const fetchFileUrl = async () => {
-      // Case 1: If this is a photo without a URL, fetch it
-      if (isPhoto(data) && !data.url) {
-        await fetchPhotoUrl(data.id);
-      }
-      // Case 2: If this is an item with a thumbnail but no URL in the corresponding photo
-      else if (isItem(data) && data.thumbnailPhotoId) {
-        const thumbnailPhoto = allPhotos.find(p => p.id === data.thumbnailPhotoId);
-        if (!thumbnailPhoto?.url) {
-          await fetchPhotoUrl(data.thumbnailPhotoId);
-        }
-      }
-    };
-
-    fetchFileUrl();
-  }, [data, allPhotos]);
-
-  // Function to fetch a photo URL from the API
+  // Function to fetch a photo URL from the API (declare before effects that use it)
   const { user } = useAuth();
-  const fetchPhotoUrl = async (photoId: string) => {
+  const fetchPhotoUrl = useCallback(async (photoId: string) => {
     if (!user?.id_token) {
       console.error("Cannot fetch photo URL: User not authenticated");
       return;
@@ -177,7 +159,7 @@ const Card: React.FC<CardProps> = ({
         const fileData = data.data.files[0];
         if (fileData.url) {
           setImageUrl(fileData.url);
-          console.log(`Successfully fetched URL for photo ${photoId}`);
+          console.warn(`Successfully fetched URL for photo ${photoId}`);
         } else {
           console.warn(`No URL available for photo ${photoId}`);
           setImageUrl('/placeholder-image.jpg');
@@ -190,7 +172,28 @@ const Card: React.FC<CardProps> = ({
       console.error("Error fetching photo URL:", error);
       setImageUrl('/placeholder-image.jpg');
     }
-  };
+  }, [user?.id_token]);
+
+  useEffect(() => {
+    // Function to fetch file URL if needed
+    const fetchFileUrl = async () => {
+      // Case 1: If this is a photo without a URL, fetch it
+      if (isPhoto(data) && !data.url) {
+        await fetchPhotoUrl(data.id);
+      }
+      // Case 2: If this is an item with a thumbnail but no URL in the corresponding photo
+      else if (isItem(data) && data.thumbnailPhotoId) {
+        const thumbnailPhoto = allPhotos.find(p => p.id === data.thumbnailPhotoId);
+        if (!thumbnailPhoto?.url) {
+          await fetchPhotoUrl(data.thumbnailPhotoId);
+        }
+      }
+    };
+
+    fetchFileUrl();
+  }, [data, allPhotos, fetchPhotoUrl]);
+
+  // fetchPhotoUrl declared above
 
   // Get the title
   const title = isPhoto(data) ? data.fileName : isItem(data) ? data.name : '';
@@ -233,10 +236,13 @@ const Card: React.FC<CardProps> = ({
     >
       {/* Image */}
       <div className="aspect-square overflow-hidden relative">
-        <img
+        <Image
           src={imageUrl}
           alt={title}
-          className="w-full h-full object-cover"
+          fill
+          sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
+          className="object-cover"
+          unoptimized
         />
 
         {/* Item indicator overlay */}

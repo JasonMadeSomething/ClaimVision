@@ -13,7 +13,6 @@ jest.mock('react-dnd', () => ({
 
 describe('DropZone Component', () => {
   const mockOnDrop = jest.fn();
-  const mockOnHover = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();

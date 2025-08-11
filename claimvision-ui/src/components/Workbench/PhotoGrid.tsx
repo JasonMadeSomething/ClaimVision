@@ -1,14 +1,10 @@
 "use client";
 
-import React, { useState, useRef, useCallback, useEffect } from "react";
-import { Photo, Item, SearchMode, DragItem } from "@/types/workbench";
-import { DndProvider, useDrag, useDrop, DropTargetMonitor } from "react-dnd";
-import { HTML5Backend } from "react-dnd-html5-backend";
-import { Menu } from '@headlessui/react';
-import { EllipsisVerticalIcon } from '@heroicons/react/24/outline';
+import { useState } from "react";
+import { Photo, Item, SearchMode } from "@/types/workbench";
 import Card from './Card';
 import DropZone from './DropZone';
-import { ChevronDownIcon, ChevronUpIcon, ViewColumnsIcon } from '@heroicons/react/24/outline';
+import { ChevronDownIcon, ChevronUpIcon } from '@heroicons/react/24/outline';
 
 // Define the props for the PhotoGrid component
 interface PhotoGridProps {
@@ -209,8 +205,7 @@ export default function PhotoGrid({
     onCreateItem(photoId);
   };
 
-  // Get unassigned photos
-  const unassignedPhotos = photosByItem.get(null) || [];
+  // Unassigned photos are computed as needed in handlers; no separate variable needed here
 
   // Get the card class based on highlight status
   const getCardClass = (isHighlighted: boolean) => {

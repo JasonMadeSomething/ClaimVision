@@ -70,7 +70,6 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
       
       if (!response.ok) {
         const errorText = await response.text();
-        // eslint-disable-next-line no-console
         console.error(`Error response: ${errorText}`);
         throw new Error(errorText || "Failed to create claim");
       }
@@ -86,7 +85,6 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
       // Redirect to the workbench without query params
       router.push('/workbench');
     } catch (err) {
-      // eslint-disable-next-line no-console
       console.error("Error creating claim:", err);
       const message = err instanceof Error ? err.message : 'Failed to create claim';
       setError(message);

@@ -26,7 +26,7 @@ export default function WorkbenchLayout() {
   const [internalSearchTerm, setInternalSearchTerm] = useState('');
   const [searchMode, setSearchMode] = useState<SearchMode>(SearchMode.Highlight);
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, _setError] = useState<string | null>(null);
   const [claimId, setClaimId] = useState<string | null>(null);
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [showReportRequestModal, setShowReportRequestModal] = useState(false);
@@ -124,101 +124,115 @@ export default function WorkbenchLayout() {
           }
           
           // Process items and associate them with their photos
-          const processedItems = safeItems.map((item: any) => {
-            // Ensure photoIds is always an array
-            if (!Array.isArray(item.file_ids)) {
-              console.warn(`Item ${item.id} has no file_ids array, initializing empty array`);
-              item.file_ids = [];
-            }
-            
-            // Map file_ids to photoIds for backward compatibility
-            item.photoIds = item.file_ids || [];
-            
-            // Set thumbnailPhotoId to the first photo if not set
-            if (!item.thumbnailPhotoId && item.photoIds.length > 0) {
-              item.thumbnailPhotoId = item.photoIds[0];
-            }
-            
-            // Map unit_cost from the API response
-            if (item.unit_cost !== undefined) {
-              item.unit_cost = parseFloat(item.unit_cost);
-            } else {
-              item.unit_cost = item.replacementValue || 0;
-            }
-            
-            // Ensure roomId is properly set from the API response
-            // The backend stores room_id, but frontend uses roomId
-            item.roomId = item.room_id || null;
-            
-            return item;
+          const processedItems: Item[] = safeItems.map((raw: unknown): Item => {
+            const r = raw as Record<string, unknown>;
+            const fileIdsRaw = r["file_ids"];
+            const photoIds: string[] = Array.isArray(fileIdsRaw) ? (fileIdsRaw as string[]) : [];
+            const thumbRaw = r["thumbnailPhotoId"];
+            const thumbnailPhotoId: string | null = typeof thumbRaw === 'string' ? (thumbRaw as string) : (photoIds.length > 0 ? photoIds[0] : null);
+            const unitCostRaw = r["unit_cost"];
+            const replacementValueRaw = r["replacementValue"];
+            const unit_cost: number = unitCostRaw !== undefined && unitCostRaw !== null
+              ? parseFloat(String(unitCostRaw))
+              : (typeof replacementValueRaw === 'number' ? (replacementValueRaw as number) : 0);
+            const roomId: string | null = typeof r["room_id"] === 'string' ? (r["room_id"] as string) : null;
+
+            const mapped: Item = {
+              id: String(r["id"] ?? ''),
+              name: String(r["name"] ?? ''),
+              description: String(r["description"] ?? ''),
+              thumbnailPhotoId,
+              photoIds,
+              roomId,
+              unit_cost,
+              quantity: typeof r["quantity"] === 'number' ? (r["quantity"] as number) : 1,
+              brand_manufacturer: typeof r["brand_manufacturer"] === 'string' ? (r["brand_manufacturer"] as string) : undefined,
+              model_number: typeof r["model_number"] === 'string' ? (r["model_number"] as string) : undefined,
+              original_vendor: typeof r["original_vendor"] === 'string' ? (r["original_vendor"] as string) : undefined,
+              age_years: typeof r["age_years"] === 'number' ? (r["age_years"] as number) : undefined,
+              age_months: typeof r["age_months"] === 'number' ? (r["age_months"] as number) : undefined,
+              condition: typeof r["condition"] === 'string' ? (r["condition"] as string) : undefined,
+              is_ai_suggested: typeof r["is_ai_suggested"] === 'boolean' ? (r["is_ai_suggested"] as boolean) : undefined,
+            };
+
+            return mapped;
           });
           
           // Process photos and associate them with their items
-          const processedPhotos = safePhotos.map((photo: any) => {
-            // Find if this photo is associated with any item
-            const associatedItem = processedItems.find((item: any) => 
-              item.photoIds && item.photoIds.includes(photo.id)
-            );
-            
-            // If associated, set the itemId
-            if (associatedItem) {
-              photo.itemId = associatedItem.id;
-            } else {
-              photo.itemId = null;
-            }
-            
-            // Ensure roomId is properly set from the API response
-            // The backend stores room_id, but frontend uses roomId
-            photo.roomId = photo.room_id || null;
-            
-            return photo;
+          const processedPhotos: Photo[] = safePhotos.map((raw: unknown): Photo => {
+            const r = raw as Record<string, unknown>;
+            const id = String(r["id"] ?? '');
+            const itemId = processedItems.find((it: Item) => Array.isArray(it.photoIds) && it.photoIds.includes(id))?.id ?? null;
+            const roomId: string | null = typeof r["room_id"] === 'string' ? (r["room_id"] as string) : null;
+            const labels: string[] = Array.isArray(r["labels"]) ? (r["labels"] as string[]) : [];
+            const url = typeof r["url"] === 'string' ? (r["url"] as string) : (typeof r["file_url"] === 'string' ? (r["file_url"] as string) : '');
+            const fileName = typeof r["fileName"] === 'string' ? (r["fileName"] as string) : (typeof r["file_name"] === 'string' ? (r["file_name"] as string) : '');
+            const isMainPhoto = typeof r["isMainPhoto"] === 'boolean' ? (r["isMainPhoto"] as boolean) : undefined;
+            const pos = (r["position"] as Record<string, unknown> | undefined) ?? undefined;
+            const uploadedAt = typeof r["uploadedAt"] === 'string' ? (r["uploadedAt"] as string) : (typeof r["uploaded_at"] === 'string' ? (r["uploaded_at"] as string) : new Date().toISOString());
+
+            const mapped: Photo = {
+              id,
+              url,
+              fileName,
+              labels,
+              itemId,
+              roomId,
+              isMainPhoto,
+              position: {
+                x: typeof pos?.x === 'number' ? (pos.x as number) : 0,
+                y: typeof pos?.y === 'number' ? (pos.y as number) : 0,
+              },
+              uploadedAt,
+            };
+
+            return mapped;
           });
           
           // Process rooms to populate itemIds arrays based on item room assignments
-          const processedRooms = safeRooms.map((room: any) => {
-            // Make sure itemIds is initialized as an array
-            if (!Array.isArray(room.itemIds)) {
-              room.itemIds = [];
-            }
-            
+          const processedRooms: Room[] = safeRooms.map((raw: unknown): Room => {
+            const r = raw as Record<string, unknown>;
+            const base: Room = {
+              id: String(r["id"] ?? ''),
+              name: String(r["name"] ?? ''),
+              itemIds: Array.isArray(r["itemIds"]) ? ([...(r["itemIds"] as string[])]) : [],
+              fileIds: Array.isArray(r["fileIds"]) ? ([...(r["fileIds"] as string[])]) : [],
+            };
+
             // Find all items assigned to this room
-            const roomItems = processedItems.filter((item: any) => 
-              item.room_id === room.id || item.roomId === room.id
-            );
-            
+            const roomItems = processedItems.filter((item: Item) => item.roomId === base.id);
+
             // Add item IDs to the room's itemIds array if not already present
-            roomItems.forEach((item: any) => {
-              if (!room.itemIds.includes(item.id)) {
-                room.itemIds.push(item.id);
+            roomItems.forEach((item: Item) => {
+              if (!base.itemIds.includes(item.id)) {
+                base.itemIds.push(item.id);
               }
             });
-            
+
             // Find all files assigned to this room
-            const roomFiles = processedPhotos.filter((photo: any) => 
-              photo.room_id === room.id || photo.roomId === room.id
-            );
-            
+            const roomFiles = processedPhotos.filter((photo: Photo) => photo.roomId === base.id);
+
             // Make sure fileIds is initialized as an array
-            if (!Array.isArray(room.fileIds)) {
-              room.fileIds = [];
+            if (!Array.isArray(base.fileIds)) {
+              base.fileIds = [];
             }
-            
+
             // Add file IDs to the room's fileIds array if not already present
-            roomFiles.forEach((photo: any) => {
-              if (!room.fileIds.includes(photo.id)) {
-                room.fileIds.push(photo.id);
+            roomFiles.forEach((photo: Photo) => {
+              if (!base.fileIds!.includes(photo.id)) {
+                base.fileIds!.push(photo.id);
               }
             });
-            
-            return room;
+
+            return base;
           });
           
           setItems(processedItems);
           setPhotos(processedPhotos);
           setRooms(processedRooms);
-          console.log("Photos set:", processedPhotos);
-          console.log("Items set:", processedItems);
-          console.log("Rooms set:", processedRooms);
+          console.warn("Photos set:", processedPhotos);
+          console.warn("Items set:", processedItems);
+          console.warn("Rooms set:", processedRooms);
         } catch (err) {
           console.error("Error fetching claim data:", err);
           // Optional: Show toast or UI fallback state
@@ -232,7 +246,7 @@ export default function WorkbenchLayout() {
     };
 
     fetchData(user.id_token);
-  }, [claimId, user?.id_token]);
+  }, [claimId, user?.id_token, router, user]);
 
   // Filter photos based on search query and mode
   const filteredPhotos = photos.filter(photo => {
@@ -251,7 +265,7 @@ export default function WorkbenchLayout() {
   });
 
   // Get photos for current view (workbench or specific room)
-  const visiblePhotos = filteredPhotos.filter(photo => {
+  const _visiblePhotos = filteredPhotos.filter(photo => {
     if (selectedRoom) {
       return photo.roomId === selectedRoom.id;
     } else {
@@ -261,7 +275,7 @@ export default function WorkbenchLayout() {
   });
 
   // Get items for current view (workbench or specific room)
-  const visibleItems = Array.isArray(items)
+  const _visibleItems = Array.isArray(items)
   ? items.filter(item => {
       if (selectedRoom) {
         return item.roomId === selectedRoom.id;
@@ -312,7 +326,7 @@ export default function WorkbenchLayout() {
       const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
       
       // Prepare the request body to match what the backend expects
-      const requestBody: any = {
+      const requestBody: { name: string; description: string; unit_cost: number; room_id: string | null; file_id?: string } = {
         name: photoId ? 'New Item' : '',
         description: '',
         unit_cost: 0, // Use unit_cost instead of replacement_value
@@ -324,7 +338,7 @@ export default function WorkbenchLayout() {
         requestBody.file_id = photoId;
       }
       
-      console.log(`Creating item for claim ${claimId} with data:`, requestBody);
+      console.warn(`Creating item for claim ${claimId} with data:`, requestBody);
       
       const response = await fetch(`${baseUrl}/claims/${claimId}/items`, {
         method: 'POST',
@@ -341,14 +355,14 @@ export default function WorkbenchLayout() {
         let errorData;
         try {
           errorData = JSON.parse(errorText);
-        } catch (e) {
+        } catch {
           errorData = { error_details: errorText || 'Failed to create item' };
         }
         throw new Error(errorData.error_details || 'Failed to create item');
       }
 
       const result = await response.json();
-      console.log("Item created successfully:", result);
+      console.warn("Item created successfully:", result);
       
       if (result.data && result.data.id) {
         // Replace the temporary item with the server-returned item
@@ -385,7 +399,7 @@ export default function WorkbenchLayout() {
                 item_id: serverItem.id
               })
             });
-            console.log(`Photo ${photoId} associated with item ${serverItem.id}`);
+            console.warn(`Photo ${photoId} associated with item ${serverItem.id}`);
           } catch (error) {
             console.error("Error associating photo with item:", error);
           }
@@ -418,12 +432,12 @@ export default function WorkbenchLayout() {
               };
               
               // Log detailed request information for debugging
-              console.log('File association request details (from pending associations):');
-              console.log('URL:', url);
-              console.log('Method:', 'POST');
-              console.log('Headers:', { 'Content-Type': 'application/json', 'Authorization': 'Bearer [token redacted]' });
-              console.log('Body:', JSON.stringify(requestBody, null, 2));
-              
+              console.warn('File association request details (from pending associations):');
+              console.warn('URL:', url);
+              console.warn('Method:', 'POST');
+              console.warn('Headers:', { 'Content-Type': 'application/json', 'Authorization': 'Bearer [token redacted]' });
+              console.warn('Body:', JSON.stringify(requestBody, null, 2));
+               
               const response = await fetch(url, {
                 method: 'POST',
                 headers: {
@@ -432,65 +446,39 @@ export default function WorkbenchLayout() {
                 },
                 body: JSON.stringify(requestBody)
               });
-
+              
               if (!response.ok) {
                 const errorText = await response.text();
                 console.error(`Error associating file with item (${response.status}):`, errorText);
                 throw new Error('Failed to associate file with item');
               }
 
-              console.log(`File ${fileId} associated with item ${serverItem.id}`);
+              console.warn(`File ${fileId} associated with item ${serverItem.id}`);
             } catch (error) {
               console.error(`Error associating file ${fileId} with item ${serverItem.id}:`, error);
             }
           }
         }
       }
-    } catch (error) {
-      console.error("Error creating item:", error);
-      
-      // Revert optimistic updates on error
-      setItems(prevItems => prevItems.filter(item => item.id !== tempId));
-      
-      if (photoId) {
-        setPhotos(prevPhotos => prevPhotos.map(photo => 
-          photo.id === photoId ? { ...photo, itemId: null } : photo
-        ));
-      }
-      
-      if (selectedItem?.id === tempId) {
-        setSelectedItem(null);
-      }
     }
-  };
-
-  // Handle updating item details
+  catch (error) {
+    console.error("Error creating item:", error);
+    
+    // Revert optimistic updates on error
+    setItems(prevItems => prevItems.filter(item => item.id !== tempId));
+    return;
+  }
+};
+  
   const handleUpdateItem = async (updatedItem: Item) => {
-    if (!claimId || !user?.id_token) {
-      console.error("Cannot update item: missing claim ID or auth token");
-      // Still update the UI even if we can't save to the server
-      const updatedItems = items.map(item => 
-        item.id === updatedItem.id ? updatedItem : item
-      );
-      setItems(updatedItems);
-      setSelectedItem(updatedItem);
-      return;
-    }
-    
-    // Skip API calls for temporary items (they haven't been created on the server yet)
-    if (updatedItem.id.startsWith('item-')) {
-      console.log("Skipping API update for temporary item:", updatedItem.id);
-      const updatedItems = items.map(item => 
-        item.id === updatedItem.id ? updatedItem : item
-      );
-      setItems(updatedItems);
-      setSelectedItem(updatedItem);
-      return;
-    }
-    
     // Store the original item for rollback if needed
     const originalItem = items.find(item => item.id === updatedItem.id);
     if (!originalItem) return;
+    if (!user?.id_token) {
+      console.error("Cannot update item: missing auth token");
+      return;
+    }
+    const token = user.id_token;
     
     // Optimistically update the UI
     const updatedItems = items.map(item => 
@@ -517,13 +505,13 @@ export default function WorkbenchLayout() {
         condition: updatedItem.condition
       };
       
-      console.log(`Updating item ${updatedItem.id} with data:`, requestBody);
+      console.warn(`Updating item ${updatedItem.id} with data:`, requestBody);
       
       const response = await fetch(`${baseUrl}/items/${updatedItem.id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${user.id_token}`
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(requestBody)
       });
@@ -534,13 +522,13 @@ export default function WorkbenchLayout() {
         let errorData;
         try {
           errorData = JSON.parse(errorText);
-        } catch (e) {
+        } catch {
           errorData = { error_details: errorText || 'Failed to update item' };
         }
         throw new Error(errorData.error_details || 'Failed to update item');
       }
 
-      console.log("Item updated successfully");
+      console.warn("Item updated successfully");
     } catch (error) {
       console.error("Error updating item:", error);
       
@@ -582,7 +570,7 @@ export default function WorkbenchLayout() {
       }
 
       const roomData = await response.json();
-      console.log("Room created successfully:", roomData);
+      console.warn("Room created successfully:", roomData);
       
       // Add the new room to the rooms list
       if (roomData.data) {
@@ -621,7 +609,7 @@ export default function WorkbenchLayout() {
         throw new Error(errorData.error_details || 'Failed to delete room');
       }
 
-      console.log("Room deleted successfully");
+      console.warn("Room deleted successfully");
       
       // Remove the room from the rooms list
       setRooms(rooms.filter(room => room.id !== roomId));
@@ -681,11 +669,11 @@ export default function WorkbenchLayout() {
         };
         
         // Log detailed request information for debugging
-        console.log('File association request details:');
-        console.log('URL:', url);
-        console.log('Method:', 'POST');
-        console.log('Headers:', { 'Content-Type': 'application/json', 'Authorization': 'Bearer [token redacted]' });
-        console.log('Body:', JSON.stringify(requestBody, null, 2));
+        console.warn('File association request details:');
+        console.warn('URL:', url);
+        console.warn('Method:', 'POST');
+        console.warn('Headers:', { 'Content-Type': 'application/json', 'Authorization': 'Bearer [token redacted]' });
+        console.warn('Body:', JSON.stringify(requestBody, null, 2));
         
         const response = await fetch(url, {
           method: 'POST',
@@ -702,13 +690,13 @@ export default function WorkbenchLayout() {
           throw new Error('Failed to associate file with item');
         }
 
-        console.log(`Successfully associated file ${photoId} with item ${itemId}`);
+        console.warn(`Successfully associated file ${photoId} with item ${itemId}`);
       } catch (error) {
         console.error("Error associating file with item:", error);
         // Continue with local state updates even if the API call fails
       }
     } else if (itemId.startsWith('item-')) {
-      console.log("Skipping API call for temporary item:", itemId);
+      console.warn("Skipping API call for temporary item:", itemId);
       // Store the association for later processing
       setPendingFileAssociations(prevAssociations => ({
         ...prevAssociations,
@@ -764,7 +752,7 @@ export default function WorkbenchLayout() {
             return; // Exit early to prevent further processing
           }
           
-          console.log("Item deleted successfully");
+          console.warn("Item deleted successfully");
         } catch (error) {
           console.error("Error deleting item:", error);
           // Revert the local deletion to prevent duplication
@@ -819,7 +807,7 @@ export default function WorkbenchLayout() {
             item_id: null
           })
         });
-        console.log("Photo item association updated successfully");
+        console.warn("Photo item association updated successfully");
       } catch (error) {
         console.error("Error updating photo item association:", error);
       }
@@ -862,7 +850,7 @@ export default function WorkbenchLayout() {
         throw new Error('Failed to update item room');
       }
 
-      console.log(`Item ${itemId} moved to room ${roomId || 'main workbench'}`);
+      console.warn(`Item ${itemId} moved to room ${roomId || 'main workbench'}`);
       
       // Also update the room's itemIds array for proper tracking
       if (roomId) {
@@ -965,7 +953,7 @@ export default function WorkbenchLayout() {
     setRooms(updatedRooms);
     
     // Log the action
-    console.log(`Photo ${photoId} moved to room ${roomId || 'Main Workbench'}`);
+    console.warn(`Photo ${photoId} moved to room ${roomId || 'Main Workbench'}`);
     
     // Update on the server
     if (!claimId || !user?.id_token) {
@@ -998,7 +986,7 @@ export default function WorkbenchLayout() {
         throw new Error(errorData.error_details || 'Failed to update room assignment');
       }
       
-      console.log("File room assignment updated successfully on server");
+      console.warn("File room assignment updated successfully on server");
     } catch (error) {
       console.error("Error updating file room assignment:", error);
     }
@@ -1076,8 +1064,8 @@ export default function WorkbenchLayout() {
   };
 
   // Handle file upload completion
-  const handleUploadComplete = (newFiles: any[]) => {
-    console.log('Upload complete, new files:', newFiles);
+  const handleUploadComplete = (newFiles: Photo[]) => {
+    console.warn('Upload complete, new files:', newFiles);
     setShowUploadModal(false);
     
     // Add the new files to the photos state
@@ -1124,7 +1112,7 @@ export default function WorkbenchLayout() {
     try {
       const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
       
-      console.log(`Deleting item ${itemId}`);
+      console.warn(`Deleting item ${itemId}`);
       
       const response = await fetch(`${baseUrl}/items/${itemId}`, {
         method: 'DELETE',
@@ -1146,7 +1134,7 @@ export default function WorkbenchLayout() {
         return; // Exit early to prevent further processing
       }
       
-      console.log("Item deleted successfully");
+      console.warn("Item deleted successfully");
     } catch (error) {
       console.error("Error deleting item:", error);
       // Revert the local deletion to prevent duplication
@@ -1195,7 +1183,7 @@ export default function WorkbenchLayout() {
     try {
       const baseUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
       
-      console.log(`Deleting photo ${photoId}`);
+      console.warn(`Deleting photo ${photoId}`);
       
       const response = await fetch(`${baseUrl}/files/${photoId}`, {
         method: 'DELETE',
@@ -1210,13 +1198,13 @@ export default function WorkbenchLayout() {
         let errorData;
         try {
           errorData = JSON.parse(errorText);
-        } catch (e) {
+        } catch {
           errorData = { error_details: errorText || 'Failed to delete photo' };
         }
         throw new Error(errorData.error_details || 'Failed to delete photo');
       }
 
-      console.log("Photo deleted successfully");
+      console.warn("Photo deleted successfully");
     } catch (error) {
       console.error("Error deleting photo:", error);
       

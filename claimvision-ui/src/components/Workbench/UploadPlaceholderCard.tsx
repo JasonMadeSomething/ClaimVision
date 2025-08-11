@@ -1,4 +1,5 @@
 import React from 'react';
+import Image from 'next/image';
 
 interface UploadPlaceholderCardProps {
   fileName: string;
@@ -49,10 +50,13 @@ const UploadPlaceholderCard: React.FC<UploadPlaceholderCardProps> = ({
     >
       {/* Image */}
       <div className="aspect-square overflow-hidden relative">
-        <img
+        <Image
           src="/placeholder-upload.svg"
           alt="Uploading file"
-          className="w-full h-full object-cover"
+          fill
+          sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 25vw"
+          className="object-cover"
+          unoptimized
         />
         
         {/* Progress overlay */}

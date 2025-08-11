@@ -3,7 +3,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import PhotoGrid from '../PhotoGrid';
 import { defaultPhotoGridProps, mockItems, mockPhotos } from '../mocks/mockData';
-import { workbenchApi } from '../mocks/mockApi';
 import { SearchMode } from '@/types/workbench';
 import Card from '../Card';
 

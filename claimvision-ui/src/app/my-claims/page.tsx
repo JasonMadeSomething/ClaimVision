@@ -47,11 +47,11 @@ export default function MyClaims() {
         }
         
         const idToken = user.id_token;
-        console.log("Using ID token from auth context");
+        console.warn("Using ID token from auth context");
         
         // Fetch claims from the API
         const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
-        console.log(`Fetching claims from: ${apiUrl}/claims`);
+        console.warn(`Fetching claims from: ${apiUrl}/claims`);
         
         const response = await fetch(`${apiUrl}/claims`, {
           method: 'GET', // Explicitly set method to GET
@@ -61,7 +61,7 @@ export default function MyClaims() {
           }
         });
 
-        console.log(`Response status: ${response.status}`);
+        console.warn(`Response status: ${response.status}`);
         
         if (!response.ok) {
           const errorText = await response.text();
@@ -70,22 +70,23 @@ export default function MyClaims() {
         }
 
         const data = await response.json();
-        console.log(`Raw API response:`, data);
+        console.warn(`Raw API response:`, data);
         
         // Check if the data is wrapped in a data property (common API pattern)
         const claimsData = data.data?.results || [];
-        console.log(`Processed claims data:`, claimsData);
+        console.warn(`Processed claims data:`, claimsData);
         // Ensure we're handling an array of claims
         if (Array.isArray(claimsData)) {
-          console.log(`Received ${claimsData.length} claims`);
+          console.warn(`Received ${claimsData.length} claims`);
           setClaims(claimsData);
         } else {
-          console.log(`Received non-array data, setting empty claims list`);
+          console.warn(`Received non-array data, setting empty claims list`);
           setClaims([]);
         }
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error('Error fetching claims:', err);
-        setError(err.message || 'Failed to load claims. Please try again later.');
+        const message = err instanceof Error ? err.message : 'Failed to load claims. Please try again later.';
+        setError(message);
       } finally {
         setLoading(false);
       }

@@ -20,7 +20,6 @@ describe('Card Component', () => {
   const mockOnDragEnd = jest.fn();
   const mockOnCreateItem = jest.fn();
   const mockOnRearrange = jest.fn();
-  const mockOnAddPhotoToItem = jest.fn();
   const mockOnSelectItem = jest.fn();
   const mockOnSelect = jest.fn();
 

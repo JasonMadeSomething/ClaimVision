@@ -1,16 +1,36 @@
 import React from 'react';
-import { render, screen, waitFor, fireEvent, findByTestId } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import WorkbenchLayout from '../WorkbenchLayout';
 import { workbenchApi } from '../mocks/mockApi';
-import { Photo, Item } from '@/types/workbench';
+import { Photo } from '@/types/workbench';
 
-// Mock the child components
-jest.mock('../WorkbenchHeader', () => () => <div data-testid="mocked-header">Mocked Header</div>);
-jest.mock('../PhotoGrid', () => () => <div data-testid="mocked-photo-grid">Mocked PhotoGrid</div>);
-jest.mock('../ItemDetailsPanel', () => () => <div data-testid="mocked-details-panel">Mocked ItemDetailsPanel</div>);
-jest.mock('../RoomSelector', () => () => <div data-testid="mocked-room-selector">Mocked RoomSelector</div>);
-jest.mock('../SearchBar', () => () => <div data-testid="mocked-search-bar">Mocked SearchBar</div>);
+// Mock the child components with display names
+jest.mock('../WorkbenchHeader', () => {
+  const Mock: React.FC & { displayName?: string } = () => <div data-testid="mocked-header">Mocked Header</div>;
+  Mock.displayName = 'WorkbenchHeader';
+  return Mock;
+});
+jest.mock('../PhotoGrid', () => {
+  const Mock: React.FC & { displayName?: string } = () => <div data-testid="mocked-photo-grid">Mocked PhotoGrid</div>;
+  Mock.displayName = 'PhotoGrid';
+  return Mock;
+});
+jest.mock('../ItemDetailsPanel', () => {
+  const Mock: React.FC & { displayName?: string } = () => <div data-testid="mocked-details-panel">Mocked ItemDetailsPanel</div>;
+  Mock.displayName = 'ItemDetailsPanel';
+  return Mock;
+});
+jest.mock('../RoomSelector', () => {
+  const Mock: React.FC & { displayName?: string } = () => <div data-testid="mocked-room-selector">Mocked RoomSelector</div>;
+  Mock.displayName = 'RoomSelector';
+  return Mock;
+});
+jest.mock('../SearchBar', () => {
+  const Mock: React.FC & { displayName?: string } = () => <div data-testid="mocked-search-bar">Mocked SearchBar</div>;
+  Mock.displayName = 'SearchBar';
+  return Mock;
+});
 
 // Mock the next/navigation module
 jest.mock('next/navigation', () => ({
@@ -100,19 +120,19 @@ describe('WorkbenchLayout', () => {
 
   it('filters photos and items when a room is selected', async () => {
     // Create a custom render function that allows us to access component state
-    const mockRoom = { id: 'room-1', name: 'Living Room' };
+    const _mockRoom = { id: 'room-1', name: 'Living Room' };
     
-    // Mock the PhotoGrid component to capture props
+    // Mock the PhotoGrid component to capture props (prefixed to avoid unused var lint)
     const originalPhotoGrid = jest.requireMock('../PhotoGrid').default;
-    let capturedPhotoGridProps: any = null;
+    let _capturedPhotoGridProps: unknown = null;
     
-    jest.requireMock('../PhotoGrid').default = (props: any) => {
-      capturedPhotoGridProps = props;
-      return originalPhotoGrid(props);
+    jest.requireMock('../PhotoGrid').default = (props: Record<string, unknown>) => {
+      _capturedPhotoGridProps = props;
+      return (originalPhotoGrid as unknown as (p: Record<string, unknown>) => React.ReactElement)(props);
     };
 
     // Render with mocked room selection
-    const { rerender } = render(<WorkbenchLayout />);
+    const { rerender: _rerender } = render(<WorkbenchLayout />);
 
     // Wait for the data to load
     await waitFor(() => {
@@ -127,11 +147,11 @@ describe('WorkbenchLayout', () => {
   it('selects an item when handleSelectItem is called', async () => {
     // Mock the ItemDetailsPanel component to verify it renders
     const originalItemDetailsPanel = jest.requireMock('../ItemDetailsPanel').default;
-    let detailsPanelProps: any = null;
+    let _detailsPanelProps: unknown = null;
     
-    jest.requireMock('../ItemDetailsPanel').default = (props: any) => {
-      detailsPanelProps = props;
-      return originalItemDetailsPanel(props);
+    jest.requireMock('../ItemDetailsPanel').default = (props: Record<string, unknown>) => {
+      _detailsPanelProps = props;
+      return (originalItemDetailsPanel as unknown as (p: Record<string, unknown>) => React.ReactElement)(props);
     };
 
     // Render the component
@@ -148,9 +168,8 @@ describe('WorkbenchLayout', () => {
   });
 
   it('removes photos from unassigned view when added to an item', async () => {
-    // Mock the WorkbenchLayout component's internal state and methods
-    const mockSetPhotos = jest.fn();
-    const mockPhotos: Photo[] = [
+    // Seed test photos
+    const seedPhotos: Photo[] = [
       { 
         id: 'photo-unassigned', 
         itemId: null, 
@@ -173,17 +192,9 @@ describe('WorkbenchLayout', () => {
       }
     ];
 
-    // Mock useState for photos
-    jest.spyOn(React, 'useState').mockImplementation((initialValue: unknown) => {
-      if (Array.isArray(initialValue) && initialValue.length === 0) {
-        return [mockPhotos, mockSetPhotos];
-      }
-      return [initialValue, jest.fn()];
-    });
-
     // Create a simple test component that mimics the behavior we want to test
     const TestComponent = () => {
-      const [photos, setPhotos] = React.useState<Photo[]>([]);
+      const [photos, setPhotos] = React.useState<Photo[]>(seedPhotos);
       
       // Function that mimics handleAddPhotoToItem
       const handleAddPhotoToItem = (itemId: string, photoId: string) => {
@@ -217,18 +228,7 @@ describe('WorkbenchLayout', () => {
     // Click the button to add the photo to the item
     fireEvent.click(screen.getByTestId('add-photo-button'));
     
-    // After the click, mockSetPhotos should have been called with updated photos
-    expect(mockSetPhotos).toHaveBeenCalled();
-    
-    // Extract the updated photos from the mockSetPhotos call
-    const updatedPhotos = mockSetPhotos.mock.calls[0][0](mockPhotos);
-    
-    // Verify that the photo's itemId was updated
-    const updatedPhoto = updatedPhotos.find((p: Photo) => p.id === 'photo-unassigned');
-    expect(updatedPhoto?.itemId).toBe('item-1');
-    
-    // Verify that there are no unassigned photos after the update
-    const updatedUnassignedPhotos = updatedPhotos.filter((p: Photo) => p.itemId === null);
-    expect(updatedUnassignedPhotos.length).toBe(0);
+    // After the click, the count should be zero
+    expect(screen.getByTestId('unassigned-count').textContent).toBe('0');
   });
 });

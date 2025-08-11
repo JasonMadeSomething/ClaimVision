@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from 'next/navigation';
 import { useAuth } from "@/context/AuthContext";
 
 export default function SignUpForm({ onClose }: { onClose: () => void }) {
@@ -15,7 +14,6 @@ export default function SignUpForm({ onClose }: { onClose: () => void }) {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [showConfirmation, setShowConfirmation] = useState(false);
-  const router = useRouter();
   const { user, signOut, isLoading } = useAuth();
 
   // Check if user is already signed in
@@ -30,9 +28,10 @@ export default function SignUpForm({ onClose }: { onClose: () => void }) {
     try {
       await signOut();
       setError("");
-    } catch (err: any) {
-      console.error("Sign-out error:", err.message);
-      setError(`Failed to sign out: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Sign-out error:", err);
+      setError(`Failed to sign out: ${message}`);
     }
   };
 
@@ -79,14 +78,15 @@ export default function SignUpForm({ onClose }: { onClose: () => void }) {
         throw new Error(errorData.error_details || 'Failed to complete registration');
       }
 
-      const data = await response.json();
-      console.log("Registration successful:", data);
+      await response.json();
+      console.warn("Registration successful");
 
       setSuccess("Account created successfully! Please check your email for a confirmation code.");
       setShowConfirmation(true);
-    } catch (err: any) {
-      console.error("Sign-up error:", err.message);
-      setError(err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Sign-up error:", err);
+      setError(message);
     } finally {
       setLoading(false);
     }
@@ -124,9 +124,10 @@ export default function SignUpForm({ onClose }: { onClose: () => void }) {
         // Open the sign-in modal
         document.getElementById('signInButton')?.click();
       }, 2000);
-    } catch (err: any) {
-      console.error("Confirmation error:", err.message);
-      setError(err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Confirmation error:", err);
+      setError(message);
     } finally {
       setLoading(false);
     }

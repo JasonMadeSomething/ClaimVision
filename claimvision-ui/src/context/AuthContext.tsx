@@ -1,8 +1,7 @@
 // context/AuthContext.tsx
 "use client";
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
-import { signOut as amplifySignOut, getCurrentUser, fetchAuthSession, type AuthUser } from '@aws-amplify/auth';
-import { Amplify } from 'aws-amplify';
+import { signOut as amplifySignOut, fetchAuthSession } from '@aws-amplify/auth';
 import { usePathname, useRouter } from 'next/navigation';
 
 // Define the AuthTokens type to include refreshToken
@@ -43,7 +42,7 @@ const storeUserData = (userData: UserData) => {
   if (typeof window === 'undefined') return;
   
   localStorage.setItem('claimvision_user', JSON.stringify(userData));
-  console.log("AuthContext: Stored user data in localStorage");
+  console.warn("AuthContext: Stored user data in localStorage");
 };
 
 // Helper to retrieve user data from localStorage
@@ -65,7 +64,7 @@ const retrieveUserData = (): UserData | null => {
 const storeCurrentPath = (path: string) => {
   if (typeof window === 'undefined' || !path || path === '/') return;
   localStorage.setItem('claimvision_last_path', path);
-  console.log("AuthContext: Stored current path:", path);
+  console.warn("AuthContext: Stored current path:", path);
 };
 
 // Helper to retrieve last path
@@ -92,19 +91,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const refreshSession = useCallback(async () => {
     // Skip if we've already refreshed the session
     if (sessionRefreshed) {
-      console.log("AuthContext: Session already refreshed, skipping");
+      console.warn("AuthContext: Session already refreshed, skipping");
       return;
     }
 
     try {
-      console.log("AuthContext: Refreshing session...");
+      console.warn("AuthContext: Refreshing session...");
       setIsLoading(true);
       
       // First try to get user data from localStorage
       const storedUser = retrieveUserData();
       
       if (storedUser) {
-        console.log("AuthContext: Found stored user data");
+        console.warn("AuthContext: Found stored user data");
         
         // Check if the token is still valid by checking expiration
         try {
@@ -112,7 +111,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           const expTime = payload.exp * 1000; // Convert to milliseconds
           
           if (expTime > Date.now()) {
-            console.log("AuthContext: Token is still valid, expires at:", new Date(expTime).toISOString());
+            console.warn("AuthContext: Token is still valid, expires at:", new Date(expTime).toISOString());
             setUser(storedUser);
             setSessionRefreshed(true);
             
@@ -121,7 +120,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               setTimeout(() => {
                 const lastPath = retrieveLastPath();
                 if (lastPath && lastPath !== '/') {
-                  console.log("AuthContext: Restoring last path:", lastPath);
+                  console.warn("AuthContext: Restoring last path:", lastPath);
                   router.push(lastPath);
                 }
               }, 100);
@@ -130,7 +129,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setIsLoading(false);
             return;
           } else {
-            console.log("AuthContext: Token has expired, clearing session");
+            console.warn("AuthContext: Token has expired, clearing session");
             localStorage.removeItem('claimvision_user');
           }
         } catch (e) {
@@ -142,7 +141,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       try {
         // Try to fetch the auth session to check if we have valid tokens
         const session = await fetchAuthSession();
-        console.log("AuthContext: Session valid:", !!session.tokens);
+        console.warn("AuthContext: Session valid:", !!session.tokens);
         
         if (session.tokens) {
           // If we have tokens, we're authenticated
@@ -158,7 +157,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             const payload = JSON.parse(atob(userData.id_token.split('.')[1]));
             userData.user_id = payload.sub;
             userData.household_id = payload.household_id;
-            console.log("AuthContext: Extracted user data from token:", { 
+            console.warn("AuthContext: Extracted user data from token:", { 
               user_id: userData.user_id,
               household_id: userData.household_id
             });
@@ -175,7 +174,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setTimeout(() => {
               const lastPath = retrieveLastPath();
               if (lastPath && lastPath !== '/') {
-                console.log("AuthContext: Restoring last path:", lastPath);
+                console.warn("AuthContext: Restoring last path:", lastPath);
                 router.push(lastPath);
               }
             }, 100);
@@ -184,7 +183,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           throw new Error("No valid tokens found");
         }
       } catch (error) {
-        console.log("AuthContext: No valid session found:", error);
+        console.error("AuthContext: No valid session found:", error);
         setUser(null);
         
         // Clear any stale data
@@ -194,7 +193,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           Object.keys(localStorage)
             .filter(key => key.startsWith('amplify') || key.startsWith('CognitoIdentityServiceProvider'))
             .forEach(key => {
-              console.log("AuthContext: Removing stale localStorage item:", key);
+              console.warn("AuthContext: Removing stale localStorage item:", key);
               localStorage.removeItem(key);
             });
         }
@@ -210,7 +209,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, [refreshSession]);
 
   const handleSetUser = async (userData: UserData | null) => {
-    console.log("AuthContext: Setting user:", userData);
+    console.warn("AuthContext: Setting user:", { hasIdToken: !!userData?.id_token, hasAccessToken: !!userData?.access_token });
     
     if (userData) {
       // Store the user data in localStorage for persistence
@@ -225,7 +224,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
               const payload = JSON.parse(atob(userData.id_token.split('.')[1]));
               userData.user_id = userData.user_id || payload.sub;
               userData.household_id = userData.household_id || payload.household_id;
-              console.log("AuthContext: Extracted user data from token:", { 
+              console.warn("AuthContext: Extracted user data from token:", { 
                 user_id: userData.user_id,
                 household_id: userData.household_id
               });
@@ -248,14 +247,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             localStorage.setItem(`${cognitoKey}.idToken`, userData.id_token);
             localStorage.setItem(`${cognitoKey}.accessToken`, userData.access_token);
             localStorage.setItem(`${cognitoKey}.refreshToken`, userData.refresh_token);
-            console.log("AuthContext: Stored tokens in localStorage");
+            console.warn("AuthContext: Stored tokens in localStorage");
           } catch (e) {
             console.error("AuthContext: Failed to store tokens in localStorage:", e);
           }
           
           setUser(userData);
           setSessionRefreshed(true);
-          console.log("AuthContext: User authenticated successfully");
+          console.warn("AuthContext: User authenticated successfully");
         } catch (error) {
           console.error("AuthContext: Error configuring Amplify with tokens:", error);
         }
@@ -272,10 +271,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => {
-    console.log("AuthContext: Signing out...");
+    console.warn("AuthContext: Signing out...");
     try {
       await amplifySignOut({ global: true });
-      console.log("AuthContext: Sign out successful");
+      console.warn("AuthContext: Sign out successful");
       setUser(null);
       setSessionRefreshed(false);
       
@@ -287,7 +286,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         Object.keys(localStorage)
           .filter(key => key.startsWith('amplify') || key.startsWith('CognitoIdentityServiceProvider'))
           .forEach(key => {
-            console.log("AuthContext: Removing localStorage item:", key);
+            console.warn("AuthContext: Removing localStorage item:", key);
             localStorage.removeItem(key);
           });
       }

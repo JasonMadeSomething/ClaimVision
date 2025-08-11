@@ -16,7 +16,6 @@ export function initializeAmplify() {
     const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
 
     if (!userPoolId || !userPoolClientId || !region || !apiUrl) {
-      // eslint-disable-next-line no-console
       console.error('[Amplify] ❌ Missing Environment Variables:', {
         userPoolId,
         userPoolClientId,
@@ -49,7 +48,6 @@ export function initializeAmplify() {
                   'Accept': 'application/json'
                 };
               } catch (error) {
-                // eslint-disable-next-line no-console
                 console.error('[Amplify] ❌ Failed to fetch auth token:', error);
                 return {};
               }
@@ -63,7 +61,6 @@ export function initializeAmplify() {
 
     isConfigured.configured = true;
   } catch (error) {
-    // eslint-disable-next-line no-console
     console.error('[Amplify] ❌ Error Configuring Amplify:', error);
     throw error;
   }

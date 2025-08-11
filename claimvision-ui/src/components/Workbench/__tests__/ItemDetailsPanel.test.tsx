@@ -7,7 +7,7 @@ import { workbenchApi } from '../mocks/mockApi';
 
 // Mock the Dialog component from @headlessui/react
 jest.mock('@headlessui/react', () => ({
-  Dialog: ({ open, children }: { open?: boolean; children: React.ReactNode }) => (
+  Dialog: ({ open: _open, children }: { open?: boolean; children: React.ReactNode }) => (
     <div data-testid="dialog">{children}</div>
   ),
   DialogPanel: ({ children }: { children: React.ReactNode }) => (
@@ -17,7 +17,7 @@ jest.mock('@headlessui/react', () => ({
     <h2 data-testid="dialog-title">{children}</h2>
   ),
   Transition: {
-    Child: ({ show, children }: { show?: boolean; children: React.ReactNode }) => (
+    Child: ({ show: _show, children }: { show?: boolean; children: React.ReactNode }) => (
       <div data-testid="transition-child">{children}</div>
     ),
   },

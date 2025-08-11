@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useRouter } from 'next/navigation';
 import { useAuth } from "@/context/AuthContext";
-import { fetchAuthSession } from "@aws-amplify/auth";
 
 export default function SignInForm({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
@@ -25,9 +24,10 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
     try {
       await signOut();
       setError("");
-    } catch (err: any) {
-      console.error("Sign-out error:", err.message);
-      setError(`Failed to sign out: ${err.message}`);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Sign-out error:", message);
+      setError(`Failed to sign out: ${message}`);
     }
   };
 
@@ -43,7 +43,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
     setError("");
 
     try {
-      console.log("SignInForm: Attempting to sign in with email:", email);
+      console.warn("SignInForm: Attempting to sign in");
       
       // Call the login API directly
       const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
@@ -64,7 +64,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
       }
 
       const loginData = await response.json();
-      console.log("SignInForm: Sign-in successful, result:", loginData);
+      console.warn("SignInForm: Sign-in successful");
       
       if (!loginData.data || !loginData.data.id_token) {
         throw new Error('Invalid response from server - missing authentication tokens');
@@ -79,9 +79,10 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
       
       // Redirect to my claims page
       router.push('/my-claims');
-    } catch (err: any) {
-      console.error("Sign-in error:", err.message);
-      setError(err.message);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("Sign-in error:", message);
+      setError(message);
     } finally {
       setLoading(false);
     }

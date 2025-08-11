@@ -19,15 +19,15 @@ export default function Navigation() {
   
   // Debug log to see what's in the user object
   useEffect(() => {
-    console.log('Navigation - Auth state:', { user, isLoading, pathname });
+    console.warn('Navigation - Auth state:', { hasUser: !!user, isLoading, pathname });
   }, [user, isLoading, pathname]);
 
   // Only refresh session once on initial load, not on every route change
   useEffect(() => {
-    console.log('Navigation - Initial load, refreshing session');
+    console.warn('Navigation - Initial load, refreshing session');
     refreshSession();
     // Empty dependency array means this only runs once on mount
-  }, []);
+  }, [refreshSession]);
 
   const handleSignOut = async () => {
     try {

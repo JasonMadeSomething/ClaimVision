@@ -16,6 +16,10 @@ interface RoomSelectorProps {
   claimId?: string | undefined;
 }
 
+type DraggedPhoto = { type: 'PHOTO'; id: string };
+type DraggedItem = { type: 'ITEM'; id: string };
+type DraggedEntity = DraggedPhoto | DraggedItem;
+
 // Room button with drop target
 const RoomButton = ({ 
   room, 
@@ -37,9 +41,9 @@ const RoomButton = ({
   const roomRef = useRef<HTMLButtonElement>(null);
   const [{ isOver }, drop] = useDrop({
     accept: ['PHOTO', 'ITEM'],
-    drop: (item: any) => {
-      console.log("Item dropped on room:", item);
-      console.log(`Item type: ${item.type}, Item ID: ${item.id}, Room ID: ${room.id}`);
+    drop: (item: DraggedEntity) => {
+      console.warn("Item dropped on room:", item);
+      console.warn(`Item type: ${item.type}, Item ID: ${item.id}, Room ID: ${room.id}`);
       
       // Check if the item has a type property
       if (!item.type) {
@@ -154,7 +158,7 @@ const MainWorkbenchButton = ({
   const [{ isOver }, drop] = useDrop({
     accept: ['PHOTO', 'ITEM'],
     drop: (item: { id: string, type: string }) => {
-      console.log(`${item.type} dropped on main workbench:`, item.id);
+      console.warn(`${item.type} dropped on main workbench:`, item.id);
       if (item.type === 'PHOTO') {
         onPhotoDrop(item.id);
       } else if (item.type === 'ITEM') {

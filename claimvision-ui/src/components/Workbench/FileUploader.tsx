@@ -1,12 +1,21 @@
 "use client";
 
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import { useDropzone } from 'react-dropzone';
+import { useDropzone, FileRejection } from 'react-dropzone';
 import { ArrowUpTrayIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import UploadPlaceholderCard from './UploadPlaceholderCard';
 
+interface UploadedFileRef {
+  id?: string;
+  file_id?: string;
+  file_name: string;
+  status?: FileStatus;
+  url?: string;
+}
+
 interface FileUploaderProps {
   claimId: string;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onUploadComplete: (newFiles: any[]) => void;
   maxFileSize?: number; // in bytes, default 10MB
   maxFiles?: number; // default 10
@@ -42,18 +51,19 @@ export default function FileUploader({
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [processingFiles, setProcessingFiles] = useState<any[]>([]);
+  const [processingFiles, setProcessingFiles] = useState<UploadedFileRef[]>([]);
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
 
   // Handle dropped or selected files
-  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: any[]) => {
+  const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
     // Handle rejected files (too large, wrong type, etc.)
     if (rejectedFiles.length > 0) {
-      const errorMessages = rejectedFiles.map(rejection => {
-        if (rejection.file.size > maxFileSize) {
-          return `${rejection.file.name} exceeds the maximum file size of ${maxFileSize / (1024 * 1024)}MB`;
+      const errorMessages = rejectedFiles.map(({ file, errors }) => {
+        if (file.size > maxFileSize) {
+          return `${file.name} exceeds the maximum file size of ${maxFileSize / (1024 * 1024)}MB`;
         }
-        return `${rejection.file.name} could not be added`;
+        const first = errors[0]?.message ?? 'could not be added';
+        return `${file.name} ${first}`;
       });
       setErrors(prev => [...prev, ...errorMessages]);
       return;
@@ -139,7 +149,14 @@ export default function FileUploader({
   };
 
   // Upload a single batch of files
-  const uploadBatch = async (batch: FileWithStatus[]): Promise<any> => {
+  interface UploadBatchResponse {
+    data?: {
+      files_queued?: UploadedFileRef[];
+    };
+    error_details?: string;
+  }
+
+  const uploadBatch = async (batch: FileWithStatus[]): Promise<UploadBatchResponse> => {
     const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
     const uploadEndpoint = `${apiUrl}/claims/${claimId}/files/upload`;
     
@@ -159,8 +176,8 @@ export default function FileUploader({
       room_id: roomId
     };
     
-    console.log(`Uploading ${batch.length} files to ${uploadEndpoint}`);
-    console.log(`File names: ${filesData.map(f => f.file_name).join(', ')}`);
+    console.warn(`Uploading ${batch.length} files to ${uploadEndpoint}`);
+    console.warn(`File names: ${filesData.map(f => f.file_name).join(', ')}`);
     
     // Upload the files as JSON instead of FormData
     const response = await fetch(uploadEndpoint, {
@@ -173,8 +190,14 @@ export default function FileUploader({
     });
     
     if (!response.ok) {
-      const errorData = await response.json();
-      throw new Error(errorData.error_details || 'Failed to upload files');
+      let errorDetails = 'Failed to upload files';
+      try {
+        const errorData: UploadBatchResponse = await response.json();
+        if (errorData.error_details) errorDetails = errorData.error_details;
+      } catch {
+        // ignore JSON parse errors
+      }
+      throw new Error(errorDetails);
     }
     
     return await response.json();
@@ -222,7 +245,7 @@ export default function FileUploader({
       )
     );
 
-    const uploadedFiles: any[] = [];
+    const uploadedFiles: UploadedFileRef[] = [];
     const failedBatches: { batch: FileWithStatus[], error: string }[] = [];
 
     // Upload each batch
@@ -230,15 +253,16 @@ export default function FileUploader({
       const batch = batches[i];
       try {
         const result = await uploadBatch(batch);
-        console.log(`Batch ${i+1}/${batches.length} upload successful:`, result);
+        console.warn(`Batch ${i+1}/${batches.length} upload successful:`, result);
         
         if (result.data && Array.isArray(result.data.files_queued)) {
-          uploadedFiles.push(...result.data.files_queued);
+          const queued = result.data.files_queued ?? [];
+          uploadedFiles.push(...queued);
           
           // Update file statuses to uploaded
           setFiles(prev => 
             prev.map(file => {
-              const matchedFile = result.data.files_queued.find((f: any) => 
+              const matchedFile = queued.find((f) => 
                 f.file_name === file.file.name
               );
               if (matchedFile && file.status === 'uploading') {
@@ -253,15 +277,16 @@ export default function FileUploader({
             })
           );
         }
-      } catch (error: any) {
+      } catch (error: unknown) {
         console.error(`Batch ${i+1}/${batches.length} upload error:`, error);
-        failedBatches.push({ batch, error: error.message });
+        const message = error instanceof Error ? error.message : 'Unknown upload error';
+        failedBatches.push({ batch, error: message });
         
         // Update file statuses to failed
         setFiles(prev => 
           prev.map(file => {
             if (batch.includes(file)) {
-              return { ...file, status: 'failed', error: error.message };
+              return { ...file, status: 'failed', error: message };
             }
             return file;
           })
@@ -288,6 +313,63 @@ export default function FileUploader({
   };
 
   // Poll for file status updates
+  const checkFileStatus = useCallback(async () => {
+    if (processingFiles.length === 0) return;
+
+    const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
+    const fileIds = processingFiles.map(file => file.file_id || file.id).join(',');
+    const statusEndpoint = `${apiUrl}/files?ids=${fileIds}`;
+
+    try {
+      const response = await fetch(statusEndpoint, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${authToken}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch file status');
+      }
+
+      const result = await response.json();
+      if (result.data && Array.isArray(result.data.files)) {
+        const updatedFiles: UploadedFileRef[] = result.data.files;
+        
+        // Update file statuses
+        setFiles(prev => 
+          prev.map(file => {
+            const matchedFile = updatedFiles.find((f) => 
+              f.id === file.id
+            );
+            if (matchedFile) {
+              return { 
+                ...file, 
+                status: (matchedFile.status as FileStatus) ?? file.status
+              };
+            }
+            return file;
+          })
+        );
+
+        // Remove processed files from the polling list
+        setProcessingFiles(prev => 
+          prev.filter(file => {
+            const matchedFile = updatedFiles.find((f) => 
+              (f.file_id || f.id) === (file.file_id || file.id)
+            );
+            return !matchedFile || 
+                  (matchedFile.status !== 'processed' && 
+                   matchedFile.status !== 'analyzed' && 
+                   matchedFile.status !== 'error');
+          })
+        );
+      }
+    } catch (error) {
+      console.error('Error checking file status:', error);
+    }
+  }, [processingFiles, authToken]);
+
   const startPollingFileStatus = useCallback(() => {
     // Clear any existing polling interval
     if (pollingInterval) {
@@ -315,65 +397,7 @@ export default function FileUploader({
     return () => {
       clearInterval(interval);
     };
-  }, [processingFiles, authToken]);
-
-  // Check the status of uploaded files
-  const checkFileStatus = async () => {
-    if (processingFiles.length === 0) return;
-
-    const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
-    const fileIds = processingFiles.map(file => file.file_id || file.id).join(',');
-    const statusEndpoint = `${apiUrl}/files?ids=${fileIds}`;
-
-    try {
-      const response = await fetch(statusEndpoint, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch file status');
-      }
-
-      const result = await response.json();
-      if (result.data && Array.isArray(result.data.files)) {
-        const updatedFiles = result.data.files;
-        
-        // Update file statuses
-        setFiles(prev => 
-          prev.map(file => {
-            const matchedFile = updatedFiles.find((f: any) => 
-              f.id === file.id
-            );
-            if (matchedFile) {
-              return { 
-                ...file, 
-                status: matchedFile.status as FileStatus
-              };
-            }
-            return file;
-          })
-        );
-
-        // Remove processed files from the polling list
-        setProcessingFiles(prev => 
-          prev.filter(file => {
-            const matchedFile = updatedFiles.find((f: any) => 
-              (f.file_id || f.id) === (file.file_id || file.id)
-            );
-            return !matchedFile || 
-                  (matchedFile.status !== 'processed' && 
-                   matchedFile.status !== 'analyzed' && 
-                   matchedFile.status !== 'error');
-          })
-        );
-      }
-    } catch (error) {
-      console.error('Error checking file status:', error);
-    }
-  };
+  }, [processingFiles, checkFileStatus, pollingInterval]);
 
   // Cleanup polling on component unmount
   useEffect(() => {

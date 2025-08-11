@@ -32,7 +32,7 @@ class WorkbenchApi {
   // Reset mock data (useful for tests)
   resetMockData(): void {
     // This is just a placeholder for test compatibility
-    console.log("Mock data reset");
+    console.warn("Mock data reset");
   }
 }
 
