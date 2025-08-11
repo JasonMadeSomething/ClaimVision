@@ -21,6 +21,8 @@ export const mockItems: Item[] = Array.from({ length: 5 }, (_, i) => ({
   photoIds: [`photo-${i * 2}`, `photo-${i * 2 + 1}`],
   roomId: i < 2 ? "room-1" : (i < 4 ? "room-2" : null),
   replacementValue: Math.floor(Math.random() * 1000) + 100,
+  unit_cost: 100,
+  quantity: 1,
 }));
 
 // Mock rooms data
@@ -52,6 +54,8 @@ export const defaultItemDetailsPanelProps = {
     photoIds: ['photo-0', 'photo-1'],
     roomId: 'room-1',
     replacementValue: 500,
+    unit_cost: 100,
+    quantity: 1,
   },
   photos: mockPhotos.filter(p => p.itemId === 'item-0'),
   rooms: mockRooms,
