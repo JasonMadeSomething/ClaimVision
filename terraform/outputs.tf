@@ -143,3 +143,27 @@ output "s3_upload_notification_queue_url" {
 output "s3_upload_notification_queue_arn" {
   value = module.application.s3_upload_notification_queue_arn
 }
+
+output "outbound_messages_queue_url" {
+  value = module.application.outbound_messages_queue_url
+}
+
+output "outbound_messages_queue_arn" {
+  value = module.application.outbound_messages_queue_arn
+}
+
+output "outbound_messages_queue_name" {
+  value = module.application.outbound_messages_queue_name
+}
+
+output "batch_tracking_queue_url" {
+  value = module.application.batch_tracking_queue_url
+}
+
+output "batch_tracking_queue_arn" {
+  value = module.application.batch_tracking_queue_arn
+}
+
+output "batch_tracking_queue_name" {
+  value = module.application.batch_tracking_queue_name
+}

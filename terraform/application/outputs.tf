@@ -30,6 +30,30 @@ output "cognito_update_queue_arn" {
   value = module.sqs.cognito_update_queue_arn
 }
 
+output "outbound_messages_queue_url" {
+  value = module.sqs.outbound_messages_queue_url
+}
+
+output "outbound_messages_queue_arn" {
+  value = module.sqs.outbound_messages_queue_arn
+}
+
+output "outbound_messages_queue_name" {
+  value = module.sqs.outbound_messages_queue_name
+}
+
+output "batch_tracking_queue_url" {
+  value = module.sqs.batch_tracking_queue_url
+}
+
+output "batch_tracking_queue_arn" {
+  value = module.sqs.batch_tracking_queue_arn
+}
+
+output "batch_tracking_queue_name" {
+  value = module.sqs.batch_tracking_queue_name
+}
+
 output "s3_upload_notification_queue_url" {
   value = module.sqs.s3_upload_notification_queue_url
 }
