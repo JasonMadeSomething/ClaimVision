@@ -38,19 +38,19 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     // If already signed in, don't try to sign in again
     if (user) {
       return;
     }
-    
+
     setLoading(true);
     setError("");
     setNotice("");
 
     try {
       console.warn("SignInForm: Attempting to sign in");
-      
+
       // Call the login API directly
       const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
       const response = await fetch(`${apiUrl}/auth/login`, {
@@ -59,7 +59,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          username: email,
+          email: email,
           password
         })
       });
@@ -71,18 +71,18 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
 
       const loginData = await response.json();
       console.warn("SignInForm: Sign-in successful");
-      
+
       if (!loginData.data || !loginData.data.id_token) {
         throw new Error('Invalid response from server - missing authentication tokens');
       }
-      
+
       // Update the auth context with the user
       // We need to refresh the session to get the updated tokens
       await setUser(loginData.data);
-      
+
       // Close the modal
       onClose();
-      
+
       // Redirect to my claims page
       router.push('/my-claims');
     } catch (err: unknown) {
@@ -116,7 +116,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
   return (
     <div className="p-4">
       <h2 className="text-xl font-bold mb-4">Sign In</h2>
-      
+
       {user && (
         <div className="mb-4">
           <div className="bg-yellow-100 border border-yellow-400 text-yellow-700 px-4 py-3 rounded mb-4">
@@ -130,7 +130,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       )}
-      
+
       <form onSubmit={handleSignIn} className="space-y-4">
         <div>
           <label htmlFor="email" className="block text-sm font-medium text-gray-700">

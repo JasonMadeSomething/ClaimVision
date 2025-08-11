@@ -26,13 +26,13 @@ def lambda_handler(event, _context):
 
         # Parse request body
         body = json.loads(event.get("body", "{}"))
-        username = body.get("username")
+        email = body.get("email")
         confirmation_code = body.get("code")
 
-        if not username or not confirmation_code:
+        if not email or not confirmation_code:
             missing_fields = []
-            if not username:
-                missing_fields.append("username")
+            if not email:
+                missing_fields.append("email")
             if not confirmation_code:
                 missing_fields.append("code")
             return response.api_response(400, error_details="Missing required fields", missing_fields=missing_fields)
@@ -40,7 +40,7 @@ def lambda_handler(event, _context):
         # Confirm the user's email
         _cognito_response = cognito_client.confirm_sign_up(
             ClientId=os.getenv("COGNITO_USER_POOL_CLIENT_ID"),
-            Username=username,
+            Username=email,
             ConfirmationCode=confirmation_code
         )
 
@@ -50,10 +50,10 @@ def lambda_handler(event, _context):
 
     except botocore.exceptions.ClientError as e:
         error_code = e.response["Error"]["Code"]
-        
+
         if error_code == "CodeMismatchException":
             return response.api_response(400, error_details="Invalid confirmation code")
-        
+
         if error_code == "ExpiredCodeException":
             return response.api_response(400, error_details="Confirmation code expired. Please request a new one")
 
@@ -62,7 +62,7 @@ def lambda_handler(event, _context):
 
         logger.error("Unexpected Cognito error: %s - %s", error_code, str(e))
         return response.api_response(500, error_details="Internal server error")
-    
+
     except Exception as e:
         logger.error("Unexpected error during confirmation: %s", str(e))
         return response.api_response(500, error_details="Internal server error")
