@@ -3,12 +3,16 @@
 import { useState, useEffect } from "react";
 import { useRouter } from 'next/navigation';
 import { useAuth } from "@/context/AuthContext";
+import ConfirmSignUp from './ConfirmSignUp';
 
 export default function SignInForm({ onClose }: { onClose: () => void }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [confirmEmail, setConfirmEmail] = useState("");
   const router = useRouter();
   const { user, setUser, signOut, isLoading } = useAuth();
 
@@ -24,6 +28,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
     try {
       await signOut();
       setError("");
+      setNotice("");
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("Sign-out error:", message);
@@ -41,6 +46,7 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
     
     setLoading(true);
     setError("");
+    setNotice("");
 
     try {
       console.warn("SignInForm: Attempting to sign in");
@@ -82,7 +88,14 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
       console.error("Sign-in error:", message);
-      setError(message);
+      // If the user is not confirmed, open the confirmation modal with the current email
+      if (message.toLowerCase().includes('not confirmed')) {
+        setShowConfirm(true);
+        setConfirmEmail(email);
+        setError("");
+      } else {
+        setError(message);
+      }
     } finally {
       setLoading(false);
     }
@@ -152,6 +165,11 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
             {error}
           </div>
         )}
+        {notice && !user && (
+          <div className="text-green-600 text-sm">
+            {notice}
+          </div>
+        )}
         <div className="flex flex-col space-y-3">
           <button
             type="submit"
@@ -169,6 +187,22 @@ export default function SignInForm({ onClose }: { onClose: () => void }) {
           </button>
         </div>
       </form>
+
+      {/* Confirmation Modal when user is not confirmed */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md w-full">
+            <ConfirmSignUp
+              username={confirmEmail}
+              onSuccess={() => {
+                setShowConfirm(false);
+                setNotice('Account confirmed! Please sign in.');
+              }}
+              onCancel={() => setShowConfirm(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }
