@@ -3,7 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 from models import File
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, enhanced_lambda_handler
+from utils.lambda_utils import extract_uuid_param, enhanced_lambda_handler
 from utils.access_control import has_permission
 from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
@@ -39,9 +39,9 @@ def lambda_handler(event, context, db_session, user, path_params, resources):
     success, result = extract_uuid_param(event, "file_id")
     if not success:
         return result  # Return error response
-        
+
     file_id = result
-    
+
     # Retrieve the file
     file_data = db_session.query(File).filter(
         File.id == file_id
@@ -49,7 +49,7 @@ def lambda_handler(event, context, db_session, user, path_params, resources):
 
     if not file_data:
         return response.api_response(404, error_details="File not found")
-    
+
     # Check if user has edit permission on the claim
     if not has_permission(
         user=user,
@@ -59,11 +59,11 @@ def lambda_handler(event, context, db_session, user, path_params, resources):
         resource_id=file_data.claim_id
     ):
         return response.api_response(403, error_details="You do not have permission to delete files in this claim")
-    
+
     # Check if file is attached to a claim
     if file_data.claim_id is None:
         return response.api_response(400, error_details="Files must be attached to a claim")
-    
+
     # Perform soft delete
     try:
         # Check for an existing deleted file with the same hash
@@ -72,22 +72,22 @@ def lambda_handler(event, context, db_session, user, path_params, resources):
             File.deleted,
             File.id != file_data.id
         ).first()
-        
+
         if existing_deleted_file:
             # If there's already a deleted file with the same hash, hard delete it
             logger.info(f"Found existing deleted file with same hash. Hard deleting file: {existing_deleted_file.id}")
             db_session.delete(existing_deleted_file)
-            
+
         # Soft delete the current file - only set these values if it's not already deleted
         if not file_data.deleted:
             file_data.deleted = True
             file_data.deleted_at = datetime.now(timezone.utc)
             file_data.updated_at = datetime.now(timezone.utc)
         db_session.commit()
-        
+
         # Return a 204 No Content response for successful deletion
         return response.api_response(204)
-        
+
     except SQLAlchemyError as e:
         logger.error(f"Database error deleting file: {str(e)}")
         db_session.rollback()

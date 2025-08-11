@@ -11,7 +11,7 @@ from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
 from utils.lambda_utils import enhanced_lambda_handler
- 
+
 
 logger = get_logger(__name__)
 
@@ -25,11 +25,11 @@ if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
 def upload_to_s3(s3_key, file_data):
     """
     Upload file data to S3 bucket.
-    
+
     Args:
         s3_key (str): S3 object key
         file_data (bytes): Binary file data to upload
-        
+
     Raises:
         BotoCoreError, ClientError: If S3 upload fails
     """
@@ -75,52 +75,52 @@ def lambda_handler(event, context, db_session, user, body, path_params, resource
     # Check for multiple files attempt
     if "files" in body:
         return response.api_response(400, error_details="Only one file can be replaced at a time")
-        
+
     file_name = body.get("file_name")
     file_data_b64 = body.get("file_data")
-    
+
     # Decode base64 file data
     try:
         file_data = base64.b64decode(file_data_b64)
     except Exception:
         return response.api_response(400, error_details="Invalid base64 encoding")
-    
+
     # Check if file is empty
     if len(file_data) == 0:
         return response.api_response(400, error_details="File data is empty")
-        
+
     # Check file size (10MB limit)
     if len(file_data) > 10 * 1024 * 1024:  # 10MB in bytes
         return response.api_response(400, error_details="File size exceeds the allowed limit")
-        
+
     # Validate file extension
     if "." not in file_name:
         return response.api_response(400, error_details="Invalid file format")
-        
+
     # Check for invalid file extensions
     file_extension = file_name.split(".")[-1].lower()
     allowed_extensions = ["jpg", "jpeg", "png"]
     if file_extension not in allowed_extensions:
         return response.api_response(400, error_details="Invalid file format. Allowed formats: jpg, jpeg, png")
-    
+
     # Use loaded resource from decorator (404 if not found handled by decorator)
     file_record = resources.get("file")
-    
+
     # Calculate file hash
     file_hash = sha256(file_data).hexdigest()
-    
+
     try:
         # Upload file to S3 using the existing S3 key
         upload_to_s3(file_record.s3_key, file_data)
-        
+
         # Update file record in database
         file_record.file_name = file_name
         file_record.file_size = len(file_data)
         file_record.file_hash = file_hash
         file_record.updated_at = datetime.now(timezone.utc)
-        
+
         db_session.commit()
-        
+
         # Format the response
         file_response = {
             "id": str(file_record.id),
@@ -133,13 +133,13 @@ def lambda_handler(event, context, db_session, user, body, path_params, resource
             "file_hash": file_record.file_hash,
             "metadata": file_record.file_metadata or {}
         }
-        
+
         return response.api_response(200, data=file_response)
-        
+
     except (BotoCoreError, ClientError) as s3_error:
         logger.error("S3 error replacing file: %s", str(s3_error))
         return response.api_response(500, error_details="Failed to upload file to storage")
-        
+
     except SQLAlchemyError as db_error:
         logger.error("Database error replacing file: %s", str(db_error))
         db_session.rollback()

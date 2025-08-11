@@ -20,7 +20,6 @@ from utils.logging_utils import get_logger
 from utils.lambda_utils import get_sqs_client, get_s3_client, enhanced_lambda_handler
 from utils.response import api_response
 from models.file import File
-from models.claim import Claim
 from database.database import get_db_session as db_get_session
 from sqlalchemy.exc import SQLAlchemyError
 from models.room import Room
@@ -376,14 +375,27 @@ def lambda_handler(event, context, db_session, user, path_params, resources, bod
     household_id = user.household_id
     logger.info(f"User household ID: {household_id}")
     
+    # Extract room_id and files from the request body (works for both JSON and multipart branches)
+    room_id = body.get("room_id") if body else None
+    files = body.get("files", []) if body else []
+
+    # Validate required parameters
+    if not files or not isinstance(files, list):
+        logger.warning("Missing or invalid files in request")
+        return api_response(400, error_details='Files are required and must be a list.')
+        
+    if not household_id:
+        logger.warning("Missing household_id in user object")
+        return api_response(400, error_details='Household ID is required.')
+
     # Use loaded claim and derive UUID
     claim_uuid = claim.id
     logger.info(f"Valid claim ID: {claim_uuid}")
     
     # Check for the room if provided
-    if body.get("room_id"):
+    if room_id:
         try:
-            room_uuid = uuid.UUID(body["room_id"])
+            room_uuid = uuid.UUID(room_id)
             room = db_session.query(Room).filter_by(id=room_uuid, claim_id=claim_uuid).first()
             if not room:
                 return api_response(404, error_details='Room not found.')
