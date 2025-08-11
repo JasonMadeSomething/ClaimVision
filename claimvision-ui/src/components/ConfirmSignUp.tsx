@@ -38,9 +38,11 @@ export default function ConfirmSignUp({ username, onSuccess, onCancel }: Confirm
       }
       
       onSuccess();
-    } catch (err: any) {
-      console.error("❌ Confirmation error:", err.message);
-      setError(err.message);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("❌ Confirmation error:", err);
+      const message = err instanceof Error ? err.message : 'Failed to confirm account';
+      setError(message);
     } finally {
       setLoading(false);
     }

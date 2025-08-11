@@ -48,7 +48,6 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
       
       // Create a default title using the date of loss
       const title = `${formattedDate} Claim`;
-      console.log(`Creating claim with title: ${title} and date of loss: ${dateOfLoss}`);
       
       // Create the claim with minimal required information
       const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
@@ -58,7 +57,6 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
         description: "Claim details to be added"
       };
       
-      console.log(`Sending POST request to ${apiUrl}/claims with payload:`, payload);
       
       const response = await fetch(`${apiUrl}/claims`, {
         method: "POST",
@@ -69,16 +67,15 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
         body: JSON.stringify(payload)
       });
 
-      console.log(`Response status: ${response.status}`);
       
       if (!response.ok) {
         const errorText = await response.text();
+        // eslint-disable-next-line no-console
         console.error(`Error response: ${errorText}`);
         throw new Error(errorText || "Failed to create claim");
       }
 
       const data = await response.json();
-      console.log(`Claim created successfully with ID: ${data.id}`);
       
       // Close the modal before redirecting
       onClose();
@@ -88,9 +85,11 @@ export default function DateOfLossModal({ onClose }: DateOfLossModalProps) {
       
       // Redirect to the workbench without query params
       router.push('/workbench');
-    } catch (err: any) {
-      console.error("Error creating claim:", err.message);
-      setError(err.message);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.error("Error creating claim:", err);
+      const message = err instanceof Error ? err.message : 'Failed to create claim';
+      setError(message);
     } finally {
       setLoading(false);
     }

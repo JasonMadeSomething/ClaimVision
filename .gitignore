@@ -105,3 +105,5 @@ scripts/config.json
 terraform/tfplan
 scripts/init_database.py
 scripts/secrets.json
+terraform_outputs.json
+claimvision-ui/lint-results.txt

@@ -1,11 +1,19 @@
-import os
+"""WebSocket $connect handler for authenticating Cognito JWTs and
+storing connection info in DynamoDB.
+
+Performs basic rate limiting per user and verifies tokens against the
+user pool JWKs.
+"""
+
 import json
+import os
 import time
-import boto3
 import urllib.request
+
+import boto3
+from botocore.exceptions import ClientError
 from jose import jwk, jwt
 from jose.utils import base64url_decode
-from urllib.parse import parse_qs
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
@@ -13,7 +21,7 @@ table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE_NAME'))
 cognito_user_pool_id = os.environ.get('COGNITO_USER_POOL_ID')
 region = os.environ.get('AWS_REGION', 'us-east-1')
 
-def lambda_handler(event, context):
+def lambda_handler(event, _context):
     """
     Handle WebSocket $connect route.
     Validates JWT token using Cognito and stores connection details in DynamoDB.
@@ -85,7 +93,7 @@ def lambda_handler(event, context):
             'body': json.dumps({'message': 'Connected'})
         }
         
-    except Exception as e:
+    except (ValueError, ClientError) as e:
         print(f"Error in connect handler: {str(e)}")
         return {
             'statusCode': 401,
@@ -118,7 +126,7 @@ def verify_cognito_token(token):
     # Find the key matching the kid
     key = next((k for k in keys if k['kid'] == kid), None)
     if not key:
-        raise Exception('Public key not found in jwks.json')
+        raise ValueError('Public key not found in jwks.json')
     
     # Construct the public key
     public_key = jwk.construct(key)
@@ -129,14 +137,14 @@ def verify_cognito_token(token):
     
     # Verify the signature
     if not public_key.verify(message.encode('utf-8'), decoded_signature):
-        raise Exception('Signature verification failed')
+        raise ValueError('Signature verification failed')
     
     # Verify the claims
     claims = jwt.get_unverified_claims(token)
     
     # Check expiration
     if time.time() > claims['exp']:
-        raise Exception('Token is expired')
+        raise ValueError('Token is expired')
     
     # Check audience (client_id)
     # Note: This check is optional and depends on your security requirements

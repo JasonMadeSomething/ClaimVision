@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { XMarkIcon, ArrowPathIcon, HomeIcon, ArrowsRightLeftIcon, TagIcon, TrashIcon } from "@heroicons/react/24/outline";
+import { XMarkIcon, ArrowPathIcon, TagIcon, TrashIcon } from "@heroicons/react/24/outline";
 import { Item, Photo, Room } from "@/types/workbench";
 
 interface ItemDetailsPanelProps {
@@ -53,7 +53,7 @@ const EditableField = ({ value, onSave, placeholder, multiline, validate, 'data-
       try {
         await onSave(editValue);
         setIsEditing(false);
-      } catch (err) {
+      } catch {
         // Keep the edited value but show error in parent
         return;
       }
@@ -163,7 +163,7 @@ export default function ItemDetailsPanel({
 
   // Filter photos based on selected labels
   const filteredPhotos = selectedLabels.length > 0
-    ? photos.filter(photo => 
+    ? photos.filter(photo =>
         selectedLabels.some(label => photo.labels && photo.labels.includes(label))
       )
     : photos;
@@ -182,7 +182,7 @@ export default function ItemDetailsPanel({
   };
 
   const toggleLabel = (label: string) => {
-    setSelectedLabels(prev => 
+    setSelectedLabels(prev =>
       prev.includes(label)
         ? prev.filter(l => l !== label)
         : [...prev, label]
@@ -196,7 +196,7 @@ export default function ItemDetailsPanel({
           <h2 className="text-xl font-semibold">Item Details</h2>
           <div className="flex space-x-2">
             {onDeleteItem && (
-              <button 
+              <button
                 onClick={() => {
                   if (window.confirm('Are you sure you want to delete this item?')) {
                     onDeleteItem();
@@ -209,8 +209,8 @@ export default function ItemDetailsPanel({
                 <TrashIcon className="h-5 w-5" />
               </button>
             )}
-            <button 
-              onClick={onClose} 
+            <button
+              onClick={onClose}
               className="p-1.5 rounded-full text-gray-500 hover:bg-gray-100"
               title="Close Panel"
             >
@@ -451,8 +451,8 @@ export default function ItemDetailsPanel({
           )}
           <div className="grid grid-cols-2 gap-2">
             {filteredPhotos.map((photo) => (
-              <div 
-                key={photo.id} 
+              <div
+                key={photo.id}
                 className="relative rounded-lg overflow-hidden"
                 data-testid="photo-item"
               >
@@ -465,12 +465,12 @@ export default function ItemDetailsPanel({
                   <div className="absolute bottom-0 left-0 right-0 bg-black/50 p-1">
                     <div className="flex flex-wrap gap-1">
                       {photo.labels.map((label, index) => (
-                        <span 
-                          key={index} 
+                        <span
+                          key={index}
                           className={`
                             text-xs px-1 py-0.5 rounded
-                            ${selectedLabels.includes(label) 
-                              ? 'bg-blue-500 text-white' 
+                            ${selectedLabels.includes(label)
+                              ? 'bg-blue-500 text-white'
                               : 'bg-gray-500 text-white'}
                           `}
                           data-testid="photo-label"
@@ -483,14 +483,14 @@ export default function ItemDetailsPanel({
                 )}
                 <div className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                   <div className="flex space-x-1">
-                    <button 
+                    <button
                       onClick={() => onRemovePhoto(photo.id)}
                       className="p-1 bg-white rounded-full shadow-md hover:bg-gray-100"
                       title="Remove from Item"
                     >
                       <XMarkIcon className="h-4 w-4 text-gray-700" />
                     </button>
-                    <button 
+                    <button
                       onClick={() => {
                         onUpdate({
                           ...item,
@@ -503,7 +503,7 @@ export default function ItemDetailsPanel({
                       <ArrowPathIcon className="h-4 w-4 text-gray-700" />
                     </button>
                     {onDeletePhoto && (
-                      <button 
+                      <button
                         onClick={() => {
                           if (window.confirm('Are you sure you want to delete this photo?')) {
                             onDeletePhoto(photo.id);

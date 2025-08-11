@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect } from 'react';
-import { Photo, Item, SearchMode } from '@/types/workbench';
+import { Photo, Item } from '@/types/workbench';
 import { useDrag, useDrop } from 'react-dnd';
 import { Menu } from '@headlessui/react';
 import { EllipsisVerticalIcon, CubeIcon, TrashIcon } from '@heroicons/react/24/outline';
@@ -61,16 +61,16 @@ const Card: React.FC<CardProps> = ({
 }) => {
   // Create refs
   const ref = useRef<HTMLDivElement>(null);
-  
+
   // Define the drag functionality
   const [{ isDragging }, drag] = useDrag({
     type: type.toUpperCase(),
     item: () => {
       if (onDragStart) onDragStart(data.id);
-      const dragItem = { 
-        id: data.id, 
-        index, 
-        type: type.toUpperCase() 
+      const dragItem = {
+        id: data.id,
+        index,
+        type: type.toUpperCase()
       };
       console.log("Dragging item with type:", dragItem.type);
       return dragItem;
@@ -86,7 +86,7 @@ const Card: React.FC<CardProps> = ({
   // Define the drop functionality for rearranging
   const [{ isOver }, drop] = useDrop({
     accept: type.toUpperCase(),
-    hover: (item: { id: string; index: number }, monitor) => {
+    hover: (item: { id: string; index: number }, _) => {
       if (item.id === data.id) return;
       if (onRearrange) {
         onRearrange(index, item.id);
@@ -172,7 +172,7 @@ const Card: React.FC<CardProps> = ({
       }
 
       const data = await response.json();
-      
+
       if (data?.data?.files && data.data.files.length > 0) {
         const fileData = data.data.files[0];
         if (fileData.url) {
@@ -197,7 +197,7 @@ const Card: React.FC<CardProps> = ({
 
   // Get the labels
   const labels = isPhoto(data) ? data.labels : [];
-  
+
   // State for tooltip visibility
   const [showTooltip, setShowTooltip] = useState(false);
 
@@ -222,7 +222,7 @@ const Card: React.FC<CardProps> = ({
         hover:shadow-lg
         ${className}
       `}
-      style={{ 
+      style={{
         touchAction: 'none',
         transform: isBeingDragged ? 'rotate(2deg)' : undefined
       }}
@@ -238,7 +238,7 @@ const Card: React.FC<CardProps> = ({
           alt={title}
           className="w-full h-full object-cover"
         />
-        
+
         {/* Item indicator overlay */}
         {isItem(data) && (
           <div className="absolute top-2 right-2 bg-indigo-100 rounded-full p-1.5 shadow-md">
@@ -265,10 +265,10 @@ const Card: React.FC<CardProps> = ({
               key={idx}
               className={`
                 inline-block px-2 py-1 text-xs rounded-full cursor-pointer
-                ${activeFilterLabel === label 
-                  ? 'bg-blue-500 text-white' 
+                ${activeFilterLabel === label
+                  ? 'bg-blue-500 text-white'
                   : isHighlighted && label.toLowerCase().includes((searchQuery || '').toLowerCase())
-                    ? 'bg-blue-100 text-blue-800' 
+                    ? 'bg-blue-100 text-blue-800'
                     : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
               `}
               onClick={(e) => {
@@ -281,7 +281,7 @@ const Card: React.FC<CardProps> = ({
           ))}
           {labels.length > 3 && (
             <div className="relative">
-              <span 
+              <span
                 className="inline-block px-2 py-1 text-xs rounded-full bg-gray-100 text-gray-700 hover:bg-gray-200 cursor-pointer"
                 onClick={(e) => {
                   e.stopPropagation(); // Prevent card selection
@@ -290,10 +290,10 @@ const Card: React.FC<CardProps> = ({
               >
                 +{labels.length - 3}
               </span>
-              
+
               {/* Tooltip for remaining labels */}
               {showTooltip && (
-                <div 
+                <div
                   className="absolute z-50 bottom-full left-0 mb-2 p-2 bg-white rounded-md shadow-lg border border-gray-200 min-w-48 max-w-xs"
                 >
                   <div className="flex flex-wrap gap-1">
@@ -302,8 +302,8 @@ const Card: React.FC<CardProps> = ({
                         key={idx}
                         className={`
                           inline-block px-2 py-1 text-xs rounded-full cursor-pointer
-                          ${activeFilterLabel === label 
-                            ? 'bg-blue-500 text-white' 
+                          ${activeFilterLabel === label
+                            ? 'bg-blue-500 text-white'
                             : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}
                         `}
                         onClick={(e) => {
@@ -334,7 +334,7 @@ const Card: React.FC<CardProps> = ({
           )}
         </div>
       )}
-        
+
         {/* Item-specific details */}
         {type === 'item' && isItem(data) && (
           <>

@@ -8,7 +8,7 @@ export function initializeAmplify() {
   if (isConfigured.configured) return;
 
   try {
-    console.warn('[Amplify] 🚀 Initializing Amplify...');
+    // Initialization starting
 
     const userPoolId = process.env.NEXT_PUBLIC_COGNITO_USER_POOL_ID;
     const userPoolClientId = process.env.NEXT_PUBLIC_COGNITO_CLIENT_ID;
@@ -16,6 +16,7 @@ export function initializeAmplify() {
     const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
 
     if (!userPoolId || !userPoolClientId || !region || !apiUrl) {
+      // eslint-disable-next-line no-console
       console.error('[Amplify] ❌ Missing Environment Variables:', {
         userPoolId,
         userPoolClientId,
@@ -43,12 +44,12 @@ export function initializeAmplify() {
             custom_header: async () => {
               try {
                 const tokens = await cognitoUserPoolsTokenProvider.getTokens();
-                console.warn('[Amplify] 🔑 Retrieved Tokens:', tokens);
                 return {
                   Authorization: `Bearer ${tokens?.accessToken?.toString() || ''}`,
                   'Accept': 'application/json'
                 };
               } catch (error) {
+                // eslint-disable-next-line no-console
                 console.error('[Amplify] ❌ Failed to fetch auth token:', error);
                 return {};
               }
@@ -58,12 +59,11 @@ export function initializeAmplify() {
       }
     };
 
-    console.warn('[Amplify] ✅ Amplify Configuration:', config);
     Amplify.configure(config);
 
     isConfigured.configured = true;
-    console.warn('[Amplify] 🎉 Amplify configured successfully!');
   } catch (error) {
+    // eslint-disable-next-line no-console
     console.error('[Amplify] ❌ Error Configuring Amplify:', error);
     throw error;
   }

@@ -17,7 +17,7 @@ def lambda_handler(event, context):
     - Implement heartbeat mechanism
     """
     connection_id = event.get('requestContext', {}).get('connectionId')
-    
+
     if not connection_id:
         return {
             'statusCode': 400,
