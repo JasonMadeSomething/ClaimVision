@@ -2371,12 +2371,12 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref BatchTrackingTable
         - SQSSendMessagePolicy:
-            QueueName: !GetAtt OutboundMessagesQueue.QueueName
+            QueueName: !Ref OutboundMessagesQueueName
       Events:
         BatchTrackingEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt BatchTrackingQueue.Arn
+            Queue: !Ref BatchTrackingQueueARN
             BatchSize: 10
 
 Outputs:
