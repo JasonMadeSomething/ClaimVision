@@ -1,6 +1,6 @@
 import os
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_url
+from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_url, enhanced_lambda_handler
 from utils.response import api_response
 from models.file import File
 from utils.access_control import has_permission
@@ -15,8 +15,12 @@ if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
     logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
     S3_BUCKET_NAME = "claimvision-dev-bucket"
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['file_id'],
+    auto_load_resources={'file_id': 'File'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Lambda handler to retrieve a specific file by ID.
     

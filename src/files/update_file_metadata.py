@@ -4,7 +4,7 @@ import uuid
 from models import File
 from models.room import Room
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, enhanced_lambda_handler
 from utils.logging_utils import get_logger
 from utils.access_control import has_permission
 from utils.vocab_enums import ResourceTypeEnum, PermissionAction
@@ -12,8 +12,16 @@ from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None, body=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=['file_id'],
+    auto_load_resources={'file_id': 'File'},
+    validation_schema={
+        'room_id': {'type': str, 'required': False}
+    }
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources):
     """
     Handles updating the room association for a file.
 

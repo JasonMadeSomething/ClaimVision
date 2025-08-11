@@ -4,6 +4,7 @@ import React, { useState, useRef, useCallback, useEffect } from 'react';
 import { useDropzone, FileRejection } from 'react-dropzone';
 import { ArrowUpTrayIcon, XMarkIcon } from '@heroicons/react/24/outline';
 import UploadPlaceholderCard from './UploadPlaceholderCard';
+import { useWebSocket } from '@/context/WebSocketContext';
 
 interface UploadedFileRef {
   id?: string;
@@ -51,8 +52,13 @@ export default function FileUploader({
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [processingFiles, setProcessingFiles] = useState<UploadedFileRef[]>([]);
-  const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  // Track active batch IDs for websocket correlation
+  const activeBatchIdsRef = useRef<Set<string>>(new Set());
+  // Map fileId -> index in files[] for quick updates from websocket events
+  const fileIdIndexRef = useRef<Record<string, number>>({});
+
+  // WebSocket integration
+  const { subscribeToClaim, lastMessage } = useWebSocket();
 
   // Handle dropped or selected files
   const onDrop = useCallback((acceptedFiles: File[], rejectedFiles: FileRejection[]) => {
@@ -148,39 +154,44 @@ export default function FileUploader({
     return batches;
   };
 
-  // Upload a single batch of files
-  interface UploadBatchResponse {
+  // Upload a single batch via presigned S3 URLs
+  interface PresignedFile {
+    name: string;
+    status: string;
+    upload_url?: string;
+    s3_key?: string;
+    method?: string;
+    content_type?: string | null;
+    expires_in?: number;
+    claim_id?: string;
+    room_id?: string | null;
+    timestamp?: string;
+    file_id: string;
+    batch_id: string;
+    error?: string;
+  }
+
+  interface UploadUrlResponseBody {
     data?: {
-      files_queued?: UploadedFileRef[];
+      files?: PresignedFile[];
+      batch_id?: string;
     };
     error_details?: string;
   }
 
-  const uploadBatch = async (batch: FileWithStatus[]): Promise<UploadBatchResponse> => {
+  const uploadBatch = async (batch: FileWithStatus[]): Promise<PresignedFile[]> => {
     const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
-    const uploadEndpoint = `${apiUrl}/claims/${claimId}/files/upload`;
-    
-    // Instead of using FormData for files, we'll create a JSON structure with base64-encoded files
-    // This ensures compatibility with the backend's expected format
-    const filesData = await Promise.all(batch.map(async (fileWithStatus) => {
-      // Convert the file to base64 using the FileReader API
-      return {
-        file_name: fileWithStatus.file.name,
-        file_data: await readFileAsBase64(fileWithStatus.file)
-      };
-    }));
-    
-    // Create the request body
+    const uploadEndpoint = `${apiUrl}/claims/${claimId}/upload-url`;
+
+    // Build request body expected by backend
     const requestBody = {
-      files: filesData,
-      room_id: roomId
+      files: batch.map(b => ({ name: b.file.name, content_type: b.file.type || undefined })),
+      room_id: roomId ?? undefined
     };
-    
-    console.warn(`Uploading ${batch.length} files to ${uploadEndpoint}`);
-    console.warn(`File names: ${filesData.map(f => f.file_name).join(', ')}`);
-    
-    // Upload the files as JSON instead of FormData
-    const response = await fetch(uploadEndpoint, {
+
+    console.warn(`Requesting presigned URLs for ${batch.length} files -> ${uploadEndpoint}`);
+
+    const resp = await fetch(uploadEndpoint, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${authToken}`,
@@ -188,39 +199,86 @@ export default function FileUploader({
       },
       body: JSON.stringify(requestBody)
     });
-    
-    if (!response.ok) {
-      let errorDetails = 'Failed to upload files';
+
+    if (!resp.ok) {
+      let detail = 'Failed to request upload URLs';
       try {
-        const errorData: UploadBatchResponse = await response.json();
-        if (errorData.error_details) errorDetails = errorData.error_details;
-      } catch {
-        // ignore JSON parse errors
+        const body: UploadUrlResponseBody = await resp.json();
+        if (body?.error_details) detail = body.error_details;
+      } catch {}
+      throw new Error(detail);
+    }
+
+    const body: UploadUrlResponseBody = await resp.json();
+    const presigned = body?.data?.files ?? [];
+
+    // Track batch for WS correlation
+    const batchId = body?.data?.batch_id;
+    if (batchId) {
+      activeBatchIdsRef.current.add(batchId);
+    }
+
+    // Assign file IDs to local entries early for WS matching
+    setFiles(prev => prev.map(f => {
+      const match = presigned.find(p => p.name === f.file.name);
+      if (match) {
+        // keep current status (likely 'uploading')
+        const idx = prev.indexOf(f);
+        if (idx >= 0 && match.file_id) {
+          fileIdIndexRef.current[match.file_id] = idx;
+        }
+        return { ...f, id: match.file_id };
       }
-      throw new Error(errorDetails);
-    }
-    
-    return await response.json();
-  };
-  
-  // Helper function to read a file as base64
-  const readFileAsBase64 = (file: File): Promise<string> => {
-    if (!(file instanceof Blob)) {
-      throw new Error('Invalid file type');
-    }
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        // Get the base64 string (remove the data URL prefix)
-        const result = reader.result as string;
-        const base64String = result.split(',')[1];
-        resolve(base64String);
-      };
-      reader.onerror = () => reject(reader.error);
-      
-      // Read the file as a data URL
-      reader.readAsDataURL(file);
+      return f;
+    }));
+
+    // Now perform uploads to S3
+    const uploadResults = await Promise.allSettled(presigned.map(async (p) => {
+      if (p.status !== 'ready' || !p.upload_url) {
+        throw new Error(p.error || `Upload URL not ready for ${p.name}`);
+      }
+      const file = batch.find(b => b.file.name === p.name)?.file;
+      if (!file) throw new Error(`File not found in batch for ${p.name}`);
+
+      const putResp = await fetch(p.upload_url, {
+        method: p.method || 'PUT',
+        headers: {
+          'Content-Type': p.content_type || 'application/octet-stream'
+        },
+        body: file
+      });
+      if (!putResp.ok) {
+        throw new Error(`S3 upload failed (${putResp.status}) for ${p.name}`);
+      }
+      return p;
+    }));
+
+    const succeeded: PresignedFile[] = [];
+    const failedMsgs: string[] = [];
+
+    uploadResults.forEach((res, i) => {
+      const p = presigned[i];
+      if (res.status === 'fulfilled') {
+        succeeded.push(p);
+      } else {
+        failedMsgs.push(`${p?.name || 'file'}: ${res.reason?.message || 'upload failed'}`);
+      }
     });
+
+    if (failedMsgs.length) {
+      setErrors(prev => [...prev, ...failedMsgs.map(m => `Upload failed: ${m}`)]);
+    }
+
+    // Update UI statuses for succeeded uploads
+    setFiles(prev => prev.map(f => {
+      const ok = succeeded.find(p => p.name === f.file.name);
+      if (ok && f.status === 'uploading') {
+        return { ...f, status: 'uploaded', progress: 100, id: ok.file_id };
+      }
+      return f;
+    }));
+
+    return presigned;
   };
 
   // Handle file upload with chunking
@@ -252,31 +310,17 @@ export default function FileUploader({
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
       try {
-        const result = await uploadBatch(batch);
-        console.warn(`Batch ${i+1}/${batches.length} upload successful:`, result);
-        
-        if (result.data && Array.isArray(result.data.files_queued)) {
-          const queued = result.data.files_queued ?? [];
-          uploadedFiles.push(...queued);
-          
-          // Update file statuses to uploaded
-          setFiles(prev => 
-            prev.map(file => {
-              const matchedFile = queued.find((f) => 
-                f.file_name === file.file.name
-              );
-              if (matchedFile && file.status === 'uploading') {
-                return { 
-                  ...file, 
-                  status: 'uploaded',
-                  id: matchedFile.file_id || matchedFile.id,
-                  progress: 100 
-                };
-              }
-              return file;
-            })
-          );
-        }
+        const presigned = await uploadBatch(batch);
+        console.warn(`Batch ${i+1}/${batches.length} presigned + upload complete`, presigned);
+
+        // Build minimal uploaded refs for callback
+        const queued = presigned.map(p => ({
+          id: p.file_id,
+          file_id: p.file_id,
+          file_name: p.name,
+          status: 'uploaded' as FileStatus
+        }));
+        uploadedFiles.push(...queued);
       } catch (error: unknown) {
         console.error(`Batch ${i+1}/${batches.length} upload error:`, error);
         const message = error instanceof Error ? error.message : 'Unknown upload error';
@@ -303,110 +347,60 @@ export default function FileUploader({
     // Call the completion handler with the new files
     if (uploadedFiles.length > 0) {
       onUploadComplete(uploadedFiles);
-      setProcessingFiles(uploadedFiles);
-      
-      // Start polling for file status
-      startPollingFileStatus();
     }
 
     setUploading(false);
   };
 
-  // Poll for file status updates
-  const checkFileStatus = useCallback(async () => {
-    if (processingFiles.length === 0) return;
-
-    const apiUrl = process.env.NEXT_PUBLIC_API_GATEWAY;
-    const fileIds = processingFiles.map(file => file.file_id || file.id).join(',');
-    const statusEndpoint = `${apiUrl}/files?ids=${fileIds}`;
-
-    try {
-      const response = await fetch(statusEndpoint, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${authToken}`
-        }
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to fetch file status');
-      }
-
-      const result = await response.json();
-      if (result.data && Array.isArray(result.data.files)) {
-        const updatedFiles: UploadedFileRef[] = result.data.files;
-        
-        // Update file statuses
-        setFiles(prev => 
-          prev.map(file => {
-            const matchedFile = updatedFiles.find((f) => 
-              f.id === file.id
-            );
-            if (matchedFile) {
-              return { 
-                ...file, 
-                status: (matchedFile.status as FileStatus) ?? file.status
-              };
-            }
-            return file;
-          })
-        );
-
-        // Remove processed files from the polling list
-        setProcessingFiles(prev => 
-          prev.filter(file => {
-            const matchedFile = updatedFiles.find((f) => 
-              (f.file_id || f.id) === (file.file_id || file.id)
-            );
-            return !matchedFile || 
-                  (matchedFile.status !== 'processed' && 
-                   matchedFile.status !== 'analyzed' && 
-                   matchedFile.status !== 'error');
-          })
-        );
-      }
-    } catch (error) {
-      console.error('Error checking file status:', error);
-    }
-  }, [processingFiles, authToken]);
-
-  const startPollingFileStatus = useCallback(() => {
-    // Clear any existing polling interval
-    if (pollingInterval) {
-      clearInterval(pollingInterval);
-    }
-
-    // Set up a new polling interval
-    const interval = setInterval(async () => {
-      if (processingFiles.length === 0) {
-        clearInterval(interval);
-        setPollingInterval(null);
-        return;
-      }
-
-      try {
-        await checkFileStatus();
-      } catch (error) {
-        console.error('Error checking file status:', error);
-      }
-    }, 5000); // Poll every 5 seconds
-
-    setPollingInterval(interval);
-
-    // Cleanup on component unmount
-    return () => {
-      clearInterval(interval);
-    };
-  }, [processingFiles, checkFileStatus, pollingInterval]);
-
-  // Cleanup polling on component unmount
+  // Subscribe to claim for websocket events
   useEffect(() => {
-    return () => {
-      if (pollingInterval) {
-        clearInterval(pollingInterval);
-      }
+    if (claimId) {
+      try { subscribeToClaim(claimId); } catch {}
+    }
+  }, [claimId, subscribeToClaim]);
+
+  // React to websocket messages
+  useEffect(() => {
+    if (!lastMessage || !lastMessage.type) return;
+    const t = String(lastMessage.type);
+    // data is expected as object containing batchId/itemId and possibly success/fileName
+    const data = (lastMessage.data ?? {}) as Record<string, unknown>;
+    const batchId = (data['batchId'] as string | undefined) ?? (data['batch_id'] as string | undefined);
+    if (!batchId || !activeBatchIdsRef.current.has(batchId)) return;
+
+    const itemId = String((data['itemId'] as string | undefined) ?? '');
+    const targetIdx = itemId && fileIdIndexRef.current[itemId] !== undefined
+      ? fileIdIndexRef.current[itemId]
+      : -1;
+
+    const updateStatus = (status: FileStatus) => {
+      if (targetIdx < 0) return;
+      setFiles(prev => prev.map((f, idx) => idx === targetIdx ? { ...f, status } : f));
     };
-  }, [pollingInterval]);
+
+    const success = (() => {
+      const raw = data['success'];
+      if (typeof raw === 'boolean') return raw;
+      const status = data['status'];
+      if (typeof status === 'string') {
+        const s = status.toLowerCase();
+        return s === 'success' || s === 'completed' || s === 'processed';
+      }
+      return false;
+    })();
+
+    if (t === 'file_processed') {
+      updateStatus(success ? 'processed' : 'error');
+    } else if (t === 'analysis_completed' || t === 'analysis_complete') {
+      updateStatus(success ? 'analyzed' : 'error');
+    } else if (t === 'file_uploaded' || t === 'file_analysis_queued' || t === 'analysis_started') {
+      // Mark as uploaded/awaiting processing
+      updateStatus('uploaded');
+    } else if (t === 'batch_completed' || t === 'batch_complete') {
+      // Stop tracking this batch
+      activeBatchIdsRef.current.delete(batchId);
+    }
+  }, [lastMessage]);
 
   // Trigger file input click
   const openFileDialog = () => {

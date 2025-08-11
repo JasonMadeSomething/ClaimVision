@@ -4,12 +4,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from models import Label
 from models.file_labels import FileLabel
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler
 
 # Configure logging
 logger = get_logger(__name__)
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session: Session = None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['label_id'],
+    permissions={'resource_type': 'label', 'action': 'delete', 'path_param': 'label_id'},
+    auto_load_resources={'label_id': 'Label'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Handles the deletion of user-created labels globally.
     
@@ -25,23 +30,11 @@ def lambda_handler(event: dict, context=None, _context=None, db_session: Session
     Returns:
         dict: API response confirming deletion or error.
     """
-    # Extract and validate label ID
-    success, result = extract_uuid_param(event, "label_id")
-    if not success:
-        return result  # Return error response
-        
-    label_id = result
+    label = resources['label']
+    label_id = label.id
 
     try:
-        # Check if the label exists
-        label = db_session.query(Label).filter(Label.id == label_id).first()
-        if not label:
-            return response.api_response(404, error_details="Label not found.")
-            
-        # Check if user has access to the label's household
-        if label.household_id != user.household_id:
-            # Return 404 for security - don't reveal that the label exists
-            return response.api_response(404, error_details="Label not found.")
+        # Label already loaded and permission checked by decorator
 
         # Prevent AI labels from being deleted globally
         if label.is_ai_generated:
@@ -68,5 +61,3 @@ def lambda_handler(event: dict, context=None, _context=None, db_session: Session
         logger.exception(f"Unexpected error deleting label: {str(e)}")
         return response.api_response(500, error_details=f'Internal Server Error: {str(e)}')
 
-    finally:
-        db_session.close()

@@ -29,7 +29,7 @@ class FileSchema(BaseModel):
     description : Optional[str]
         User-provided description of the file.
     claim_id : Optional[str]
-        Associated insurance claim ID, if applicable.
+        Associated insurance claim ID (UUID string), if applicable.
     labels : List[str]
         List of labels from Rekognition or user-provided labels.
     status : str
@@ -52,7 +52,7 @@ class FileSchema(BaseModel):
     s3_key: str  # Path in S3 bucket
     uploaded_at: Optional[str] = None  # Will be set in Lambda function
     description: Optional[str] = None
-    claim_id: Optional[int] = None  # If associated with a claim
+    claim_id: Optional[str] = None  # If associated with a claim
     labels: List[str] = []  # Rekognition labels / user-provided labels
     status: str = "uploaded"  # uploaded, processing, processed
     file_url: str

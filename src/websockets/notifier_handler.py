@@ -3,6 +3,7 @@ import json
 import boto3
 import logging
 from datetime import datetime
+from boto3.dynamodb.conditions import Attr
 
 # Set up logging
 logger = logging.getLogger()
@@ -10,7 +11,6 @@ logger.setLevel(logging.INFO)
 
 # Initialize DynamoDB and API Gateway Management clients
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE_NAME'))
 sqs = boto3.client('sqs')
 
 def lambda_handler(event, context):
@@ -30,20 +30,27 @@ def lambda_handler(event, context):
             'body': json.dumps({'message': 'No records found in event'})
         }
     
-    # Initialize API Gateway Management API client
-    # Extract the API ID from the endpoint URL
+    # Validate environment and init clients lazily
     endpoint_url = os.environ.get('WS_API_ENDPOINT')
+    connections_table_name = os.environ.get('CONNECTIONS_TABLE_NAME')
     if not endpoint_url:
-        logger.error("Missing WS_API_ENDPOINT environment variable")
+        logger.error("Missing WS_API_ENDPOINT environment variable", extra={"event": event})
         return {
             'statusCode': 500,
-            'body': json.dumps({'message': 'Missing API endpoint configuration'})
+            'body': json.dumps({'error': 'MissingEnv', 'message': 'Missing API endpoint configuration'})
+        }
+    if not connections_table_name:
+        logger.error("Missing CONNECTIONS_TABLE_NAME environment variable", extra={"event": event})
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'MissingEnv', 'message': 'Missing connections table configuration'})
         }
     
     gateway_management = boto3.client(
         'apigatewaymanagementapi',
         endpoint_url=endpoint_url
     )
+    table = dynamodb.Table(connections_table_name)
     
     # Process each SQS message
     results = []
@@ -68,16 +75,29 @@ def lambda_handler(event, context):
                     KeyConditionExpression='userId = :uid',
                     ExpressionAttributeValues={':uid': user_id}
                 ).get('Items', [])
-                connections.extend(user_connections)
+                # Filter out expired TTL
+                now_ts = int(datetime.utcnow().timestamp())
+                connections.extend([c for c in user_connections if int(c.get('ttl', 0)) > now_ts])
             elif claim_id:
-                # TODO: Implement query for connections subscribed to a specific claim
-                # This would require a GSI on claimId or a scan with a filter
-                pass
+                # Deliver only to connections subscribed to this claim
+                logger.info(f"Delivering by claim subscription: {claim_id}")
+                scan_kwargs = {
+                    'FilterExpression': Attr('subscriptions').contains(claim_id) & Attr('ttl').gt(int(datetime.utcnow().timestamp())),
+                    'ProjectionExpression': 'connectionId'
+                }
+                done = False
+                while not done:
+                    resp = table.scan(**scan_kwargs)
+                    connections.extend(resp.get('Items', []))
+                    if 'LastEvaluatedKey' in resp:
+                        scan_kwargs['ExclusiveStartKey'] = resp['LastEvaluatedKey']
+                    else:
+                        done = True
             else:
                 # Broadcast to all connections (use with caution)
                 logger.warning("Broadcasting message to all connections")
                 # Use scan with pagination to handle large numbers of connections
-                scan_kwargs = {}
+                scan_kwargs = {'FilterExpression': Attr('ttl').gt(int(datetime.utcnow().timestamp()))}
                 done = False
                 while not done:
                     response = table.scan(**scan_kwargs)
@@ -103,6 +123,25 @@ def lambda_handler(event, context):
                         'timestamp': datetime.utcnow().isoformat(),
                         'data': message_body.get('data', {})
                     }
+
+                    # If this is a batch-tracker style notification, promote notificationType to the top-level type
+                    notification_type = message_body.get('notificationType')
+                    if notification_type:
+                        payload['type'] = notification_type
+                        # Ensure batch identifiers and notificationType are present in data for consumers
+                        try:
+                            data_obj = payload.get('data') or {}
+                            if isinstance(data_obj, dict):
+                                if 'batchId' not in data_obj and 'batchId' in message_body:
+                                    data_obj['batchId'] = message_body.get('batchId')
+                                if 'itemId' not in data_obj and 'itemId' in message_body:
+                                    data_obj['itemId'] = message_body.get('itemId')
+                                if 'notificationType' not in data_obj:
+                                    data_obj['notificationType'] = notification_type
+                                payload['data'] = data_obj
+                        except Exception:
+                            # Non-fatal; continue with original data
+                            pass
                     
                     # Send the message
                     gateway_management.post_to_connection(

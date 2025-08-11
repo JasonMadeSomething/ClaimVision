@@ -7,16 +7,18 @@ system, ensuring proper authorization and data validation.
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler
 from models.room import Room
 from models.claim_rooms import ClaimRoom
-from models.claim import Claim
-from utils.access_control import has_permission
-from utils.vocab_enums import PermissionAction, ResourceTypeEnum
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=["claim_id"],
+    auto_load_resources={"claim_id": "Claim"},
+    permissions={"resource_type": "CLAIM", "action": "READ", "path_param": "claim_id"}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources) -> dict:
     """
     Handles retrieving all rooms associated with a claim for the authenticated user's household.
 
@@ -30,32 +32,12 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         dict: API response containing list of rooms or error message
     """
     try:
-        # Extract claim ID from path parameters
-        if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
-            logger.warning("Missing claim ID in path parameters")
-            return response.api_response(400, error_details="Claim ID is required in path parameters")
-
-        # Extract and validate claim_id from path parameters
-        success, result = extract_uuid_param(event, "claim_id")
-        if not success:
-            return result  # Return error response
-
-        claim_id = result
-
-        # Verify claim exists
-        claim = db_session.query(Claim).filter(
-            Claim.id == claim_id,
-            Claim.deleted.is_(False)
-        ).first()
-
-        if not claim:
+        # Use decorator-provided params and resources
+        claim_id = path_params["claim_id"]
+        claim = resources.get("claim")
+        if hasattr(claim, "deleted") and getattr(claim, "deleted") is True:
             logger.info("Claim not found or access denied: %s", claim_id)
             return response.api_response(404, error_details="Claim not found or access denied")
-
-        # Verify user has access to claim
-        if not has_permission(user, PermissionAction.READ, ResourceTypeEnum.CLAIM.value, db_session, claim_id, user.group_id):
-            logger.info("User %s does not have access to claim %s", user.id, claim_id)
-            return response.api_response(403, error_details="User does not have access to claim")
 
         # Query rooms associated with the claim through the join table
         rooms = db_session.query(Room).join(

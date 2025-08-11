@@ -5,6 +5,7 @@ import "./globals.css"; // Ensure global styles are loaded
 import { initializeAmplify } from "@/amplifyConfig"; // ✅ Import Amplify config
 import Navigation from "@/components/Navigation";
 import { AuthProvider } from "@/context/AuthContext";
+import { WebSocketProvider } from "@/context/WebSocketContext";
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   useEffect(() => {
@@ -15,10 +16,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <body className="min-h-screen bg-gray-50">
         <AuthProvider>
-          <Navigation />
-          <main className="container mx-auto px-4 py-8">
-            {children}
-          </main>
+          <WebSocketProvider>
+            <Navigation />
+            <main className="container mx-auto px-4 py-8">
+              {children}
+            </main>
+          </WebSocketProvider>
         </AuthProvider>
       </body>
     </html>

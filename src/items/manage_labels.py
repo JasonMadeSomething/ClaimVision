@@ -5,7 +5,7 @@ This module handles adding and removing labels from an item.
 """
 import uuid
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler
 from utils import response
 from models.item import Item
 from models.item_labels import ItemLabel
@@ -14,8 +14,14 @@ from sqlalchemy.exc import SQLAlchemyError
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=['item_id'],
+    permissions={'resource_type': 'item', 'action': 'write', 'path_param': 'item_id'},
+    auto_load_resources={'item_id': 'Item'}
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources):
     """
     Lambda handler to add or remove labels from an item.
     
@@ -29,12 +35,8 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
     Returns:
         dict: API response with label management status or error
     """
-    # Extract item_id from path parameters
-    path_params = event.get("pathParameters") or {}
-    success, result = extract_uuid_param(path_params, "item_id")
-    if not success:
-        return result  # This is already an API response with error details
-    item_id = result
+    item = resources['item']
+    item_id = item.id
     
     # Validate request body
     add_labels = body.get("add", [])
@@ -44,10 +46,6 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
         return response.api_response(400, error_details="Request must include at least one label to add or remove")
     
     try:
-        # Verify the item exists and belongs to the user's household
-        item = db_session.query(Item).filter(Item.id == item_id).first()
-        if not item:
-            return response.api_response(404, error_details="Item not found")
         
         # Process labels to add
         labels_added = 0
@@ -71,7 +69,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
                 
                 if not existing_item_label:
                     # Create new association
-                    db_session.add(ItemLabel(item_id=item_id, label_id=label_id))
+                    db_session.add(ItemLabel(item_id=item_id, label_id=label_id, group_id=item.group_id))
                     labels_added += 1
                 elif existing_item_label.deleted is True:
                     # Reactivate deleted association

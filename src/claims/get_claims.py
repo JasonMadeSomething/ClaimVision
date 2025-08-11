@@ -1,6 +1,6 @@
 from models.claim import Claim
 from utils.vocab_enums import PermissionAction, ResourceTypeEnum
-from utils.lambda_utils import standard_lambda_handler
+from utils.lambda_utils import standard_lambda_handler, enhanced_lambda_handler
 from utils.auth_utils import extract_user_id, get_authenticated_user
 from utils import response
 from sqlalchemy.exc import SQLAlchemyError
@@ -9,8 +9,8 @@ from utils.access_control import has_permission, AccessDeniedError
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event, context, db_session):
+@enhanced_lambda_handler(requires_auth=True)
+def lambda_handler(event, context, db_session, user):
     try:
         # Extract user ID from the event
         success, result = extract_user_id(event)

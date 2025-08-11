@@ -6,7 +6,7 @@ from models.claim import Claim
 from models.user import User
 from utils.vocab_enums import MembershipStatusEnum
 from utils.access_control import has_permission
-from utils.lambda_utils import standard_lambda_handler
+from utils.lambda_utils import standard_lambda_handler, enhanced_lambda_handler
 from utils.auth_utils import extract_user_id
 from utils import response
 from utils.logging_utils import get_logger
@@ -17,8 +17,16 @@ from models.group_membership import GroupMembership
 # Configure logging
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True, requires_body=True, required_fields=["title", "date_of_loss"])
-def lambda_handler(event, context, db_session):
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    required_fields=["title", "date_of_loss"],
+    validation_schema={
+        'title': {'type': str, 'max_length': 255},
+        'description': {'type': str, 'max_length': 1000, 'required': False}
+    }
+)
+def lambda_handler(event, context, db_session, user, body):
     body = json.loads(event["body"])
 
     # Get the authenticated user ID

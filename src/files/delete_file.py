@@ -3,7 +3,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from datetime import datetime, timezone
 from models import File
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, enhanced_lambda_handler
 from utils.access_control import has_permission
 from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
@@ -12,8 +12,12 @@ logger = get_logger(__name__)
 
 
 # Configure logging
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['file_id'],
+    auto_load_resources={'file_id': 'File'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Handles deleting a file from both AWS S3 and PostgreSQL.
 

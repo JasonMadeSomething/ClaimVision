@@ -7,7 +7,7 @@ presigned URLs for file access when needed.
 import os
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
-from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_url
+from utils.lambda_utils import get_s3_client, extract_uuid_param, generate_presigned_url, enhanced_lambda_handler
 from utils import response
 from models.file import File
 from models.claim import Claim
@@ -24,8 +24,8 @@ if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
     logger.warning("S3_BUCKET_NAME appears to be an SSM parameter path: %s. Using default bucket for local testing.", S3_BUCKET_NAME)
     S3_BUCKET_NAME = "claimvision-dev-bucket"
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(requires_auth=True)
+def lambda_handler(event, context, db_session, user) -> dict:
     """
     Lambda handler to retrieve files for the authenticated user based on permissions.
     Can optionally filter by claim_id if provided in path parameters.

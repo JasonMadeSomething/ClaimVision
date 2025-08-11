@@ -6,7 +6,7 @@ with optional seeding of labels from the file to the item.
 """
 import uuid
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler
 from utils import response
 from models.item import Item
 from models.file import File
@@ -18,8 +18,15 @@ from sqlalchemy.exc import SQLAlchemyError
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=['item_id'],
+    permissions={'resource_type': 'item', 'action': 'write', 'path_param': 'item_id'},
+    auto_load_resources={'item_id': 'Item'},
+    required_fields=['file_id']
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources):
     """
     Lambda handler to associate a file with an item.
     
@@ -33,19 +40,12 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
     Returns:
         dict: API response with association status or error
     """
-    # Extract item_id from path parameters
-    success, result = extract_uuid_param(event, "item_id")
-    if not success:
-        return result  # This is already an API response with error details
-    item_id = result
+    item = resources['item']
+    item_id = item.id
     
-    # Extract file_id from body
-    file_id_str = body.get("file_id")
-    if not file_id_str:
-        return response.api_response(400, error_details="Missing required field: file_id")
-    
+    # Extract file_id from body (already validated by decorator)
     try:
-        file_id = uuid.UUID(file_id_str)
+        file_id = uuid.UUID(body['file_id'])
     except ValueError:
         return response.api_response(400, error_details="Invalid file ID format")
     
@@ -53,10 +53,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=
     seed_labels = body.get("seed_labels", False)
     
     try:
-        # Verify the item exists and belongs to the user's household
-        item = db_session.query(Item).filter(Item.id == item_id).first()
-        if not item:
-            return response.api_response(404, error_details="Item not found")
+        # Item already loaded by decorator
         
         # Verify the file exists and belongs to the user's household
         file = db_session.query(File).filter(File.id == file_id).first()

@@ -7,7 +7,7 @@ with an optional claim ID parameter to indicate which rooms are associated with 
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler, extract_uuid_param
 from models.room import Room
 from models.claim_rooms import ClaimRoom
 from models.claim import Claim
@@ -17,8 +17,8 @@ from sqlalchemy import select
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(requires_auth=True)
+def lambda_handler(event, context, db_session, user) -> dict:
     """
     Handles retrieving all available rooms, with an optional claim ID parameter
     to indicate which rooms are associated with a specific claim.

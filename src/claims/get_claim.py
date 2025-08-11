@@ -9,48 +9,38 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from models import Claim
 from utils import response
 from utils.access_control import has_permission
-from utils.lambda_utils import extract_uuid_param, standard_lambda_handler
+from utils.lambda_utils import extract_uuid_param, standard_lambda_handler, enhanced_lambda_handler
 from utils.logging_utils import get_logger
 from utils.vocab_enums import PermissionAction, ResourceTypeEnum
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['claim_id'],
+    permissions={'resource_type': 'claim', 'action': 'read', 'path_param': 'claim_id'},
+    auto_load_resources={'claim_id': 'Claim'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Handles retrieving a claim by ID for the authenticated user's group.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
-        _context (dict): Lambda execution context (unused).
-        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
-        user (User): Authenticated user object (provided by decorator).
+        context (dict): Lambda execution context.
+        db_session (Session): SQLAlchemy session.
+        user (User): Authenticated user object.
+        path_params (dict): Extracted path parameters.
+        resources (dict): Auto-loaded resources.
 
     Returns:
         dict: API response containing the claim details or an error message.
     """
-    # Extract claim ID from path parameters
-    success, result = extract_uuid_param(event, "claim_id")
-    if not success:
-        return result  # Return error response
+    claim = resources['claim']
     
-    claim_id = result
-    
-    try:
-        # Query the claim
-        claim = db_session.query(Claim).filter_by(id=claim_id).first()
-        
-        # Check if claim exists
-        if not claim:
-            return response.api_response(404, error_details="Claim not found")
-        
-        # Check if claim is soft-deleted
-        if claim.deleted:
-            return response.api_response(404, error_details="Claim not found")
-        
-        if not has_permission(user, action=PermissionAction.READ, resource_type=ResourceTypeEnum.CLAIM.value, resource_id=claim.id, db=db_session):
-            logger.warning("User %s does not have permission to read claim %s", user.id, claim.id)
-            return response.api_response(403, error_details="You do not have access to this claim")
+    # Check if claim is soft-deleted
+    if claim.deleted:
+        return response.api_response(404, error_details="Claim not found")
         
         # Convert claim to dictionary for response
         claim_data = {

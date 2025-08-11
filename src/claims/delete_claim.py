@@ -7,7 +7,7 @@ ensuring proper authorization and data integrity.
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, enhanced_lambda_handler
 from models import Claim
 from database.database import get_db_session
 from datetime import datetime, timezone
@@ -17,7 +17,12 @@ from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['claim_id'],
+    permissions={'resource_type': 'claim', 'action': 'write', 'path_param': 'claim_id'},
+    auto_load_resources={'claim_id': 'Claim'}
+)
 def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
     """
     Handles soft deleting a claim for the authenticated user.

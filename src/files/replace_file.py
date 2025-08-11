@@ -9,10 +9,9 @@ from hashlib import sha256
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
 from sqlalchemy.exc import SQLAlchemyError
-from models.file import File
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from database.database import get_db_session
+from utils.lambda_utils import enhanced_lambda_handler
+ 
 
 logger = get_logger(__name__)
 
@@ -41,8 +40,18 @@ def upload_to_s3(s3_key, file_data):
         logger.error("S3 upload failed: %s", str(e))
         raise
 
-@standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event, context=None, _context=None, db_session=None, user=None, body=None):
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=["file_id"],
+    auto_load_resources={"file_id": "File"},
+    permissions={"resource_type": "FILE", "action": "WRITE", "path_param": "file_id"},
+    validation_schema={
+        "file_name": {"type": "string", "required": True},
+        "file_data": {"type": "string", "required": True}
+    }
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources):
     """
     Handles requests to replace an existing file with a new version.
 
@@ -63,29 +72,12 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     Returns:
         dict: API response with updated file details or error
     """
-    # Extract and validate file ID
-    success, result = extract_uuid_param(event, "file_id")
-    if not success:
-        return result  # Return error response
-        
-    file_id = result
-    
-    # Validate request body
-    if not body:
-        return response.api_response(400, error_details="Request body is empty")
-    
     # Check for multiple files attempt
     if "files" in body:
         return response.api_response(400, error_details="Only one file can be replaced at a time")
         
     file_name = body.get("file_name")
     file_data_b64 = body.get("file_data")
-    
-    if not file_name:
-        return response.api_response(400, error_details="File name is required")
-        
-    if not file_data_b64:
-        return response.api_response(400, error_details="File data is empty")
     
     # Decode base64 file data
     try:
@@ -111,14 +103,8 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     if file_extension not in allowed_extensions:
         return response.api_response(400, error_details="Invalid file format. Allowed formats: jpg, jpeg, png")
     
-    # Retrieve the file, ensuring it belongs to user's household
-    file_record = db_session.query(File).filter(
-        File.id == file_id,
-        File.household_id == user.household_id
-    ).first()
-
-    if not file_record:
-        return response.api_response(404, error_details="File not found")
+    # Use loaded resource from decorator (404 if not found handled by decorator)
+    file_record = resources.get("file")
     
     # Calculate file hash
     file_hash = sha256(file_data).hexdigest()

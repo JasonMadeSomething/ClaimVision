@@ -4,14 +4,18 @@ from models.item import Item
 from models.item_files import ItemFile
 from models.item_labels import ItemLabel
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from utils.access_control import has_permission
-from utils.vocab_enums import ResourceTypeEnum, PermissionAction
+from utils.lambda_utils import enhanced_lambda_handler
+import uuid
 
 # Configure logging
 logger = get_logger(__name__)
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event, context=None, _context=None, db_session=None, user=None):
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['item_id'],
+    permissions={'resource_type': 'item', 'action': 'write', 'path_param': 'item_id'},
+    auto_load_resources={'item_id': 'Item'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Deletes an item, removing all file and label associations but preserving files.
 
@@ -24,28 +28,10 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     Returns:
         dict: API response confirming deletion or error message.
     """
-    # Extract and validate item ID
-    success, result = extract_uuid_param(event, "item_id")
-    if not success:
-        return result  # Return error response
-        
-    item_uuid = result
+    item = resources['item']
+    item_uuid = uuid.UUID(path_params['item_id'])
 
     try:
-        # Fetch item
-        item = db_session.query(Item).filter(Item.id == item_uuid).first()
-        if not item:
-            return response.api_response(404, error_details='Item not found.')
-            
-        # Check if user has permission to edit the claim this item belongs to
-        if not has_permission(
-            user=user,
-            action=PermissionAction.WRITE,
-            resource_type=ResourceTypeEnum.CLAIM.value,
-            db=db_session,
-            resource_id=item.claim_id
-        ):
-            return response.api_response(403, error_details='You do not have permission to delete items in this claim.')
 
         # Remove file associations (but keep files intact)
         db_session.query(ItemFile).filter(ItemFile.item_id == item_uuid).delete()
@@ -69,5 +55,3 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
         logger.exception(f"Unexpected error deleting item: {str(e)}")
         return response.api_response(500, error_details='Internal Server Error')
 
-    finally:
-        db_session.close()

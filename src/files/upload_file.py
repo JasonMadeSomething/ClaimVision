@@ -17,7 +17,7 @@ import re
 from botocore.exceptions import ClientError
 
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, get_sqs_client, get_s3_client, extract_uuid_param
+from utils.lambda_utils import get_sqs_client, get_s3_client, enhanced_lambda_handler
 from utils.response import api_response
 from models.file import File
 from models.claim import Claim
@@ -281,17 +281,25 @@ def parse_multipart_form_data(event):
         logger.exception("Full exception details:")
         return None
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=["claim_id"],
+    auto_load_resources={"claim_id": "Claim"},
+    permissions={"resource_type": "CLAIM", "action": "WRITE", "path_param": "claim_id"}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources, body=None) -> dict:
     """
     Handles receiving file uploads and sending them to SQS for processing.
     Supports both JSON with base64-encoded files and multipart form data.
     
     Args:
         event (dict): API Gateway event containing authentication details and file data
-        _context (dict): Lambda execution context (unused)
-        db_session (Session, optional): SQLAlchemy session for testing
-        user (User): Authenticated user object (provided by decorator)
+        context (dict): Lambda execution context (unused)
+        db_session (Session): SQLAlchemy session
+        user (User): Authenticated user object
+        path_params (dict): Path parameters from API Gateway event
+        resources (dict): Loaded resources (Claim object)
+        body (dict, optional): Request body (parsed JSON or multipart form data)
         
     Returns:
         dict: API response containing upload request status
@@ -305,16 +313,13 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     content_type = event.get('headers', {}).get('content-type', '')
     logger.info(f"Content-Type: {content_type}")
     
-    body = None
-    
-    # Extract claim_id from path parameters (required)
-    success, claim_id_or_error = extract_uuid_param(event, 'claim_id')
-    if not success:
-        logger.warning("Missing or invalid claim_id in path parameters")
-        return claim_id_or_error  # This will be the error response from extract_uuid_param
-    
-    claim_id = claim_id_or_error
+    # Use decorator-provided path params/resources and validate claim
+    claim_id = path_params["claim_id"]
+    claim = resources.get("claim")
     logger.info(f"Found claim_id in path parameters: {claim_id}")
+    if hasattr(claim, "deleted") and getattr(claim, "deleted") is True:
+        logger.warning("Claim is deleted")
+        return api_response(404, error_details='Claim not found.')
     
     if content_type and 'multipart/form-data' in content_type:
         logger.info("Processing multipart form data request")
@@ -347,18 +352,19 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         logger.info("Processing JSON request with base64-encoded files")
         
         # Parse the body from the event
-        if 'body' in event:
-            try:
-                if isinstance(event['body'], str):
-                    body = json.loads(event['body'])
-                else:
-                    body = event['body']
-            except json.JSONDecodeError:
-                logger.error("Failed to parse JSON body")
-                return api_response(400, error_details='Invalid JSON body')
-        else:
-            logger.error("No body in request")
-            return api_response(400, error_details='Request body is required')
+        if body is None:
+            if 'body' in event:
+                try:
+                    if isinstance(event['body'], str):
+                        body = json.loads(event['body'])
+                    else:
+                        body = event['body']
+                except json.JSONDecodeError:
+                    logger.error("Failed to parse JSON body")
+                    return api_response(400, error_details='Invalid JSON body')
+            else:
+                logger.error("No body in request")
+                return api_response(400, error_details='Request body is required')
     
     # Log only the structure of the request body, not the actual file data
     body_structure = {}
@@ -370,45 +376,14 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     household_id = user.household_id
     logger.info(f"User household ID: {household_id}")
     
-    # Extract room_id and files from the request body
-    room_id = body.get("room_id") if body else None
-    files = body.get("files", []) if body else []
-    
-    # Validate required parameters
-    if not files or not isinstance(files, list):
-        logger.warning("Missing or invalid files in request")
-        return api_response(400, error_details='Files are required and must be a list.')
-        
-    if not household_id:
-        logger.warning("Missing household_id in user object")
-        return api_response(400, error_details='Household ID is required.')
-    
-    # Validate claim ID format
-    try:
-        claim_uuid = uuid.UUID(claim_id)
-        logger.info(f"Valid claim ID: {claim_uuid}")
-    except ValueError:
-        logger.warning(f"Invalid claim ID format: {claim_id}")
-        return api_response(400, error_details='Invalid claim ID format.')
-    
-    # Check for the claim
-    try:
-        claim = db_session.query(Claim).filter_by(id=claim_uuid, household_id=household_id).first()
-        if not claim:
-            logger.error(f"Claim not found. claim_id: {claim_id}, household_id: {household_id}")
-            return api_response(404, error_details='Claim not found.')
-        logger.info(f"Claim found: {claim.id}")
-    except (ValueError, SQLAlchemyError) as e:
-        if isinstance(e, ValueError):
-            logger.error(f"Invalid claim ID format: {claim_id}")
-            return api_response(400, error_details='Invalid claim ID format. Expected UUID.')
-        logger.error(f"Database error when checking claim: {str(e)}")
-        return api_response(500, error_details='Database error when checking claim.')
+    # Use loaded claim and derive UUID
+    claim_uuid = claim.id
+    logger.info(f"Valid claim ID: {claim_uuid}")
     
     # Check for the room if provided
-    if room_id:
+    if body.get("room_id"):
         try:
-            room_uuid = uuid.UUID(room_id)
+            room_uuid = uuid.UUID(body["room_id"])
             room = db_session.query(Room).filter_by(id=room_uuid, claim_id=claim_uuid).first()
             if not room:
                 return api_response(404, error_details='Room not found.')

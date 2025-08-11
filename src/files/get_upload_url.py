@@ -6,16 +6,12 @@ Files uploaded using these URLs will trigger a separate Lambda function for proc
 """
 import os
 import uuid
-import json
 import mimetypes
 from datetime import datetime, timezone
 
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, get_s3_client, extract_uuid_param, generate_presigned_upload_url
+from utils.lambda_utils import get_s3_client, generate_presigned_upload_url, enhanced_lambda_handler
 from utils.response import api_response
-from models.claim import Claim
-from utils.access_control import has_permission
-from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 from batch.batch_tracker import generate_batch_id, file_uploaded
 
 logger = get_logger(__name__)
@@ -51,8 +47,14 @@ def generate_s3_key(claim_id, file_name, user_id=None):
     else:
         return f"pending/{claim_id}/{file_id}/{safe_file_name}"
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=["claim_id"],
+    auto_load_resources={"claim_id": "Claim"},
+    permissions={"resource_type": "CLAIM", "action": "WRITE", "path_param": "claim_id"}
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources) -> dict:
     """
     Handles generating pre-signed URLs for direct file uploads to S3.
     
@@ -67,30 +69,13 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     """
     logger.info("Starting pre-signed URL generation for file upload")
     
-    # Extract claim_id from path parameters (required)
-    success, claim_id_or_error = extract_uuid_param(event, 'claim_id')
-    if not success:
-        logger.warning("Missing or invalid claim_id in path parameters")
-        return claim_id_or_error  # This will be the error response from extract_uuid_param
-    
-    claim_id = claim_id_or_error
+    # Extract claim_id provided by decorator and ensure claim not deleted
+    claim_id = path_params["claim_id"]
+    claim = resources.get("claim")
     logger.info(f"Found claim_id in path parameters: {claim_id}")
-    
-    # Parse the request body
-    body = None
-    if 'body' in event:
-        try:
-            if isinstance(event['body'], str):
-                body = json.loads(event['body'])
-            else:
-                body = event['body']
-        except json.JSONDecodeError:
-            logger.error("Failed to parse request body as JSON")
-            return api_response(400, error_details="Invalid JSON in request body")
-    
-    if not body:
-        logger.error("No request body provided")
-        return api_response(400, error_details="Request body is required")
+    if hasattr(claim, "deleted") and getattr(claim, "deleted") is True:
+        logger.warning(f"Claim is deleted: {claim_id}")
+        return api_response(404, error_details="Claim not found")
     
     # Extract file information from the request
     files_info = body.get('files', [])
@@ -105,24 +90,8 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     batch_id = generate_batch_id()
     logger.info(f"Generated batch ID for upload session: {batch_id}")
     
-    # Check if the claim exists
+    # Generate pre-signed URLs
     try:
-        claim = db_session.query(Claim).filter(Claim.id == claim_id).first()
-        if not claim:
-            logger.warning(f"Claim not found: {claim_id}")
-            return api_response(404, error_details="Claim not found")
-            
-        # Check if the user has permission to upload files to this claim
-        if not has_permission(
-            db=db_session,
-            user=user,
-            resource_type=ResourceTypeEnum.CLAIM.value,
-            resource_id=claim_id,
-            action=PermissionAction.WRITE
-        ):
-            logger.warning(f"User {user.id} does not have permission to upload files to claim {claim_id}")
-            return api_response(403, error_details="You do not have permission to upload files to this claim")
-        
         # Get S3 client
         s3_client = get_s3_client()
         

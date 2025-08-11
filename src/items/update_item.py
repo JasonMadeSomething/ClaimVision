@@ -1,89 +1,39 @@
-import json
 from utils.logging_utils import get_logger
 import uuid
 
-from database.database import get_db_session
 from models.item import Item
-from models.claim import Claim
-from models.user import User
 from models.room import Room
 from utils import response
-from utils.access_control import has_permission
-from utils.vocab_enums import ResourceTypeEnum, PermissionAction
+from utils.lambda_utils import enhanced_lambda_handler
 
 # Configure logging
 logger = get_logger(__name__)
-def lambda_handler(event, _context, db_session=None):
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=['item_id'],
+    permissions={'resource_type': 'item', 'action': 'write', 'path_param': 'item_id'},
+    auto_load_resources={'item_id': 'Item'}
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources):
     """
     Updates an item's properties.
     
     Parameters:
         event (dict): API Gateway event with item ID and request body.
-        _context (dict): AWS Lambda execution context (unused).
-        db_session (Session, optional): SQLAlchemy session for testing.
+        context (dict): Lambda execution context.
+        db_session (Session): SQLAlchemy session (provided by decorator).
+        user (User): Authenticated user object (provided by decorator).
+        body (dict): Request body (provided by decorator).
+        path_params (dict): Path parameters (provided by decorator).
+        resources (dict): Auto-loaded resources (provided by decorator).
         
     Returns:
         dict: API response with success or error message.
     """
-    db = db_session if db_session else get_db_session()
+    item = resources['item']
     
     try:
-        # Extract user ID from event for authentication
-        user_id_str = event.get("requestContext", {}).get("authorizer", {}).get("user_id")
-        
-        # For testing purposes, allow auth_user to be passed directly
-        if not user_id_str and "auth_user" in event:
-            user_id_str = event.get("auth_user")
-            
-        if not user_id_str:
-            return response.api_response(401, error_details='Authentication required.')
-            
-        try:
-            user_id = uuid.UUID(user_id_str) if not isinstance(user_id_str, uuid.UUID) else user_id_str
-        except ValueError:
-            return response.api_response(400, error_details='Invalid user ID format.')
-
-        # Get item_id from path parameters
-        item_id_str = event.get("pathParameters", {}).get("item_id")
-        if not item_id_str:
-            return response.api_response(400, error_details='Item ID is required.')
-            
-        try:
-            # Handle case where item_id is already a UUID object
-            if isinstance(item_id_str, uuid.UUID):
-                item_id = item_id_str
-            else:
-                item_id = uuid.UUID(item_id_str)
-        except ValueError:
-            return response.api_response(400, error_details='Invalid item ID format.')
-
-        # Parse request body
-        body = json.loads(event.get("body", "{}")) if event.get("body") else {}
-        
-        # Ensure item exists
-        item = db.query(Item).filter(Item.id == item_id).first()
-        if not item:
-            return response.api_response(404, error_details='Item not found.')
-            
-        # Get the claim associated with this item
-        claim = db.query(Claim).filter(Claim.id == item.claim_id).first()
-        if not claim:
-            return response.api_response(404, error_details='Associated claim not found.')
-            
-        # Get the user from the database
-        user = db.query(User).filter(User.id == user_id).first()
-        if not user:
-            return response.api_response(404, error_details='User not found.')
-            
-        # Check if user has permission to edit this claim
-        if not has_permission(
-            user=user,
-            action=PermissionAction.WRITE,
-            resource_type=ResourceTypeEnum.CLAIM.value,
-            db=db,
-            resource_id=item.claim_id
-        ):
-            return response.api_response(403, error_details='You do not have permission to update items in this claim.')
             
         # Handle item property updates (name, description, etc.)
         item_updated = False
@@ -144,7 +94,7 @@ def lambda_handler(event, _context, db_session=None):
                         room_id = uuid.UUID(room_id_str)
                         
                     # Verify the room exists and belongs to the same claim
-                    room = db.query(Room).filter(Room.id == room_id).first()
+                    room = db_session.query(Room).filter(Room.id == room_id).first()
                     if not room:
                         return response.api_response(404, error_details='Room not found.')
                         
@@ -163,7 +113,7 @@ def lambda_handler(event, _context, db_session=None):
         if not item_updated:
             return response.api_response(400, error_details='No updates provided.')
             
-        db.commit()
+        db_session.commit()
         
         # Prepare response data with updated item information
         response_data = {
@@ -190,9 +140,5 @@ def lambda_handler(event, _context, db_session=None):
 
     except Exception as e:
         logger.exception("Unexpected error updating item")
-        db.rollback()
+        db_session.rollback()
         return response.api_response(500, error_details=f'Internal Server Error: {str(e)}')
-
-    finally:
-        if db_session is None and db:
-            db.close()

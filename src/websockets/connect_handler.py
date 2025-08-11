@@ -15,9 +15,13 @@ from botocore.exceptions import ClientError
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE_NAME'))
+# Lazy-init table in handler to allow env validation first
+table = None  # type: ignore
 cognito_user_pool_id = os.environ.get('COGNITO_USER_POOL_ID')
 region = os.environ.get('AWS_REGION', 'us-east-1')
+
+# Module-level JWKS cache by kid for warm invocations
+JWKS_CACHE = {}
 
 def lambda_handler(event, _context):
     """
@@ -33,6 +37,24 @@ def lambda_handler(event, _context):
             'statusCode': 400,
             'body': json.dumps({'message': 'Missing connectionId'})
         }
+
+    # Validate required env vars
+    connections_table_name = os.environ.get('CONNECTIONS_TABLE_NAME')
+    if not connections_table_name:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'MissingEnv', 'message': 'CONNECTIONS_TABLE_NAME is not set'})
+        }
+    if not cognito_user_pool_id:
+        return {
+            'statusCode': 500,
+            'body': json.dumps({'error': 'MissingEnv', 'message': 'COGNITO_USER_POOL_ID is not set'})
+        }
+
+    # Lazy init table
+    global table
+    if table is None:
+        table = dynamodb.Table(connections_table_name)
 
     # Get query string parameters
     query_params = event.get('queryStringParameters', {}) or {}
@@ -57,14 +79,31 @@ def lambda_handler(event, _context):
                 'body': json.dumps({'message': 'Invalid token: missing user ID'})
             }
 
-        # Check for rate limiting - max 5 connections per user
+        # Check for rate limiting - max 5 active connections per user
         user_connections = table.query(
             IndexName='UserIdIndex',
             KeyConditionExpression='userId = :uid',
             ExpressionAttributeValues={':uid': user_id}
         ).get('Items', [])
 
-        if len(user_connections) >= 5:
+        now_ts = int(time.time())
+        active_connections = []
+        expired_connection_ids = []
+        for c in user_connections:
+            if int(c.get('ttl', 0)) > now_ts:
+                active_connections.append(c)
+            else:
+                cid = c.get('connectionId')
+                if cid:
+                    expired_connection_ids.append(cid)
+        # Best-effort cleanup of expired before enforcing limit
+        for cid in expired_connection_ids:
+            try:
+                table.delete_item(Key={'connectionId': cid})
+            except Exception:
+                pass
+
+        if len(active_connections) >= 5:
             return {
                 'statusCode': 429,
                 'body': json.dumps({'message': 'Too many connections for this user'})
@@ -121,19 +160,24 @@ def verify_cognito_token(token):
     headers = jwt.get_unverified_headers(token)
     kid = headers['kid']
 
-    # Get the public keys from Cognito
-    keys_url = f'https://cognito-idp.{region}.amazonaws.com/{cognito_user_pool_id}/.well-known/jwks.json'
-    with urllib.request.urlopen(keys_url) as f:
-        response = f.read()
-    keys = json.loads(response.decode('utf-8'))['keys']
+    # Try cache first
+    public_key = JWKS_CACHE.get(kid)
 
-    # Find the key matching the kid
-    key = next((k for k in keys if k['kid'] == kid), None)
-    if not key:
-        raise ValueError('Public key not found in jwks.json')
-
-    # Construct the public key
-    public_key = jwk.construct(key)
+    if public_key is None:
+        # Fetch JWKS and cache
+        keys_url = f'https://cognito-idp.{region}.amazonaws.com/{cognito_user_pool_id}/.well-known/jwks.json'
+        with urllib.request.urlopen(keys_url) as f:
+            response = f.read()
+        keys = json.loads(response.decode('utf-8'))['keys']
+        # Populate cache
+        for k in keys:
+            try:
+                JWKS_CACHE[k['kid']] = jwk.construct(k)
+            except Exception:
+                continue
+        public_key = JWKS_CACHE.get(kid)
+        if public_key is None:
+            raise ValueError('Public key not found in jwks.json')
 
     # Get the last section of the token (the signature)
     message, encoded_signature = token.rsplit('.', 1)

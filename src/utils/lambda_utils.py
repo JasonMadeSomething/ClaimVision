@@ -17,6 +17,7 @@ import inspect
 import uuid
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union, TypeVar
+import re
 
 import boto3
 from botocore.exceptions import BotoCoreError, ClientError
@@ -194,6 +195,323 @@ def standard_lambda_handler(
             
         return wrapper
     return decorator
+
+
+def enhanced_lambda_handler(
+    requires_auth: bool = True,
+    requires_body: bool = False,
+    required_fields: Optional[List[str]] = None,
+    path_params: Optional[List[str]] = None,
+    permissions: Optional[Dict[str, Any]] = None,
+    validation_schema: Optional[Dict[str, Dict[str, Any]]] = None,
+    auto_load_resources: Optional[Dict[str, str]] = None
+) -> Callable[[HandlerFunction], HandlerFunction]:
+    """
+    Enhanced decorator for Lambda handlers with advanced features.
+    
+    Args:
+        requires_auth: Whether the endpoint requires authentication
+        requires_body: Whether the endpoint requires a request body  
+        required_fields: List of required fields in the request body
+        path_params: List of path parameters to auto-extract and validate as UUIDs
+        permissions: Permission configuration {'resource_type': str, 'action': str, 'path_param': str}
+        validation_schema: Body field validation {'field': {'type': type, 'max_length': int, 'min': num}}
+        auto_load_resources: Resource loading config {'param_name': 'ModelClass'}
+        
+    Returns:
+        Decorated handler function with enhanced capabilities
+    """
+    def decorator(handler_func: HandlerFunction) -> HandlerFunction:
+        @wraps(handler_func)
+        def wrapper(event: Dict[str, Any], context: Dict[str, Any], **kwargs) -> Dict[str, Any]:
+            function_name = handler_func.__name__
+            
+            # Log request
+            http_method = event.get('httpMethod', 'UNKNOWN')
+            path = event.get('path', 'UNKNOWN')
+            logger.info(f"Request started: {http_method} {path} -> {function_name}")
+            
+            # Initialize database session
+            db_session = kwargs.get('db_session')
+            session_created = False
+            
+            try:
+                if db_session is None:
+                    try:
+                        db_session = get_db_session()
+                        session_created = True
+                        logger.debug(f"{function_name}: Created new database session")
+                    except SQLAlchemyError as db_error:
+                        logger.error(f"{function_name}: Failed to get database session: {str(db_error)}")
+                        return response.api_response(500, error_details="Failed to establish database connection")
+                
+                user = None
+                
+                # Authenticate user if required
+                if requires_auth:
+                    logger.debug(f"{function_name}: Extracting user ID from token")
+                    success, user_id_or_response = auth_utils.extract_user_id(event)
+                    if not success:
+                        return user_id_or_response
+
+                    success, user_or_response = auth_utils.get_authenticated_user(db_session, user_id_or_response)
+                    if not success:
+                        return user_or_response
+
+                    user = user_or_response
+                    logger.debug(f"{function_name}: User authenticated: {user.id}")
+                
+                # Process request body if required
+                body_data = {}
+                if requires_body:
+                    logger.debug(f"{function_name}: Processing request body")
+                    try:
+                        body_data = json.loads(event.get("body", "{}"))
+                    except json.JSONDecodeError:
+                        logger.warning(f"{function_name}: Invalid JSON in request body")
+                        return response.api_response(400, error_details="Invalid JSON in request body")
+                
+                    # Validate required fields
+                    if required_fields:
+                        missing = [field for field in required_fields if field not in body_data]
+                        if missing:
+                            logger.warning(f"{function_name}: Missing required fields: {missing}")
+                            return response.api_response(
+                                400, 
+                                message="Bad Request",
+                                error_details="Missing required fields", 
+                                data={"missing_fields": missing}
+                            )
+                    
+                    # Apply validation schema if provided
+                    if validation_schema:
+                        validation_error = _validate_body(body_data, validation_schema)
+                        if validation_error:
+                            return validation_error
+                
+                # Auto-extract path parameters
+                extracted_params = {}
+                if path_params:
+                    for param_name in path_params:
+                        success, result = extract_uuid_param(event, param_name)
+                        if not success:
+                            return result
+                        extracted_params[param_name] = result
+                
+                # Auto-load resources if configured
+                loaded_resources = {}
+                if auto_load_resources and extracted_params:
+                    for param_name, model_class_name in auto_load_resources.items():
+                        if param_name in extracted_params:
+                            resource = _load_resource(db_session, model_class_name, extracted_params[param_name])
+                            if not resource:
+                                return response.api_response(404, error_details=f'{model_class_name} not found')
+                            loaded_resources[param_name.replace('_id', '')] = resource
+                
+                # Check permissions using existing access control system
+                if permissions and requires_auth and user:
+                    permission_error = _check_permissions(
+                        user, permissions, extracted_params, loaded_resources, db_session
+                    )
+                    if permission_error:
+                        return permission_error
+                
+                # Prepare handler parameters
+                handler_params = {
+                    'event': event,
+                    'context': context,
+                    'db_session': db_session,
+                    'user': user,
+                    'body': body_data
+                }
+                
+                # Add extracted parameters
+                if extracted_params:
+                    handler_params['path_params'] = extracted_params
+                
+                # Add loaded resources
+                if loaded_resources:
+                    handler_params['resources'] = loaded_resources
+                
+                # Add any additional kwargs
+                handler_params.update(kwargs)
+                
+                # Get handler signature and filter parameters
+                sig = inspect.signature(handler_func)
+                filtered_params = {}
+                for param_name, param in sig.parameters.items():
+                    if param_name in handler_params:
+                        filtered_params[param_name] = handler_params[param_name]
+                    elif param_name == '_event' and 'event' in handler_params:
+                        filtered_params[param_name] = handler_params['event']
+                    elif param_name == '_context' and 'context' in handler_params:
+                        filtered_params[param_name] = handler_params['context']
+                    elif param.kind == inspect.Parameter.VAR_KEYWORD:
+                        for k, v in handler_params.items():
+                            if k not in filtered_params:
+                                filtered_params[k] = v
+                
+                # Call the handler
+                logger.debug(f"{function_name}: Calling handler with parameters: {filtered_params.keys()}")
+                result = handler_func(**filtered_params)
+                
+                # Log response status
+                status_code = result.get("statusCode", 0)
+                logger.info(f"Request completed: {http_method} {path} -> {function_name} (Status: {status_code})")
+                
+                return result
+                
+            except SQLAlchemyError as db_error:
+                logger.error(f"{function_name}: Database error: {str(db_error)}")
+                return response.api_response(500, message="Database error", error_details=str(db_error))
+            
+            except Exception as e:
+                logger.exception(f"{function_name}: Unexpected error in Lambda handler: {str(e)}")
+                return response.api_response(500, message="Internal Server Error", error_details=str(e))
+            
+            finally:
+                if session_created and db_session is not None:
+                    try:
+                        db_session.close()
+                        logger.debug(f"{function_name}: Closed database session")
+                    except Exception as e:
+                        logger.error(f"{function_name}: Error closing database session: {str(e)}")
+            
+        return wrapper
+    return decorator
+
+
+def _validate_body(body: Dict[str, Any], schema: Dict[str, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """Validate request body against schema."""
+    errors = []
+    
+    for field_name, field_schema in schema.items():
+        value = body.get(field_name)
+        
+        # Check required fields (if value is None and no default)
+        if value is None and 'default' not in field_schema:
+            if field_schema.get('required', True):
+                errors.append(f"Field '{field_name}' is required")
+            continue
+        
+        if value is not None:
+            # Type validation
+            expected_type = field_schema.get('type')
+            if expected_type and not isinstance(value, expected_type):
+                errors.append(f"Field '{field_name}' must be of type {expected_type.__name__}")
+                continue
+            
+            # String length validation
+            if isinstance(value, str):
+                max_length = field_schema.get('max_length')
+                if max_length and len(value) > max_length:
+                    errors.append(f"Field '{field_name}' exceeds maximum length of {max_length}")
+                
+                min_length = field_schema.get('min_length', 0)
+                if len(value) < min_length:
+                    errors.append(f"Field '{field_name}' must be at least {min_length} characters")
+            
+            # Numeric validation
+            if isinstance(value, (int, float)):
+                min_val = field_schema.get('min')
+                if min_val is not None and value < min_val:
+                    errors.append(f"Field '{field_name}' must be at least {min_val}")
+                
+                max_val = field_schema.get('max')
+                if max_val is not None and value > max_val:
+                    errors.append(f"Field '{field_name}' must be at most {max_val}")
+            
+            # Pattern validation for strings
+            pattern = field_schema.get('pattern')
+            if pattern and isinstance(value, str):
+                if not re.match(pattern, value):
+                    errors.append(f"Field '{field_name}' does not match required pattern")
+    
+    if errors:
+        return response.api_response(400, 
+            message="Validation failed", 
+            error_details="Request validation failed", 
+            data={"validation_errors": errors}
+        )
+    
+    return None
+
+
+def _load_resource(db_session, model_class_name: str, resource_id: str):
+    """Load a resource by ID using the model class name."""
+    # Import models dynamically to avoid circular imports
+    from models.claim import Claim
+    from models.item import Item
+    from models.file import File
+    from models.room import Room
+    from models.label import Label
+    from models.user import User
+    
+    model_map = {
+        'Claim': Claim,
+        'Item': Item, 
+        'File': File,
+        'Room': Room,
+        'Label': Label,
+        'User': User
+    }
+    
+    model_class = model_map.get(model_class_name)
+    if not model_class:
+        logger.warning(f"Unknown model class: {model_class_name}")
+        return None
+    
+    try:
+        resource_uuid = uuid.UUID(resource_id)
+        return db_session.query(model_class).filter(model_class.id == resource_uuid).first()
+    except (ValueError, SQLAlchemyError) as e:
+        logger.warning(f"Failed to load {model_class_name} with ID {resource_id}: {str(e)}")
+        return None
+
+
+def _check_permissions(user, permissions: Dict[str, Any], extracted_params: Dict[str, str], 
+                      loaded_resources: Dict[str, Any], db_session) -> Optional[Dict[str, Any]]:
+    """Check permissions using the existing access control system."""
+    from utils.access_control import has_permission
+    from utils.vocab_enums import ResourceTypeEnum, PermissionAction
+    
+    resource_type = permissions.get('resource_type')
+    action = permissions.get('action') 
+    path_param = permissions.get('path_param')
+    
+    if not all([resource_type, action, path_param]):
+        logger.warning(f"Incomplete permission configuration: {permissions}")
+        return None
+    
+    # Get resource ID from extracted params
+    resource_id = extracted_params.get(path_param)
+    if not resource_id:
+        logger.warning(f"Path parameter {path_param} not found for permission check")
+        return response.api_response(400, error_details=f"Missing {path_param} parameter")
+    
+    try:
+        resource_uuid = uuid.UUID(resource_id)
+        
+        # Map string values to enums
+        resource_type_enum = getattr(ResourceTypeEnum, resource_type.upper()).value
+        action_enum = getattr(PermissionAction, action.upper())
+        
+        # Use existing access control system exactly as-is
+        if not has_permission(
+            user=user,
+            action=action_enum,
+            resource_type=resource_type_enum,
+            db=db_session,
+            resource_id=resource_uuid
+        ):
+            return response.api_response(403, 
+                error_details=f'You do not have permission to {action.lower()} this {resource_type.lower()}.')
+    
+    except (ValueError, AttributeError) as e:
+        logger.error(f"Permission check failed: {str(e)}")
+        return response.api_response(500, error_details="Permission validation error")
+    
+    return None
 
 
 def extract_path_param(event: Dict[str, Any], param_name: str) -> Tuple[bool, Union[str, Dict[str, Any]]]:

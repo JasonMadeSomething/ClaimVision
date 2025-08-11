@@ -1,10 +1,14 @@
 import os
 import json
 import boto3
+import logging
 
 # Initialize DynamoDB client
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+
 dynamodb = boto3.resource('dynamodb')
-table = dynamodb.Table(os.environ.get('CONNECTIONS_TABLE_NAME'))
+table = None  # lazy-init after env validation
 
 def lambda_handler(event, context):
     """
@@ -25,7 +29,17 @@ def lambda_handler(event, context):
         }
     
     try:
+        connections_table_name = os.environ.get('CONNECTIONS_TABLE_NAME')
+        if not connections_table_name:
+            logger.error("Missing CONNECTIONS_TABLE_NAME env var", extra={"event": event})
+            return {
+                'statusCode': 500,
+                'body': json.dumps({'error': 'MissingEnv', 'message': 'CONNECTIONS_TABLE_NAME is not set'})
+            }
         # Get the connection record to verify it exists
+        global table
+        connections_table_name = os.environ.get('CONNECTIONS_TABLE_NAME')
+        table = table or dynamodb.Table(connections_table_name)
         connection = table.get_item(
             Key={
                 'connectionId': connection_id
@@ -58,24 +72,29 @@ def lambda_handler(event, context):
             # Handle subscription to specific claim
             claim_id = message.get('claimId')
             if claim_id:
-                # Update the connection record with subscription info
+                # Read current subscriptions
+                current = table.get_item(Key={'connectionId': connection_id}).get('Item') or {}
+                existing = current.get('subscriptions') or []
+                try:
+                    unique = list({*existing, claim_id})  # dedupe
+                except TypeError:
+                    # Fallback if existing not iterable
+                    unique = [claim_id]
+                # Write back the deduped list
                 table.update_item(
-                    Key={
-                        'connectionId': connection_id
-                    },
-                    UpdateExpression="SET subscriptions = list_append(if_not_exists(subscriptions, :empty_list), :claim)",
-                    ExpressionAttributeValues={
-                        ':empty_list': [],
-                        ':claim': [claim_id]
-                    }
+                    Key={'connectionId': connection_id},
+                    UpdateExpression='SET subscriptions = :subs',
+                    ExpressionAttributeValues={':subs': unique}
                 )
                 return send_to_connection(connection_id, {
                     'type': 'subscribed',
-                    'claimId': claim_id
+                    'claimId': claim_id,
+                    'subscriptions': unique
                 })
             else:
                 return send_to_connection(connection_id, {
                     'type': 'error',
+                    'error': 'BadRequest',
                     'message': 'Missing claimId for subscription'
                 })
         else:
@@ -85,11 +104,11 @@ def lambda_handler(event, context):
                 'message': message
             })
             
-    except (ValueError, KeyError, TypeError) as e:
-        print("Error in default handler: " + str(e))
+    except (ValueError, KeyError, TypeError):
+        logger.exception("Error in default handler")
         return {
             'statusCode': 500,
-            'body': json.dumps({'message': 'Internal server error'})
+            'body': json.dumps({'error': 'InternalError', 'message': 'Internal server error'})
         }
 
 def send_to_connection(connection_id, data):
@@ -98,10 +117,10 @@ def send_to_connection(connection_id, data):
     """
     api_endpoint = os.environ.get('WS_API_ENDPOINT')
     if not api_endpoint:
-        print("Missing WS_API_ENDPOINT environment variable")
+        logger.error("Missing WS_API_ENDPOINT environment variable")
         return {
             'statusCode': 500,
-            'body': json.dumps({'message': 'Missing API endpoint configuration'})
+            'body': json.dumps({'error': 'MissingEnv', 'message': 'Missing API endpoint configuration'})
         }
         
     gateway_management = boto3.client(
@@ -120,11 +139,15 @@ def send_to_connection(connection_id, data):
         }
     except gateway_management.exceptions.GoneException:
         # Connection is no longer valid
-        table.delete_item(
-            Key={
-                'connectionId': connection_id
-            }
-        )
+        try:
+            global table
+            connections_table_name = os.environ.get('CONNECTIONS_TABLE_NAME')
+            if connections_table_name:
+                table = table or dynamodb.Table(connections_table_name)
+                table.delete_item(Key={'connectionId': connection_id})
+        except Exception:
+            # Best-effort cleanup
+            pass
         return {
             'statusCode': 410,
             'body': json.dumps({'message': 'Connection is gone'})

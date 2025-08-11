@@ -4,14 +4,17 @@ from models.item import Item
 from models.item_labels import ItemLabel
 from models.label import Label
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from utils.access_control import has_permission
-from utils.vocab_enums import ResourceTypeEnum, PermissionAction
+from utils.lambda_utils import enhanced_lambda_handler
 
 # Configure logging
 logger = get_logger(__name__)
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event, context=None, _context=None, db_session=None, user=None):
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['item_id'],
+    permissions={'resource_type': 'item', 'action': 'read', 'path_param': 'item_id'},
+    auto_load_resources={'item_id': 'Item'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Retrieves an item by ID and its associated labels.
 
@@ -24,33 +27,16 @@ def lambda_handler(event, context=None, _context=None, db_session=None, user=Non
     Returns:
         dict: API response with item details or error message.
     """
-    # Extract and validate item ID
-    success, result = extract_uuid_param(event, "item_id")
-    if not success:
-        return result  # Return error response
-        
-    item_uuid = result
+    item = resources['item']
+    item_uuid = item.id
     
-    # Fetch the item with eager-loaded files to avoid N+1
+    # Reload item with eager-loaded files to avoid N+1
     item = (
         db_session.query(Item)
         .options(joinedload(Item.files))
         .filter(Item.id == item_uuid)
         .first()
     )
-    
-    if not item:
-        return response.api_response(404, error_details='Item not found.')
-    
-    # Check if user has permission to view the claim this item belongs to
-    if not has_permission(
-        user=user,
-        action=PermissionAction.READ,
-        resource_type=ResourceTypeEnum.CLAIM.value,
-        db=db_session,
-        resource_id=item.claim_id
-    ):
-        return response.api_response(403, error_details='You do not have permission to access this item.')
 
     # Fetch associated labels (exclude soft-deleted)
     item_labels = (

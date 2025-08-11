@@ -8,7 +8,7 @@ from utils.logging_utils import get_logger
 from datetime import datetime, date
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, enhanced_lambda_handler
 from models import Claim
 from utils.access_control import has_permission, AccessDeniedError
 from utils.vocab_enums import ResourceTypeEnum, PermissionAction
@@ -18,36 +18,34 @@ logger = get_logger(__name__)
 
 
 # Configure logging
-@standard_lambda_handler(requires_auth=True, requires_body=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None, body=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    requires_body=True,
+    path_params=['claim_id'],
+    permissions={'resource_type': 'claim', 'action': 'write', 'path_param': 'claim_id'},
+    auto_load_resources={'claim_id': 'Claim'},
+    validation_schema={
+        'title': {'type': str, 'max_length': 255, 'required': False},
+        'description': {'type': str, 'max_length': 1000, 'required': False}
+    }
+)
+def lambda_handler(event, context, db_session, user, body, path_params, resources):
     """
     Handles updating a claim by ID for the authenticated user.
 
     Args:
         event (dict): API Gateway event containing authentication details and claim ID.
-        _context (dict): Lambda execution context (unused).
-        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
-        user (User): Authenticated user object (provided by decorator).
-        body (dict): Request body containing updated claim data (provided by decorator).
+        context (dict): Lambda execution context.
+        db_session (Session): SQLAlchemy session.
+        user (User): Authenticated user object.
+        body (dict): Request body containing updated claim data.
+        path_params (dict): Extracted path parameters.
+        resources (dict): Auto-loaded resources.
 
     Returns:
         dict: API response containing the updated claim details or an error message.
     """
-    # Extract claim ID from path parameters
-    success, result = extract_uuid_param(event, "claim_id")
-    if not success:
-        return result  # Return error response
-    
-    claim_id = result
-    
-    try:
-        # Query the claim
-        claim = db_session.query(Claim).filter_by(id=claim_id).first()
-        
-        # Check if claim exists
-        if not claim:
-            return response.api_response(404, error_details="Claim not found")
-        
+    claim = resources['claim']
         # Check if user has permission to update the claim
         if not has_permission(
             user=user,

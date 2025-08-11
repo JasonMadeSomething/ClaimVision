@@ -1,10 +1,12 @@
-from sqlalchemy import Column, String, ForeignKey, Boolean, Integer, DateTime, Numeric
+from sqlalchemy import String, ForeignKey, Boolean, Integer, DateTime, Numeric
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, Mapped, mapped_column
 from models.base import Base
 import uuid
 from datetime import datetime, timezone
+from typing import Optional
+from decimal import Decimal
 
 class Item(Base):
     """
@@ -15,28 +17,32 @@ class Item(Base):
     """
     __tablename__ = "items"
 
-    id = Column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    claim_id = Column(PG_UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True)
-    name = Column(String, nullable=False, index=True)
-    description = Column(String, nullable=True)
-    condition = Column(String, nullable=True)  # (New, Good, Average, Bad, etc.)
-    is_ai_suggested = Column(Boolean, default=False)
-    room_id = Column(PG_UUID(as_uuid=True), ForeignKey("rooms.id"), nullable=True)
-    group_id = Column(PG_UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False, index=True)
+    id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    claim_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("claims.id"), nullable=False, index=True)
+    name: Mapped[str] = mapped_column(String, nullable=False, index=True)
+    description: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    condition: Mapped[Optional[str]] = mapped_column(String, nullable=True)  # (New, Good, Average, Bad, etc.)
+    is_ai_suggested: Mapped[bool] = mapped_column(Boolean, default=False)
+    room_id: Mapped[Optional[uuid.UUID]] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("rooms.id"), nullable=True)
+    group_id: Mapped[uuid.UUID] = mapped_column(PG_UUID(as_uuid=True), ForeignKey("groups.id"), nullable=False, index=True)
     
     # Additional fields for reporting
-    brand_manufacturer = Column(String, nullable=True)
-    model_number = Column(String, nullable=True)
-    original_vendor = Column(String, nullable=True)
-    quantity = Column(Integer, default=1, nullable=False)
-    age_years = Column(Integer, nullable=True)
-    age_months = Column(Integer, nullable=True)
+    brand_manufacturer: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    model_number: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    original_vendor: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    quantity: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    age_years: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    age_months: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     # Monetary values use Decimal to avoid float rounding issues
-    unit_cost = Column(Numeric(10, 2), nullable=False, default=0)
-    deleted = Column(Boolean, default=False, nullable=False, index=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), 
-                        onupdate=lambda: datetime.now(timezone.utc), nullable=False)
+    unit_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2), nullable=False, default=0)
+    deleted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
     
     claim = relationship("Claim", back_populates="items")
     files = relationship("File", secondary="item_files", back_populates="items")

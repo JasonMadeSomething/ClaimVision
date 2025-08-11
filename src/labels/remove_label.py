@@ -1,15 +1,19 @@
 from utils.logging_utils import get_logger
-from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from database.database import get_db_session
 from models.file_labels import FileLabel
 from models import Label
 from utils import response
-from utils import auth_utils
+from utils.lambda_utils import enhanced_lambda_handler
 
 # Configure logging
 logger = get_logger(__name__)
-def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['file_id', 'label_id'],
+    permissions={'resource_type': 'file', 'action': 'write', 'path_param': 'file_id'},
+    auto_load_resources={'file_id': 'File', 'label_id': 'Label'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Handles label removal from a file.
 
@@ -19,55 +23,24 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
 
     Parameters:
         event (dict): API Gateway event containing authentication details, file ID, and label ID.
-        _context (dict): Lambda execution context (unused).
-        db_session (Session, optional): SQLAlchemy session for testing. Defaults to None.
+        context (dict): Lambda execution context.
+        db_session (Session): SQLAlchemy session (provided by decorator).
+        user (User): Authenticated user object (provided by decorator).
+        path_params (dict): Path parameters (provided by decorator).
+        resources (dict): Auto-loaded resources (provided by decorator).
 
     Returns:
         dict: API response confirming deletion or an error message.
     """
-    db = db_session if db_session else get_db_session()
+    file = resources['file']
+    label = resources['label']
+    file_id = file.id
+    label_id = label.id
 
     try:
-        # Extract and validate user ID
-        success, result = auth_utils.extract_user_id(event)
-        if not success:
-            return result  # Return error response
-        
-        user_id = result
-        
-        # Get authenticated user
-        success, result = auth_utils.get_authenticated_user(db, user_id)
-        if not success:
-            return result  # Return error response
-            
-        user = result
-        
-        # Extract and validate file ID
-        success, result = auth_utils.extract_resource_id(event, "file_id")
-        if not success:
-            return result  # Return error response
-            
-        file_id = result
-        
-        # Extract and validate label ID
-        success, result = auth_utils.extract_resource_id(event, "label_id")
-        if not success:
-            return result  # Return error response
-            
-        label_id = result
-
-        # Check if the label exists
-        label = db.query(Label).filter(Label.id == label_id).first()
-        if not label:
-            return response.api_response(404, error_details='Label not found.')
-        
-        # Check if user has access to the label's household
-        success, error_response = auth_utils.check_resource_access(user, label.household_id)
-        if not success:
-            return error_response
         
         # Check if the file-label relationship exists
-        file_label = db.query(FileLabel).filter(
+        file_label = db_session.query(FileLabel).filter(
             FileLabel.file_id == file_id,
             FileLabel.label_id == label_id
         ).first()
@@ -78,29 +51,26 @@ def lambda_handler(event: dict, _context: dict, db_session: Session = None) -> d
         if label.is_ai_generated:
             # AI Label → Soft delete by setting `deleted = True` in `file_labels`
             file_label.deleted = True
-            db.commit()
+            db_session.commit()
             logger.info("Soft deleted AI label %s from file %s in household %s", label_id, file_id, label.household_id)
             return response.api_response(204, success_message='AI label removed from file.')
 
         else:
             # User Label → Fully remove from `Label` (global delete)
-            db.delete(file_label)  # Remove from file_labels first
-            db.commit()
-            remaining_links = db.query(FileLabel).filter(FileLabel.label_id == label_id).count()
+            db_session.delete(file_label)  # Remove from file_labels first
+            db_session.commit()
+            remaining_links = db_session.query(FileLabel).filter(FileLabel.label_id == label_id).count()
             if remaining_links == 0:
-                db.delete(label)  # Only delete globally if no remaining links
-                db.commit()
+                db_session.delete(label)  # Only delete globally if no remaining links
+                db_session.commit()
             logger.info(f"Deleted user label {label_id} globally from household {label.household_id}")
             return response.api_response(204, success_message='User label deleted globally.')
 
     except SQLAlchemyError as db_error:
-        db.rollback()
+        db_session.rollback()
         logger.error(f"Database error removing label: {str(db_error)}")
         return response.api_response(500, error_details='Database error.')
 
     except Exception:
         logger.exception("Unexpected error removing label")
         return response.api_response(500, error_details='Internal Server Error')
-
-    finally:
-        db.close()

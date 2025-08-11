@@ -5,7 +5,7 @@ This module handles copying labels from a file to an item without
 overwriting existing labels, ensuring proper deduplication.
 """
 from utils.logging_utils import get_logger
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler
 from utils import response
 from models.item import Item
 from models.file import File
@@ -16,8 +16,13 @@ from sqlalchemy.exc import SQLAlchemyError
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['item_id', 'file_id'],
+    permissions={'resource_type': 'item', 'action': 'write', 'path_param': 'item_id'},
+    auto_load_resources={'item_id': 'Item', 'file_id': 'File'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Lambda handler to inherit labels from a file to an item.
     
@@ -30,32 +35,12 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     Returns:
         dict: API response with inheritance status or error
     """
-    # Extract item_id and file_id from path parameters
-    path_params = event.get("pathParameters") or {}
-    
-    # Extract item_id
-    success, result = extract_uuid_param(path_params, "item_id")
-    if not success:
-        return result  # This is already an API response with error details
-    item_id = result
-    
-    # Extract file_id
-    success, result = extract_uuid_param(path_params, "file_id")
-    if not success:
-        return result  # This is already an API response with error details
-    file_id = result
+    item = resources['item']
+    file = resources['file']
+    item_id = item.id
+    file_id = file.id
     
     try:
-        # Verify the item exists and belongs to the user's household
-        item = db_session.query(Item).filter(Item.id == item_id).first()
-        if not item:
-            return response.api_response(404, error_details="Item not found")
-        
-        # Verify the file exists
-        file = db_session.query(File).filter(File.id == file_id).first()
-        if not file:
-            return response.api_response(404, error_details="File not found")
-        
         # Verify the file belongs to the same claim as the item
         if file.claim_id != item.claim_id:
             return response.api_response(400, error_details="File must belong to the same claim as the item")
@@ -90,7 +75,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             
             if not existing_item_label:
                 # Create new association
-                db_session.add(ItemLabel(item_id=item_id, label_id=label.id))
+                db_session.add(ItemLabel(item_id=item_id, label_id=label.id, group_id=item.group_id))
                 labels_added += 1
             elif existing_item_label.deleted:
                 # Reactivate deleted association

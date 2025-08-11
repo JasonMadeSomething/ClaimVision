@@ -14,15 +14,20 @@ from sqlalchemy.exc import SQLAlchemyError
 from models import Label, File
 from models.file_labels import FileLabel
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
+from utils.lambda_utils import enhanced_lambda_handler
 
 
 logger = get_logger(__name__)
 
 
 # Configure logging
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, context=None, _context=None, db_session: Session = None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['file_id'],
+    permissions={'resource_type': 'file', 'action': 'read', 'path_param': 'file_id'},
+    auto_load_resources={'file_id': 'File'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Retrieves all labels associated with a given file.
 
@@ -48,22 +53,11 @@ def lambda_handler(event: dict, context=None, _context=None, db_session: Session
     dict
         Standardized API response containing the list of labels.
     """
-    # Extract and validate file ID
-    success, result = extract_uuid_param(event, "file_id")
-    if not success:
-        return result  # Return error response
-        
-    file_id = result
+    file = resources['file']
+    file_id = file.id
 
     try:
-        # Step 1: Retrieve file
-        file = db_session.query(File).filter(File.id == file_id).first()
-        if not file:
-            return response.api_response(404, error_details='File not found.')
-        
-        # Check if user has access to the file's household
-        if file.household_id != user.household_id:
-            return response.api_response(403, error_details='Access denied to this file.')
+        # File already loaded and permission checked by decorator
 
         # Step 2: Retrieve labels (including soft-deleted AI ones)
         labels = (

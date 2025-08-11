@@ -7,20 +7,21 @@ ensuring proper authorization and data validation.
 from utils.logging_utils import get_logger
 from sqlalchemy.exc import SQLAlchemyError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from models.room import Room
+from utils.lambda_utils import enhanced_lambda_handler
 from models.claim_rooms import ClaimRoom
-from models.claim import Claim
 from models.item import Item
 from models.file import File
 from datetime import datetime, timezone
-from utils.access_control import has_permission
-from utils.vocab_enums import PermissionAction, ResourceTypeEnum
 
 logger = get_logger(__name__)
 
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> dict:
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=["claim_id", "room_id"],
+    auto_load_resources={"claim_id": "Claim", "room_id": "Room"},
+    permissions={"resource_type": "CLAIM", "action": "WRITE", "path_param": "claim_id"}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources) -> dict:
     """
     Handles removing a room from a claim for the authenticated user's household.
     Also removes room associations from any items and files in that claim.
@@ -35,52 +36,15 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
         dict: API response indicating success or error
     """
     try:
-        # Extract claim ID from path parameters
-        if not event.get("pathParameters") or "claim_id" not in event.get("pathParameters", {}):
-            logger.warning("Missing claim ID in path parameters")
-            return response.api_response(400, error_details="Claim ID is required in path parameters")
-        # Extract and validate claim_id from path parameters
-        success, result = extract_uuid_param(event, "claim_id")
-        if not success:
-            return result  # Return error response
+        # Extract IDs and loaded resources from decorator
+        claim_id = path_params["claim_id"]
+        room_id = path_params["room_id"]
+        claim = resources.get("claim")
 
-        claim_id = result
-
-        # Verify claim exists
-        claim = db_session.query(Claim).filter(
-            Claim.id == claim_id,
-            Claim.deleted.is_(False)
-        ).first()
-
-        if not claim:
-            logger.info("Claim not found: %s", claim_id)
+        # If claim is deleted, preserve original 404 behavior
+        if hasattr(claim, "deleted") and getattr(claim, "deleted") is True:
+            logger.info("Claim is deleted: %s", claim_id)
             return response.api_response(404, error_details="Claim not found")
-
-        # Verify user has write access to claim
-        if not has_permission(user, PermissionAction.WRITE, ResourceTypeEnum.CLAIM.value, db_session, claim_id, user.group_id):
-            logger.info("User %s does not have write access to claim %s", user.id, claim_id)
-            return response.api_response(403, error_details="User does not have write access to claim")
-
-        # Extract room ID from path parameters
-        if not event.get("pathParameters") or "room_id" not in event.get("pathParameters", {}):
-            logger.warning("Missing room ID in path parameters")
-            return response.api_response(400, error_details="Room ID is required in path parameters")
-
-        # Extract and validate room_id from path parameters
-        success, result = extract_uuid_param(event, "room_id")
-        if not success:
-            return result  # Return error response
-
-        room_id = result
-
-        # Verify room exists
-        room = db_session.query(Room).filter(
-            Room.id == room_id
-        ).first()
-
-        if not room:
-            logger.info("Room not found: %s", room_id)
-            return response.api_response(404, error_details="Room not found")
 
         # Check if the room is associated with the claim
         claim_room = db_session.query(ClaimRoom).filter(

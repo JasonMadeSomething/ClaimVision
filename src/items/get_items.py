@@ -5,48 +5,33 @@ from sqlalchemy import desc
 from models.item import Item
 from models.claim import Claim
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param
-from utils.access_control import has_permission
-from utils.vocab_enums import ResourceTypeEnum, PermissionAction
+from utils.lambda_utils import enhanced_lambda_handler
 
 # Configure logging
 logger = get_logger(__name__)
-@standard_lambda_handler(requires_auth=True)
-def lambda_handler(event, context=None, _context=None, db_session=None, user=None):
+@enhanced_lambda_handler(
+    requires_auth=True,
+    path_params=['claim_id'],
+    permissions={'resource_type': 'claim', 'action': 'read', 'path_param': 'claim_id'},
+    auto_load_resources={'claim_id': 'Claim'}
+)
+def lambda_handler(event, context, db_session, user, path_params, resources):
     """
     Retrieves all items under a specific claim with pagination support.
     
     Parameters:
         event (dict): API Gateway event with claim ID and optional pagination parameters.
-        context/_context (dict): Lambda execution context (unused).
-        db_session (Session): SQLAlchemy session (provided by decorator).
-        user (User): Authenticated user object (provided by decorator).
+        context (dict): Lambda execution context.
+        db_session (Session): SQLAlchemy session.
+        user (User): Authenticated user object.
+        path_params (dict): Extracted path parameters.
+        resources (dict): Auto-loaded resources.
         
     Returns:
         dict: API response with paginated items list or error message.
     """
-    # Extract and validate claim ID
-    success, result = extract_uuid_param(event, "claim_id")
-    if not success:
-        return result  # Return error response
-        
-    claim_uuid = result
-    
-    # Verify the claim exists
-    claim = db_session.query(Claim).filter(Claim.id == claim_uuid).first()
-    
-    if not claim:
-        return response.api_response(404, error_details='Claim not found.')
-    
-    # Check if user has permission to view this claim
-    if not has_permission(
-        user=user,
-        action=PermissionAction.READ,
-        resource_type=ResourceTypeEnum.CLAIM.value,
-        db=db_session,
-        resource_id=claim_uuid
-    ):
-        return response.api_response(403, error_details='You do not have permission to access this claim.')
+    claim = resources['claim']
+    claim_uuid = claim.id
 
     # Get pagination parameters from query string
     query_params = event.get("queryStringParameters") or {}
