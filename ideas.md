@@ -25,8 +25,8 @@
 ## Technical
  - Zip Upload -> might work, untested
  - Room mapping on Zip Upload -> might work, untested
- - Webhook for upload completion
- - Webhook for report generation
+ - websocket for upload completion
+ - websocket for report generation
  - ~~Presigned S3 Uploads~~
  - Group ID -> Access policy abstraction -> Nearly done
  - Claim Workbench endpoint (Load all resources on one pull) -> Maybe an additional endpoint, maybe enhance the existing one
@@ -37,7 +37,7 @@
  - Metadata normalization (multi source uploads)
  - Report report -> To report on reports internally. Probably an additional endpoint
  - Monitoring/Alerting
- - DLQ Inegration -> Not an endpoint, but definitely an auxillary lambda. Maybe webhooks?
+ - DLQ Inegration -> Not an endpoint, but definitely an auxillary lambda. Maybe websockets?
  - Training consent screen -> Schema Changes
  - AI confidence slider -> Schema Changes
  - Offline mode

@@ -1,4 +1,4 @@
-﻿AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
@@ -85,19 +85,19 @@ Parameters:
     Description: Name of the Cognito update SQS queue
   VpcId:
     Type: String
-    Default: ""
+    Default: ''
     Description: VPC ID for Lambda functions
   SubnetIds:
     Type: CommaDelimitedList
-    Default: ""
+    Default: ''
     Description: Subnet IDs for Lambda functions (comma-delimited)
   SecurityGroupIds:
     Type: CommaDelimitedList
-    Default: ""
+    Default: ''
     Description: Security Group IDs for Lambda functions (comma-delimited)
   RouteTableIds:
     Type: String
-    Default: ""
+    Default: ''
     Description: Route Table ID for Lambda functions
   EnableDNS:
     Type: String
@@ -106,6 +106,34 @@ Parameters:
       - true
       - false
     Description: Enable DNS for Lambda functions
+
+  OutboundMessagesQueueURL:
+    Type: String
+    Description: URL of the outbound messages SQS queue for WebSocket notifications
+  OutboundMessagesQueueARN:
+    Type: String
+    Description: ARN of the outbound messages SQS queue for WebSocket notifications
+  OutboundMessagesQueueName:
+    Type: String
+    Description: Name of the outbound messages SQS queue for WebSocket notifications
+
+  BatchTrackingQueueName:
+    Type: String
+    Description: Name of the SQS queue for batch tracking events
+    Default: batch-tracking-queue
+
+  BatchTrackingQueueDLQName:
+    Type: String
+    Description: Name of the DLQ for batch tracking events
+    Default: batch-tracking-dlq
+
+  BatchTrackingQueueURL:
+    Type: String
+    Description: URL of the SQS queue for batch tracking events
+
+  BatchTrackingQueueARN:
+    Type: String
+    Description: ARN of the SQS queue for batch tracking events
 
   # Report Infrastructure Parameters
   ReportsBucketName:
@@ -155,22 +183,28 @@ Parameters:
     Description: URL of the deliver report SQS queue
   HostedZoneId:
     Type: String
-    Description: "Route 53 Hosted Zone ID"
+    Description: Route 53 Hosted Zone ID
   ApiDomainName:
     Type: String
-    Description: "Fully qualified domain name for the API"
+    Description: Fully qualified domain name for the API
+  WsDomainName:
+    Type: String
+    Description: Fully qualified domain name for the WebSocket API
   FrontendOrigin:
     Type: String
-    Description: "Frontend origin URL"
+    Description: Frontend origin URL
 
 Conditions:
-  IsDev: !Equals [!Ref Env, "dev"]
-  HasVpc: 
-    Fn::Not:
-      - Fn::Equals:
-          - !Ref VpcId
-          - ""
-  CreateDNS: !Equals [ !Ref EnableDNS, true ]
+  IsDev: !Equals
+    - !Ref Env
+    - dev
+  HasVpc: !Not
+    - !Equals
+      - !Ref VpcId
+      - ''
+  CreateDNS: !Equals
+    - !Ref EnableDNS
+    - true
 
 Globals:
   Function:
@@ -186,7 +220,7 @@ Globals:
         USER_REGISTRATION_QUEUE_URL: !Ref UserRegistrationQueueURL
         COGNITO_UPDATE_QUEUE_URL: !Ref CognitoUpdateQueueURL
         FRONTEND_ORIGIN: !Ref FrontendOrigin
-    VpcConfig: !If 
+    VpcConfig: !If
       - HasVpc
       - SubnetIds: !Ref SubnetIds
         SecurityGroupIds: !Ref SecurityGroupIds
@@ -749,7 +783,7 @@ Resources:
       CodeUri: src/
       Handler: claims.get_claims.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -779,14 +813,13 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Create Claim Function
   CreateClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: claims.create_claim.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -807,14 +840,13 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Get Claim Function
   GetClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: claims.get_claim.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -835,14 +867,13 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Update Claim Function
   UpdateClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: claims.update_claim.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -863,14 +894,13 @@ Resources:
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Delete Claim Function
   DeleteClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: claims.delete_claim.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -891,14 +921,13 @@ Resources:
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Create Item Function
   CreateItemFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.create_item.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -925,7 +954,7 @@ Resources:
     Properties:
       Handler: items.get_items.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -946,14 +975,13 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Get Item Function
   GetItemFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.get_item.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -974,14 +1002,13 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Update Item Function
   UpdateItemFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.update_item.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1002,14 +1029,13 @@ Resources:
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Delete Item Function
   DeleteItemFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.delete_item.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1030,15 +1056,13 @@ Resources:
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
 
-
-
   # Associate File with Item Function
   AssociateFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.associate_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1059,15 +1083,13 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
-
-
   # Inherit Labels from File Function
   InheritLabelsFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.inherit_labels.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1088,15 +1110,13 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
-
-
   # Manage Item Labels Function
   ManageLabelsFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: items.manage_labels.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1117,14 +1137,13 @@ Resources:
             Method: PATCH
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Create Label Function
   CreateLabelFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: labels.create_label.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1145,14 +1164,13 @@ Resources:
             Method: POST
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Get Labels Function
   GetLabelsFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: labels.get_labels.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1173,15 +1191,13 @@ Resources:
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
 
-
-
   # Delete Label Function
   DeleteLabelFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: labels.delete_label.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1202,14 +1218,13 @@ Resources:
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Remove Label Function
   RemoveLabelFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: labels.remove_label.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1230,14 +1245,13 @@ Resources:
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Restore Label Function
   RestoreLabelFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: labels.restore_label.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1258,15 +1272,14 @@ Resources:
             Method: PUT
             RestApiId: !Ref ClaimVisionAPI
 
-
   # Room Functions
-  # Add Room Function
-  AddRoomFunction:
+  # Get Rooms Function
+  GetRoomsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: rooms.add_room_to_claim.lambda_handler
+      Handler: rooms.get_rooms.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1280,104 +1293,59 @@ Resources:
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
       Events:
-        AddRoomAPI:
+        GetRoomsAPI:
           Type: Api
           Properties:
-            Path: /claims/{claim_id}/rooms/{room_id}
-            Method: POST
+            Path: /rooms
+            Method: GET
             RestApiId: !Ref ClaimVisionAPI
-
-  # Get Rooms Function
-  GetClaimRoomsFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: rooms.get_claim_rooms.lambda_handler
-      Runtime: python3.12
-      VpcConfig: !If 
-        - HasVpc
-        - SubnetIds: !Ref SubnetIds
-          SecurityGroupIds: !Ref SecurityGroupIds
-        - !Ref AWS::NoValue
-      CodeUri: src/
-      Role: !GetAtt LambdaExecutionRole.Arn
-      Environment:
-        Variables:
-          DB_USERNAME: !Ref DBUsername
-          DB_PASSWORD: !Ref DBPassword
-          DB_HOST: !Ref DBEndpoint
-          DB_NAME: claimvision
-      Events:
         GetClaimRoomsAPI:
           Type: Api
           Properties:
             Path: /claims/{claim_id}/rooms
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
+        GetRoomsAPI:
+          Type: Api
+          Properties:
+            Path: /rooms
+            Method: GET
+            RestApiId: !Ref ClaimVisionAPI
+            
+  # Add Room to Claim Function
+  AddRoomToClaimFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: rooms.add_room_to_claim.lambda_handler
+      Runtime: python3.12
+      VpcConfig: !If
+        - HasVpc
+        - SubnetIds: !Ref SubnetIds
+          SecurityGroupIds: !Ref SecurityGroupIds
+        - !Ref AWS::NoValue
+      CodeUri: src/
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Environment:
+        Variables:
+          DB_USERNAME: !Ref DBUsername
+          DB_PASSWORD: !Ref DBPassword
+          DB_HOST: !Ref DBEndpoint
+          DB_NAME: claimvision
+      Events:
+        AddRoomToClaimAPI:
+          Type: Api
+          Properties:
+            Path: /claims/{claim_id}/rooms/{room_id}
+            Method: POST
+            RestApiId: !Ref ClaimVisionAPI
 
-
-  # Get Room Function -> Maybe readd once we have a need for it
-#  GetRoomFunction:
-#    Type: AWS::Serverless::Function
-#    Properties:
-#      Handler: rooms.get_room.lambda_handler
-#      Runtime: python3.12
-#      VpcConfig: !If 
-#        - HasVpc
-#        - SubnetIds: !Ref SubnetIds
-#          SecurityGroupIds: !Ref SecurityGroupIds
-#        - !Ref AWS::NoValue
-#      CodeUri: src/
-#      Role: !GetAtt LambdaExecutionRole.Arn
-#      Environment:
-#        Variables:
-#          DB_USERNAME: !Ref DBUsername
-#          DB_PASSWORD: !Ref DBPassword
-#          DB_HOST: !Ref DBEndpoint
-#          DB_NAME: claimvision
-#      Events:
-#        GetRoomAPI:
-#          Type: Api
-#          Properties:
-#            Path: /claims/{claim_id}/rooms/{room_id}
-#            Method: GET
-#            RestApiId: !Ref ClaimVisionAPI
-
-
-  # Update Room Function
-#  UpdateRoomFunction:
-#    Type: AWS::Serverless::Function
-#    Properties:
-#      Handler: rooms.update_room.lambda_handler
-#      Runtime: python3.12
-#      VpcConfig: !If 
-#        - HasVpc
-#        - SubnetIds: !Ref SubnetIds
-#          SecurityGroupIds: !Ref SecurityGroupIds
-#        - !Ref AWS::NoValue
-#      CodeUri: src/
-#      Role: !GetAtt LambdaExecutionRole.Arn
-#      Environment:
-#        Variables:
-#          DB_USERNAME: !Ref DBUsername
-#          DB_PASSWORD: !Ref DBPassword
-#          DB_HOST: !Ref DBEndpoint
-#          DB_NAME: claimvision
-#      Events:
-#        UpdateRoomAPI:
-#          Type: Api
-#          Properties:
-#            Path: /claims/{claim_id}/rooms/{room_id}
-#            Method: PUT
-#            RestApiId: !Ref ClaimVisionAPI
-
-
-  # Delete Room Function
+  # Remove Room from Claim Function
   RemoveRoomFromClaimFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: rooms.remove_room_from_claim.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1398,7 +1366,6 @@ Resources:
             Method: DELETE
             RestApiId: !Ref ClaimVisionAPI
 
-
   ##Admin##
   # Get Users Function
   GetUsersFunction:
@@ -1406,7 +1373,7 @@ Resources:
     Properties:
       Handler: admin.get_users.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1445,7 +1412,7 @@ Resources:
     Properties:
       Handler: admin.update_user_role.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1490,7 +1457,7 @@ Resources:
     Properties:
       Handler: files.get_files.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1536,7 +1503,7 @@ Resources:
     Properties:
       Handler: files.get_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1577,7 +1544,7 @@ Resources:
     Properties:
       Handler: files.update_file_metadata.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1635,7 +1602,7 @@ Resources:
     Properties:
       Handler: files.delete_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1676,7 +1643,7 @@ Resources:
     Properties:
       Handler: files.upload_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1701,6 +1668,7 @@ Resources:
           DB_NAME: claimvision
           S3_BUCKET_NAME: !Ref S3BucketName
           SQS_UPLOAD_QUEUE_URL: !Ref FileUploadQueueURL
+          BATCH_TRACKING_QUEUE_URL: !Ref BatchTrackingQueueURL
       Policies:
         - S3CrudPolicy:
             BucketName: !Sub claimvision-files-${AWS::AccountId}-${Env}
@@ -1718,7 +1686,7 @@ Resources:
     Properties:
       Handler: files.get_upload_url.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1741,13 +1709,14 @@ Resources:
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
           S3_BUCKET_NAME: !Ref S3BucketName
+          BATCH_TRACKING_QUEUE_URL: !Ref BatchTrackingQueueURL
 
   ProcessUploadedFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: files.process_uploaded_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1772,14 +1741,15 @@ Resources:
           DB_NAME: claimvision
           S3_BUCKET_NAME: !Ref S3BucketName
           SQS_UPLOAD_QUEUE_URL: !Ref FileUploadQueueURL
-          EFS_MOUNT_PATH: "/mnt/efs"
+          EFS_MOUNT_PATH: /mnt/efs
+          BATCH_TRACKING_QUEUE_URL: !Ref BatchTrackingQueueURL
 
   ProcessFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: files.process_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1803,13 +1773,14 @@ Resources:
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
+          BATCH_TRACKING_QUEUE_URL: !Ref BatchTrackingQueueURL
 
   AnalyzeFileFunction:
     Type: AWS::Serverless::Function
     Properties:
       Handler: files.analyze_file.lambda_handler
       Runtime: python3.12
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1833,6 +1804,7 @@ Resources:
           DB_PASSWORD: !Ref DBPassword
           DB_HOST: !Ref DBEndpoint
           DB_NAME: claimvision
+          BATCH_TRACKING_QUEUE_URL: !Ref BatchTrackingQueueURL
 
   RequestReportFunction:
     Type: AWS::Serverless::Function
@@ -1845,7 +1817,7 @@ Resources:
         Variables:
           REPORT_REQUEST_QUEUE_URL: !Ref ReportRequestQueueURL
           SENDER_EMAIL: !Ref SenderEmail
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1857,7 +1829,6 @@ Resources:
             Path: /claims/{claim_id}/report
             Method: post
             RestApiId: !Ref ClaimVisionAPI
-
 
   AggregateReportFunction:
     Type: AWS::Serverless::Function
@@ -1872,7 +1843,7 @@ Resources:
           FILE_ORGANIZATION_QUEUE_URL: !Ref FileOrganizationQueueURL
           REPORTS_BUCKET_NAME: !Ref ReportsBucketName
           SENDER_EMAIL: !Ref SenderEmail
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1884,7 +1855,7 @@ Resources:
             Queue: !Ref ReportRequestQueueARN
             BatchSize: 1
             Enabled: true
-            
+
   OrganizeReportFilesFunction:
     Type: AWS::Serverless::Function
     Properties:
@@ -1900,7 +1871,7 @@ Resources:
           EFS_FILE_SYSTEM_ID: !Ref EFSFileSystemId
           SENDER_EMAIL: !Ref SenderEmail
           DELIVER_REPORT_QUEUE_URL: !Ref DeliverReportQueueURL
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1929,7 +1900,7 @@ Resources:
           EMAIL_QUEUE_URL: !Ref EmailQueueURL
           EFS_ACCESS_POINT_ARN: !Ref EFSAccessPointARN
           EFS_FILE_SYSTEM_ID: !Ref EFSFileSystemId
-      VpcConfig: !If 
+      VpcConfig: !If
         - HasVpc
         - SubnetIds: !Ref SubnetIds
           SecurityGroupIds: !Ref SecurityGroupIds
@@ -1963,7 +1934,7 @@ Resources:
             Queue: !Ref EmailQueueARN
             BatchSize: 1
             Enabled: true
-## FIX THESE POLICIES!!!!! TODO: FINDME !!!!!!
+  ## FIX THESE POLICIES!!!!! TODO: FINDME !!!!!!
   ReportingLambdaRole:
     Type: AWS::IAM::Role
     Properties:
@@ -2011,10 +1982,10 @@ Resources:
                   - s3:ListBucket
                   - s3:HeadObject
                 Resource:
-                  - !Sub "arn:aws:s3:::${ReportsBucketName}/*"
-                  - !Sub "arn:aws:s3:::${ReportsBucketName}"
-                  - !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*"
-                  - !Sub "arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}"
+                  - !Sub arn:aws:s3:::${ReportsBucketName}/*
+                  - !Sub arn:aws:s3:::${ReportsBucketName}
+                  - !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}/*
+                  - !Sub arn:aws:s3:::claimvision-files-${AWS::AccountId}-${Env}
               - Effect: Allow
                 Action:
                   - elasticfilesystem:ClientMount
@@ -2118,6 +2089,296 @@ Resources:
         HostedZoneId: !GetAtt APIDomainName.RegionalHostedZoneId
         EvaluateTargetHealth: false
 
+  WebSocketCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Condition: CreateDNS
+    Properties:
+      DomainName: !Ref WsDomainName
+      ValidationMethod: DNS
+      DomainValidationOptions:
+        - DomainName: !Ref WsDomainName
+          HostedZoneId: !Ref HostedZoneId
+
+  WebSocketDomainName:
+    Type: AWS::ApiGatewayV2::DomainName
+    Condition: CreateDNS
+    Properties:
+      DomainName: !Ref WsDomainName
+      DomainNameConfigurations:
+        - EndpointType: REGIONAL
+          CertificateArn: !Ref WebSocketCertificate
+
+  WebSocketMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Condition: CreateDNS
+    Properties:
+      DomainName: !Ref WebSocketDomainName
+      ApiId: !Ref WebSocketApi
+      Stage: !Ref Env
+    DependsOn:
+      - WebSocketApi
+      - WebSocketDomainName
+      - WebSocketStage
+
+  WebSocketDNSRecord:
+    Type: AWS::Route53::RecordSet
+    Condition: CreateDNS
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      Name: !Ref WsDomainName
+      Type: A
+      AliasTarget:
+        DNSName: !GetAtt WebSocketDomainName.RegionalDomainName
+        HostedZoneId: !GetAtt WebSocketDomainName.RegionalHostedZoneId
+        EvaluateTargetHealth: false
+
+  WebSocketApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: ClaimVisionWebSocketApi
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  WebSocketStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref WebSocketApi
+      StageName: !Ref Env
+      DefaultRouteSettings:
+        ThrottlingBurstLimit: 100
+        ThrottlingRateLimit: 50
+      Description: !Sub "${Env} Stage for WebSocket API"
+
+  WebSocketConnectionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ClaimVision-WebSocketConnections-${Env}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: connectionId
+          AttributeType: S
+        - AttributeName: userId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: connectionId
+          KeyType: HASH
+      GlobalSecondaryIndexes:
+        - IndexName: UserIdIndex
+          KeySchema:
+            - AttributeName: userId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  WebSocketConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: websockets.connect_handler.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE_NAME: !Ref WebSocketConnectionsTable
+          COGNITO_USER_POOL_ID: !Ref CognitoUserPoolId
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+
+  WebSocketDisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: websockets.disconnect_handler.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE_NAME: !Ref WebSocketConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+
+  WebSocketDefaultFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: websockets.default_handler.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 10
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE_NAME: !Ref WebSocketConnectionsTable
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+
+  WebSocketNotifierFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: websockets.notifier_handler.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          CONNECTIONS_TABLE_NAME: !Ref WebSocketConnectionsTable
+          WS_API_ENDPOINT: !If
+            - CreateDNS
+            - !Sub https://${WsDomainName}
+            - !Sub https://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
+          OUTBOUND_QUEUE_URL: !Ref OutboundMessagesQueueURL
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref WebSocketConnectionsTable
+        - SQSPollerPolicy:
+            QueueName: !Ref OutboundMessagesQueueName
+        - Statement:
+            - Effect: Allow
+              Action:
+                - 'execute-api:ManageConnections'
+              Resource: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/${Env}/POST/@connections/*
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !Ref OutboundMessagesQueueARN
+            BatchSize: 10
+            MaximumBatchingWindowInSeconds: 5
+
+  WebSocketConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketConnectFunction.Arn}/invocations
+
+  WebSocketDisconnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDisconnectFunction.Arn}/invocations
+
+  WebSocketDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref WebSocketApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${WebSocketDefaultFunction.Arn}/invocations
+
+  WebSocketConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $connect
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      Target: !Sub integrations/${WebSocketConnectIntegration}
+
+  WebSocketDisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $disconnect
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      Target: !Sub integrations/${WebSocketDisconnectIntegration}
+
+  WebSocketDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref WebSocketApi
+      RouteKey: $default
+      AuthorizationType: NONE
+      OperationName: DefaultRoute
+      Target: !Sub integrations/${WebSocketDefaultIntegration}
+
+  WebSocketConnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketConnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$connect
+
+  WebSocketDisconnectPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketDisconnectFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$disconnect
+
+  WebSocketDefaultPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref WebSocketDefaultFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${WebSocketApi}/*/$default
+
+  BatchTrackingTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub ${Env}-batch-tracking
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: batchId
+          AttributeType: S
+        - AttributeName: itemId
+          AttributeType: S
+      KeySchema:
+        - AttributeName: batchId
+          KeyType: HASH
+        - AttributeName: itemId
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: ItemIdIndex
+          KeySchema:
+            - AttributeName: itemId
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Env
+
+  BatchTrackerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: src/
+      Handler: batch.tracker_handler.lambda_handler
+      Runtime: python3.12
+      MemorySize: 256
+      Timeout: 30
+      Environment:
+        Variables:
+          BATCH_TRACKING_TABLE: !Ref BatchTrackingTable
+          OUTBOUND_QUEUE_URL: !Ref OutboundMessagesQueueURL
+          BATCH_TRACKING_QUEUE_URL: !Ref BatchTrackingQueueURL
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref BatchTrackingTable
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt OutboundMessagesQueue.QueueName
+      Events:
+        BatchTrackingEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt BatchTrackingQueue.Arn
+            BatchSize: 10
+
 Outputs:
   #  Print API Gateway URL After Deployment
   ApiGatewayInvokeURL:
@@ -2127,3 +2388,25 @@ Outputs:
     Condition: CreateDNS
     Description: Custom Domain URL
     Value: !Sub https://${ApiDomainName}
+  WebSocketApiEndpoint:
+    Description: "WebSocket API endpoint URL"
+    Value: !If
+      - CreateDNS
+      - !Sub wss://${WsDomainName}
+      - !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
+  
+  WebSocketConnectionsTableName:
+    Description: Name of the DynamoDB table for WebSocket connections
+    Value: !Ref WebSocketConnectionsTable
+
+  BatchTrackingTableName:
+    Description: "Batch Tracking DynamoDB Table Name"
+    Value: !Ref BatchTrackingTable
+
+  BatchTrackingQueueURL:
+    Description: "Batch Tracking SQS Queue URL"
+    Value: !Ref BatchTrackingQueueURL
+
+  BatchTrackingQueueARN:
+    Description: "Batch Tracking SQS Queue ARN"
+    Value: !Ref BatchTrackingQueueARN

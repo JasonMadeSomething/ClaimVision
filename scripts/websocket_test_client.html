@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClaimVision WebSocket Test Client</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        .card {
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            padding: 15px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input[type="text"], textarea {
+            width: 100%;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            box-sizing: border-box;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        .status {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+        }
+        .connected {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .disconnected {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+        .connecting {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+        #messageLog {
+            height: 300px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            padding: 10px;
+            background-color: #f9f9f9;
+            font-family: monospace;
+        }
+        .message {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-bottom: 1px solid #eee;
+        }
+        .sent {
+            color: #0066cc;
+        }
+        .received {
+            color: #006600;
+        }
+        .error {
+            color: #cc0000;
+        }
+    </style>
+</head>
+<body>
+    <h1>ClaimVision WebSocket Test Client</h1>
+    
+    <div class="container">
+        <div class="card">
+            <h2>Connection</h2>
+            <div class="form-group">
+                <label for="wsUrl">WebSocket URL:</label>
+                <input type="text" id="wsUrl" value="wss://ws.dev.claimvision.made-something.com" />
+            </div>
+            <div class="form-group">
+                <label for="token">Cognito ID Token:</label>
+                <input type="text" id="token" placeholder="Paste your Cognito ID token here" />
+                <div class="help-text">
+                    Get this from the Cognito authentication flow in your application.
+                    This is the ID token, not the access token or refresh token.
+                </div>
+            </div>
+            
+            <div class="button-group">
+                <button id="connectBtn">Connect</button>
+                <button id="disconnectBtn" disabled>Disconnect</button>
+            </div>
+            
+            <div class="status">
+                <span>Status: </span><span id="connectionStatus">Disconnected</span>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h2>Send Message</h2>
+            <div class="form-group">
+                <label for="messageType">Message Type:</label>
+                <select id="messageType">
+                    <option value="ping">Ping</option>
+                    <option value="subscribe">Subscribe to Claim</option>
+                    <option value="custom">Custom Message</option>
+                </select>
+            </div>
+            
+            <div id="claimIdField" class="form-group" style="display: none;">
+                <label for="claimId">Claim ID:</label>
+                <input type="text" id="claimId" placeholder="claim-123">
+            </div>
+            
+            <div id="customMessageField" class="form-group" style="display: none;">
+                <label for="customMessage">Custom JSON Message:</label>
+                <textarea id="customMessage" rows="5" placeholder='{"action": "custom", "data": {"key": "value"}}'></textarea>
+            </div>
+            
+            <button id="sendBtn" disabled>Send Message</button>
+        </div>
+        
+        <div class="card">
+            <h2>Message Log</h2>
+            <div id="messageLog"></div>
+            <button id="clearLogBtn">Clear Log</button>
+        </div>
+    </div>
+    
+    <script>
+        // DOM Elements
+        const wsUrlInput = document.getElementById('wsUrl');
+        const tokenInput = document.getElementById('token');
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const connectionStatus = document.getElementById('connectionStatus');
+        const messageTypeSelect = document.getElementById('messageType');
+        const claimIdField = document.getElementById('claimIdField');
+        const claimIdInput = document.getElementById('claimId');
+        const customMessageField = document.getElementById('customMessageField');
+        const customMessageInput = document.getElementById('customMessage');
+        const sendBtn = document.getElementById('sendBtn');
+        const messageLog = document.getElementById('messageLog');
+        const clearLogBtn = document.getElementById('clearLogBtn');
+        
+        // WebSocket connection
+        let socket = null;
+        
+        // Event listeners
+        connectBtn.addEventListener('click', connect);
+        disconnectBtn.addEventListener('click', disconnect);
+        sendBtn.addEventListener('click', sendMessage);
+        clearLogBtn.addEventListener('click', clearLog);
+        messageTypeSelect.addEventListener('change', updateMessageFields);
+        
+        // Initialize
+        updateMessageFields();
+        
+        // Functions
+        function connect() {
+            const wsUrl = wsUrlInput.value.trim();
+            const token = tokenInput.value.trim();
+            
+            if (!wsUrl) {
+                logMessage('Please enter a WebSocket URL', 'error');
+                return;
+            }
+            
+            if (!token) {
+                logMessage('Please enter a Cognito ID token', 'error');
+                return;
+            }
+            
+            // Construct the full URL with the token
+            const fullUrl = `${wsUrl}/?token=${token}`;
+            
+            try {
+                // Update UI
+                connectionStatus.textContent = 'Connecting...';
+                connectionStatus.className = 'status connecting';
+                connectBtn.disabled = true;
+                
+                // Create WebSocket connection
+                socket = new WebSocket(fullUrl);
+                
+                // WebSocket event handlers
+                socket.onopen = function(event) {
+                    connectionStatus.textContent = 'Connected';
+                    connectionStatus.className = 'status connected';
+                    disconnectBtn.disabled = false;
+                    sendBtn.disabled = false;
+                    logMessage('WebSocket connection established', 'info');
+                };
+                
+                socket.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        logMessage(`Received: ${JSON.stringify(data, null, 2)}`, 'received');
+                    } catch (e) {
+                        logMessage(`Received: ${event.data}`, 'received');
+                    }
+                };
+                
+                socket.onerror = function(error) {
+                    logMessage(`WebSocket error: ${error.message || 'Unknown error'}`, 'error');
+                };
+                
+                socket.onclose = function(event) {
+                    const reason = event.reason ? ` Reason: ${event.reason}` : '';
+                    logMessage(`WebSocket connection closed. Code: ${event.code}.${reason}`, 'info');
+                    resetConnection();
+                };
+                
+            } catch (error) {
+                logMessage(`Error creating WebSocket: ${error.message}`, 'error');
+                resetConnection();
+            }
+        }
+        
+        function disconnect() {
+            if (socket) {
+                socket.close();
+                resetConnection();
+            }
+        }
+        
+        function resetConnection() {
+            socket = null;
+            connectionStatus.textContent = 'Disconnected';
+            connectionStatus.className = 'status disconnected';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            sendBtn.disabled = true;
+        }
+        
+        function updateMessageFields() {
+            const messageType = messageTypeSelect.value;
+            
+            // Hide all fields first
+            claimIdField.style.display = 'none';
+            customMessageField.style.display = 'none';
+            
+            // Show fields based on message type
+            if (messageType === 'subscribe') {
+                claimIdField.style.display = 'block';
+            } else if (messageType === 'custom') {
+                customMessageField.style.display = 'block';
+            }
+        }
+        
+        function sendMessage() {
+            if (!socket || socket.readyState !== WebSocket.OPEN) {
+                logMessage('WebSocket is not connected', 'error');
+                return;
+            }
+            
+            const messageType = messageTypeSelect.value;
+            let message;
+            
+            if (messageType === 'ping') {
+                message = { action: 'ping' };
+            } else if (messageType === 'subscribe') {
+                const claimId = claimIdInput.value.trim();
+                if (!claimId) {
+                    logMessage('Please enter a Claim ID', 'error');
+                    return;
+                }
+                message = { action: 'subscribe', claimId: claimId };
+            } else if (messageType === 'custom') {
+                try {
+                    message = JSON.parse(customMessageInput.value);
+                } catch (e) {
+                    logMessage(`Invalid JSON: ${e.message}`, 'error');
+                    return;
+                }
+            }
+            
+            try {
+                const messageString = JSON.stringify(message);
+                socket.send(messageString);
+                logMessage(`Sent: ${JSON.stringify(message, null, 2)}`, 'sent');
+            } catch (error) {
+                logMessage(`Error sending message: ${error.message}`, 'error');
+            }
+        }
+        
+        function logMessage(message, type) {
+            const messageElement = document.createElement('div');
+            messageElement.className = `message ${type}`;
+            
+            const timestamp = new Date().toISOString();
+            messageElement.textContent = `[${timestamp}] ${message}`;
+            
+            messageLog.appendChild(messageElement);
+            messageLog.scrollTop = messageLog.scrollHeight;
+        }
+        
+        function clearLog() {
+            messageLog.innerHTML = '';
+        }
+    </script>
+</body>
+</html>

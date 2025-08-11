@@ -16,6 +16,7 @@ from utils.response import api_response
 from models.claim import Claim
 from utils.access_control import has_permission
 from utils.vocab_enums import ResourceTypeEnum, PermissionAction
+from batch.batch_tracker import generate_batch_id, file_uploaded
 
 logger = get_logger(__name__)
 
@@ -100,6 +101,10 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
     # Extract room_id if provided
     room_id = body.get('room_id')
     
+    # Generate a batch ID for this upload session
+    batch_id = generate_batch_id()
+    logger.info(f"Generated batch ID for upload session: {batch_id}")
+    
     # Check if the claim exists
     try:
         claim = db_session.query(Claim).filter(Claim.id == claim_id).first()
@@ -160,6 +165,22 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 })
                 continue
             
+            # Generate a unique file ID for tracking
+            file_id = str(uuid.uuid4())
+            
+            # Send batch tracking event for file upload URL generation
+            try:
+                file_uploaded(
+                    batch_id=batch_id,
+                    file_id=file_id,
+                    file_name=file_name,
+                    user_id=str(user.id),
+                    claim_id=str(claim_id)
+                )
+                logger.info(f"Sent batch tracking event for file upload URL generation: {file_id}")
+            except Exception as e:
+                logger.warning(f"Failed to send batch tracking event: {str(e)}")
+            
             # Add file metadata to response
             response_files.append({
                 "name": file_name,
@@ -171,7 +192,9 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
                 "expires_in": presigned_data['expires_in'],
                 "claim_id": str(claim_id),
                 "room_id": str(room_id) if room_id else None,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "file_id": file_id,
+                "batch_id": batch_id
             })
         
         # Determine the appropriate status code based on the results
@@ -189,7 +212,7 @@ def lambda_handler(event: dict, _context=None, db_session=None, user=None) -> di
             status_code = 200
             
         # Return response with pre-signed URLs
-        return api_response(status_code, data={"files": response_files})
+        return api_response(status_code, data={"files": response_files, "batch_id": batch_id})
         
     except Exception as e:
         logger.exception(f"Error generating pre-signed URLs: {str(e)}")

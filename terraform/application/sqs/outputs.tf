@@ -112,3 +112,33 @@ output "s3_upload_notification_queue_name" {
   description = "Name of the S3 upload notification queue"
   value       = aws_sqs_queue.s3_upload_notification_queue.name
 }
+
+output "outbound_messages_queue_url" {
+  description = "URL of the outbound messages queue"
+  value       = aws_sqs_queue.outbound_messages.url
+}
+
+output "outbound_messages_queue_arn" {
+  description = "ARN of the outbound messages queue"
+  value       = aws_sqs_queue.outbound_messages.arn
+}
+
+output "outbound_messages_queue_name" {
+  description = "Name of the outbound messages queue"
+  value       = aws_sqs_queue.outbound_messages.name
+}
+
+output "batch_tracking_queue_url" {
+  description = "URL of the batch tracking queue"
+  value       = aws_sqs_queue.batch_tracking.url
+}
+
+output "batch_tracking_queue_arn" {
+  description = "ARN of the batch tracking queue"
+  value       = aws_sqs_queue.batch_tracking.arn
+}
+
+output "batch_tracking_queue_name" {
+  description = "Name of the batch tracking queue"
+  value       = aws_sqs_queue.batch_tracking.name
+}

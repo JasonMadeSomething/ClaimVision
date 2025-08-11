@@ -1,34 +1,41 @@
 """
-Lambda handler for processing files from the SQS queue.
+Lambda handler for processing files from the processing queue.
 
-This module is triggered by the SQS queue and handles:
-1. Moving the file from the 'pending' location to the final location in S3
-2. Storing file metadata in the database
-3. Sending a message to the analysis queue
+This module handles moving files from the pending directory to their final location,
+updating file metadata in the database, and sending notifications.
 """
 import os
 import json
+import boto3
+import time
 import uuid
 from datetime import datetime, timezone
 from hashlib import sha256
+from database.database import get_db_session
+from models.file import File, FileStatus
+from models.claim import Claim
+from models.group_membership import GroupMembership
+from models.user import User
 from utils.logging_utils import get_logger, log_structured, LogLevel
 from utils.lambda_utils import get_s3_client, get_sqs_client
-from models.file import FileStatus, File
-from database.database import get_db_session
-from models.user import User
-from models.group_membership import GroupMembership
-from models.claim import Claim
+from batch.batch_tracker import file_processed, file_analysis_queued, file_uploaded
+from misc.websocket_sender import notify_file_processed
 
 logger = get_logger(__name__)
 
+# Get environment variables
+S3_BUCKET_NAME = os.environ.get('S3_BUCKET_NAME')
+PROCESSING_QUEUE_URL = os.environ.get('PROCESSING_QUEUE_URL')
+ANALYSIS_QUEUE_URL = os.environ.get('ANALYSIS_QUEUE_URL')
+OUTBOUND_QUEUE_URL = os.environ.get('OUTBOUND_QUEUE_URL')
+
 # Get the actual bucket name, not the SSM parameter path
-S3_BUCKET_NAME = os.getenv("S3_BUCKET_NAME")
 if S3_BUCKET_NAME and S3_BUCKET_NAME.startswith('/'):
     # If it looks like an SSM parameter path, use a default for local testing
-    logger.warning(f"S3_BUCKET_NAME appears to be an SSM parameter path: {S3_BUCKET_NAME}. Using default bucket for local testing.")
+    logger.warning("S3_BUCKET_NAME appears to be an SSM parameter path: %s. Using default bucket for local testing.", S3_BUCKET_NAME)
     S3_BUCKET_NAME = "claimvision-dev-bucket"
 
-SQS_ANALYSIS_QUEUE_URL = os.getenv("SQS_ANALYSIS_QUEUE_URL", "")
+SQS_ANALYSIS_QUEUE_URL = ANALYSIS_QUEUE_URL
 
 def compute_file_hash(s3_bucket, s3_key):
     """
@@ -43,22 +50,33 @@ def compute_file_hash(s3_bucket, s3_key):
     """
     try:
         log_structured(logger, LogLevel.INFO, "Computing hash for file in S3", s3_bucket=s3_bucket, s3_key=s3_key)
+        
+        # Get S3 client
         s3 = get_s3_client()
-        response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
-        file_data = response['Body'].read()
-        file_hash = sha256(file_data).hexdigest()
         
-        # Extract file size and content type
-        file_size = len(file_data)
-        content_type = response.get('ContentType', '')
+        # Get file metadata
+        response = s3.head_object(Bucket=s3_bucket, Key=s3_key)
+        file_size = response.get('ContentLength', 0)
+        content_type = response.get('ContentType', 'application/octet-stream')
         
-        log_structured(logger, LogLevel.INFO, "Computed file hash", file_hash=file_hash, file_size=file_size, content_type=content_type)
+        # Get file content and compute hash
+        file_obj = s3.get_object(Bucket=s3_bucket, Key=s3_key)
+        file_content = file_obj['Body'].read()
+        
+        # Compute SHA-256 hash
+        file_hash = sha256(file_content).hexdigest()
+        
+        log_structured(logger, LogLevel.INFO, "Computed file hash", 
+                      s3_key=s3_key, file_size=file_size, hash=file_hash)
+        
         return file_hash, file_size, content_type
     except Exception as e:
-        log_structured(logger, LogLevel.ERROR, "Error computing file hash", error=str(e))
-        raise
+        log_structured(logger, LogLevel.ERROR, "Error computing file hash", 
+                      error=str(e), s3_bucket=s3_bucket, s3_key=s3_key)
+        return None, 0, 'application/octet-stream'
 
-def send_to_analysis_queue(file_id, s3_key, file_name, group_id, claim_id) -> str:
+
+def send_to_analysis_queue(file_id, s3_key, file_name, group_id, claim_id):
     """
     Sends a message to the analysis queue.
     
@@ -72,27 +90,40 @@ def send_to_analysis_queue(file_id, s3_key, file_name, group_id, claim_id) -> st
     Returns:
         str: The message ID if successful, or a dummy ID if queue URL is not set
     """
-    # Prepare the message body
-    message_body = {
-        "file_id": str(file_id),
-        "s3_key": s3_key,
-        "file_name": file_name,
-        "group_id": str(group_id),
-        "claim_id": str(claim_id),
-    }
-    
-    # Check if queue URL is set
     if not SQS_ANALYSIS_QUEUE_URL:
-        log_structured(logger, LogLevel.WARNING, "SQS_ANALYSIS_QUEUE_URL environment variable is not set, skipping analysis queue")
-        return "dummy-message-id-for-testing"
+        log_structured(logger, LogLevel.WARNING, "SQS_ANALYSIS_QUEUE_URL not set, skipping analysis queue")
+        return str(uuid.uuid4())  # Return a dummy message ID
     
-    # Send the message
-    sqs = get_sqs_client()
-    response = sqs.send_message(
-        QueueUrl=SQS_ANALYSIS_QUEUE_URL,
-        MessageBody=json.dumps(message_body)
-    )
-    return response['MessageId']
+    try:
+        # Get SQS client
+        sqs = get_sqs_client()
+        
+        # Prepare message
+        message = {
+            'file_id': str(file_id),
+            's3_key': s3_key,
+            'file_name': file_name,
+            'group_id': str(group_id) if group_id else None,
+            'claim_id': str(claim_id) if claim_id else None,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        }
+        
+        # Send message to analysis queue
+        response = sqs.send_message(
+            QueueUrl=SQS_ANALYSIS_QUEUE_URL,
+            MessageBody=json.dumps(message)
+        )
+        
+        message_id = response.get('MessageId')
+        log_structured(logger, LogLevel.INFO, "Sent file to analysis queue", 
+                      file_id=str(file_id), message_id=message_id)
+        
+        return message_id
+    except Exception as e:
+        log_structured(logger, LogLevel.ERROR, "Error sending file to analysis queue", 
+                      error=str(e), file_id=str(file_id))
+        return str(uuid.uuid4())  # Return a dummy message ID
+
 
 def lambda_handler(event, _context):
     """
@@ -105,96 +136,97 @@ def lambda_handler(event, _context):
     Returns:
         dict: Processing status
     """
-    log_structured(logger, LogLevel.INFO, "Processing file upload from SQS")
-    
-    # Get database session
     db_session = get_db_session()
     
     try:
-        # Process each record from SQS
+        log_structured(logger, LogLevel.INFO, "Processing SQS event", records_count=len(event.get('Records', [])))
+        
         for record in event.get('Records', []):
             try:
-                # Parse message body
+                # Parse the message body
                 message_body = json.loads(record['body'])
-                
-                # Log the full message body in dev environments
-                log_structured(logger, LogLevel.DEBUG, "Processing SQS message", message_body=message_body)
+                log_structured(logger, LogLevel.INFO, "Processing SQS message", message_body=message_body)
                 
                 # Extract file information
-                file_id = uuid.UUID(message_body['file_id'])
-                user_id = uuid.UUID(message_body['user_id'])
-                file_name = message_body['file_name']
-                claim_id = uuid.UUID(message_body['claim_id'])
-                room_id = uuid.UUID(message_body['room_id']) if message_body.get('room_id') else None
+                file_id = message_body.get('file_id')
+                s3_key = message_body.get('s3_key')
+                file_name = message_body.get('file_name')
+                claim_id = message_body.get('claim_id')
+                user_id = message_body.get('user_id')
+                group_id = message_body.get('group_id')
+                batch_id = message_body.get('batch_id')
                 
-                # Get group_id if available, otherwise try to get it from the user or claim
-                group_id = None
-                if message_body.get('group_id'):
-                    group_id = uuid.UUID(message_body['group_id'])
-                else:
-                    # Try to get group_id from user
-                    try:
-                        with get_db_session() as user_db_session:
-                            # First try to get from user's membership
-                            user = user_db_session.query(User).filter_by(id=user_id).first()
-                            if user:
-                                membership = user_db_session.query(GroupMembership).filter_by(
-                                    user_id=user.id
-                                ).first()
-                                
-                                if membership and membership.group_id:
-                                    group_id = membership.group_id
-                                    log_structured(logger, LogLevel.INFO, "Using group_id from user membership", 
-                                                  group_id=str(group_id), user_id=str(user_id))
-                            
-                            # If still not found, try to get from claim
-                            if not group_id:
-                                claim = user_db_session.query(Claim).filter_by(id=claim_id).first()
-                                if claim and claim.group_id:
-                                    group_id = claim.group_id
-                                    log_structured(logger, LogLevel.INFO, "Using group_id from claim", 
-                                                  group_id=str(group_id), claim_id=str(claim_id))
-                    except Exception as e:
-                        log_structured(logger, LogLevel.WARNING, "Error getting group_id", error=str(e))
-                
-                # Ensure we have a group_id before proceeding
-                if not group_id:
-                    log_structured(logger, LogLevel.ERROR, "Could not determine group_id for file", file_id=str(file_id))
+                # Skip if missing required information
+                if not file_id or not s3_key or not file_name:
+                    log_structured(logger, LogLevel.ERROR, "Missing required file information", 
+                                  file_id=file_id, s3_key=s3_key, file_name=file_name)
                     continue
                 
-                # Get S3 information
-                source_s3_key = message_body['s3_key']
-                source_s3_bucket = message_body['s3_bucket']
-                
-                # Construct final S3 key
-                target_s3_key = f"ClaimVision/{claim_id}/{file_id}/{file_name}"
-                log_structured(logger, LogLevel.INFO, "Moving file from pending to final location", 
-                              source_key=source_s3_key, target_key=target_s3_key)
-                
-                # Move file from pending location to final location
+                # If batch_id is missing, log error but continue processing
+                if not batch_id:
+                    log_structured(logger, LogLevel.ERROR, "No batch_id found in message, batch tracking disabled for this file", 
+                                  file_id=file_id)
+                    # We'll still process the file but won't send batch tracking events
                 try:
-                    s3 = get_s3_client()
+                    # Get the group ID for the user and claim
+                    if user_id and claim_id:
+                        user = db_session.query(User).filter(User.id == user_id).first()
+                        if user:
+                            # Find the group membership for this user
+                            membership = db_session.query(GroupMembership).filter(
+                                GroupMembership.user_id == user_id
+                            ).first()
+                            
+                            if membership:
+                                group_id = membership.group_id
+                                log_structured(logger, LogLevel.INFO, "Found group ID for user", 
+                                              user_id=user_id, group_id=str(group_id))
+                            
+                            # Verify the claim belongs to the user's group
+                            claim = db_session.query(Claim).filter(
+                                Claim.id == claim_id,
+                                Claim.group_id == group_id
+                            ).first()
+                            
+                            if not claim:
+                                log_structured(logger, LogLevel.WARNING, "Claim not found or does not belong to user's group", 
+                                              claim_id=claim_id, user_id=user_id, group_id=str(group_id) if group_id else None)
+                                continue
                     
-                    # Copy the object to the new location
+                    # Send batch tracking event for file upload
+                    if batch_id:
+                        file_uploaded(
+                            batch_id=batch_id,
+                            file_id=file_id,
+                            file_name=file_name or "Unknown",
+                            user_id=user_id,
+                            claim_id=claim_id
+                        )
+                    
+                    # Construct target S3 key (move from 'pending/' to appropriate location)
+                    target_s3_key = s3_key.replace('pending/', '', 1)
+                    
+                    # Move the file in S3
+                    s3 = get_s3_client()
                     s3.copy_object(
-                        CopySource={'Bucket': source_s3_bucket, 'Key': source_s3_key},
+                        CopySource={'Bucket': S3_BUCKET_NAME, 'Key': s3_key},
                         Bucket=S3_BUCKET_NAME,
                         Key=target_s3_key
                     )
                     
-                    # Delete the original object (from pending location)
+                    # Delete the source file
                     s3.delete_object(
-                        Bucket=source_s3_bucket,
-                        Key=source_s3_key
+                        Bucket=S3_BUCKET_NAME,
+                        Key=s3_key
                     )
                     
-                    s3_url = f"s3://{S3_BUCKET_NAME}/{target_s3_key}"
-                    log_structured(logger, LogLevel.INFO, "File moved successfully", s3_url=s3_url)
+                    log_structured(logger, LogLevel.INFO, "Moved file in S3", 
+                                  source_key=s3_key, target_key=target_s3_key)
                     
                     # Update file record in database
                     file_record = db_session.query(File).filter(File.id == file_id).first()
+                    
                     if file_record:
-                        # Update S3 key and status
                         file_record.s3_key = target_s3_key
                         file_record.status = FileStatus.PROCESSED
                         file_record.updated_at = datetime.now(timezone.utc)
@@ -228,12 +260,93 @@ def lambda_handler(event, _context):
                             )
                             log_structured(logger, LogLevel.INFO, "File sent to analysis queue", 
                                           message_id=message_id, file_id=str(file_id))
+                            
+                            # Send batch tracking event for file analysis queued
+                            if batch_id:
+                                file_analysis_queued(
+                                    batch_id=batch_id,
+                                    file_id=file_id,
+                                    message_id=message_id,
+                                    user_id=user_id,
+                                    claim_id=claim_id
+                                )
+                                log_structured(logger, LogLevel.INFO, "Batch tracking event sent for file analysis queued", 
+                                              file_id=str(file_id), batch_id=batch_id)
+                        
+                        # Send WebSocket notification if OUTBOUND_QUEUE_URL is configured
+                        try:
+                            if os.environ.get('OUTBOUND_QUEUE_URL'):
+                                # Prepare file info for notification
+                                file_info = {
+                                    'id': str(file_id),
+                                    'name': file_name,
+                                    'size': file_record.file_size,
+                                    'contentType': file_record.content_type,
+                                    'status': file_record.status.value,
+                                    's3Key': target_s3_key
+                                }
+                                
+                                # Send notification
+                                notify_file_processed(
+                                    file_id=str(file_id),
+                                    claim_id=str(claim_id),
+                                    user_id=str(user_id),
+                                    file_info=file_info
+                                )
+                                log_structured(logger, LogLevel.INFO, "WebSocket notification sent for processed file", 
+                                              file_id=str(file_id), user_id=str(user_id))
+                                
+                                # Send batch tracking event for file processed
+                                if batch_id:
+                                    file_processed(
+                                        batch_id=batch_id,
+                                        file_id=file_id,
+                                        success=True,
+                                        file_url=f"s3://{S3_BUCKET_NAME}/{target_s3_key}",
+                                        user_id=user_id,
+                                        claim_id=claim_id
+                                    )
+                                    log_structured(logger, LogLevel.INFO, "Batch tracking event sent for processed file", 
+                                                  file_id=str(file_id), batch_id=batch_id)
+                        except Exception as ws_error:
+                            log_structured(logger, LogLevel.WARNING, "Error sending notifications", 
+                                          error=str(ws_error), file_id=str(file_id))
+                            
+                            # Send batch tracking event for failed file processing
+                            try:
+                                if batch_id:
+                                    file_processed(
+                                        batch_id=batch_id,
+                                        file_id=file_id,
+                                        success=False,
+                                        user_id=user_id,
+                                        claim_id=claim_id,
+                                        error=str(ws_error)
+                                    )
+                            except Exception as bt_error:
+                                log_structured(logger, LogLevel.WARNING, "Error sending batch tracking event", 
+                                              error=str(bt_error), file_id=str(file_id))
                     else:
                         log_structured(logger, LogLevel.WARNING, "File record not found in database", file_id=str(file_id))
                         
                 except Exception as s3_error:
                     log_structured(logger, LogLevel.ERROR, "Error moving file in S3", 
-                                  error=str(s3_error), source_key=source_s3_key)
+                                  error=str(s3_error), source_key=s3_key)
+                    
+                    # Send batch tracking event for failed file processing
+                    try:
+                        if batch_id:
+                            file_processed(
+                                batch_id=batch_id,
+                                file_id=file_id,
+                                success=False,
+                                user_id=user_id,
+                                claim_id=claim_id,
+                                error=str(s3_error)
+                            )
+                    except Exception as bt_error:
+                        log_structured(logger, LogLevel.WARNING, "Error sending batch tracking event", 
+                                      error=str(bt_error), file_id=str(file_id))
                     continue
                     
             except Exception as record_error:
@@ -243,7 +356,7 @@ def lambda_handler(event, _context):
         return {
             "statusCode": 200,
             "body": json.dumps({
-                "message": f"Processed {len(event.get('Records', []))} files"
+                "message": f"Processed {len(event.get('Records', []))} files",
             })
         }
     except Exception as e:

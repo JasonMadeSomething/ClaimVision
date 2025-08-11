@@ -1,9 +1,7 @@
 import argparse
 import json
 import subprocess
-import os
 import sys
-import re
 
 # -----------------------------
 # REPLACEMENT SOURCES (Single Source of Truth)
@@ -23,7 +21,7 @@ REPLACEMENT_SOURCES = {
     "{{RDS_ENDPOINT_SSM_PATH}}": ("terraform", "rds_endpoint_ssm_path", lambda d: d["value"]),
     "{{DB_ENDPOINT}}": ("terraform", "rds_endpoint", lambda d: d["value"]),
     "{{VPC_ID}}": ("terraform", "vpc_id", lambda d: d["value"]),
-    "{{SUBNET_IDS}}": ("terraform", "subnet_ids", lambda d: ",".join(d["value"])),
+    "{{SUBNET_IDS}}": ("terraform", "subnet_ids", lambda d: ",".join(map(str, d["value"]))),
     "{{SECURITY_GROUP_IDS}}": ("terraform", "rds_security_group_id", lambda d: d["value"]),
     "{{PUBLIC_SUBNET_1}}": ("terraform", "public_subnet_1", lambda d: d["value"]),
     "{{PUBLIC_SUBNET_2}}": ("terraform", "public_subnet_2", lambda d: d["value"]),
@@ -56,9 +54,21 @@ REPLACEMENT_SOURCES = {
     "{{EMAIL_QUEUE_NAME}}": ("terraform", "email_queue_url", lambda d: d["value"].split('/')[-1]),
     "{{S3_UPLOAD_NOTIFICATION_QUEUE_URL}}": ("terraform", "s3_upload_notification_queue_url", lambda d: d["value"]),
     "{{S3_UPLOAD_NOTIFICATION_QUEUE_ARN}}": ("terraform", "s3_upload_notification_queue_arn", lambda d: d["value"]),
+    "{{CLAIMS_QUEUE_URL}}": ("terraform", "claims_queue_url", lambda d: d["value"]),
+    "{{CLAIMS_QUEUE_ARN}}": ("terraform", "claims_queue_arn", lambda d: d["value"]),
+    "{{CLAIMS_QUEUE_NAME}}": ("terraform", "claims_queue_url", lambda d: d["value"].split('/')[-1]),
+    "{{UPLOADS_QUEUE_URL}}": ("terraform", "uploads_queue_url", lambda d: d["value"]),
+    "{{UPLOADS_QUEUE_ARN}}": ("terraform", "uploads_queue_arn", lambda d: d["value"]),
+    "{{UPLOADS_QUEUE_NAME}}": ("terraform", "uploads_queue_url", lambda d: d["value"].split('/')[-1]),
+    "{{OUTBOUND_MESSAGES_QUEUE_URL}}": ("terraform", "outbound_messages_queue_url", lambda d: d["value"]),
+    "{{OUTBOUND_MESSAGES_QUEUE_ARN}}": ("terraform", "outbound_messages_queue_arn", lambda d: d["value"]),
+    "{{OUTBOUND_MESSAGES_QUEUE_NAME}}": ("terraform", "outbound_messages_queue_url", lambda d: d["value"].split('/')[-1]),
+    "{{BATCH_TRACKING_QUEUE_URL}}": ("terraform", "batch_tracking_queue_url", lambda d: d["value"]),
+    "{{BATCH_TRACKING_QUEUE_ARN}}": ("terraform", "batch_tracking_queue_arn", lambda d: d["value"]),
 
     # DNS/SES
     "{{API_DOMAIN_NAME}}": ("secrets", "ApiDomainName", None),
+    "{{WS_DOMAIN_NAME}}": ("secrets", "WsDomainName", None),
     "{{HOSTED_ZONE_ID}}": ("secrets", "HostedZoneId", None),
     "{{FRONTEND_ORIGIN}}": ("secrets", "FrontendOrigin", None),
     "{{SENDER_EMAIL}}": ("secrets", "SenderEmail", None),
@@ -73,14 +83,14 @@ REPLACEMENT_SOURCES = {
 # -----------------------------
 
 def run_cmd(cmd):
-    result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, shell=True, check=False)
     if result.returncode != 0:
         print(f"Error running command: {cmd}\n{result.stderr}")
         sys.exit(1)
     return result.stdout
 
 def load_json_file(filepath):
-    with open(filepath, 'r') as f:
+    with open(filepath, 'r', encoding='utf-8') as f:
         return json.load(f)
 
 def fetch_cognito_outputs(env):
@@ -92,7 +102,7 @@ def fetch_cognito_outputs(env):
         output_dict = {item['OutputKey']: item['OutputValue'] for item in outputs}
         return output_dict
     except Exception as e:
-        print(f"Error fetching Cognito outputs for stack {stack_name}: {e}")
+        print(f"Error fetching Cognito outputs for stack {stack_name}: {str(e)}")
         return {}
 
 # -----------------------------
@@ -110,7 +120,7 @@ def main():
     secrets = load_json_file("scripts/secrets.json")
 
     # Load template
-    with open("samconfig.template.toml", "r") as f:
+    with open("samconfig.template.toml", "r", encoding='utf-8') as f:
         template_content = f.read()
 
     replacements = {}
@@ -143,7 +153,7 @@ def main():
         template_content = template_content.replace(placeholder, replacement)
 
     # Write final output
-    with open("samconfig.toml", "w") as f:
+    with open("samconfig.toml", "w", encoding='utf-8') as f:
         f.write(template_content)
 
     print("✅ samconfig.toml successfully generated.")

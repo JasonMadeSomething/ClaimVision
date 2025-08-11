@@ -289,3 +289,57 @@ resource "aws_sqs_queue_policy" "s3_to_sqs_policy" {
     ]
   })
 }
+
+# WebSocket Outbound Messages Queue
+resource "aws_sqs_queue" "outbound_messages_dlq" {
+  name                      = "${var.environment}-outbound-messages-dlq"
+  message_retention_seconds = 1209600 # 14 days
+
+  tags = {
+    Environment = var.environment
+    Project     = "ClaimVision"
+  }
+}
+
+resource "aws_sqs_queue" "outbound_messages" {
+  name                      = "${var.environment}-outbound-messages"
+  visibility_timeout_seconds = 60
+  message_retention_seconds = 1209600 # 14 days
+  
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.outbound_messages_dlq.arn
+    maxReceiveCount     = 5
+  })
+
+  tags = {
+    Environment = var.environment
+    Project     = "ClaimVision"
+  }
+}
+
+# Batch Tracking Queue
+resource "aws_sqs_queue" "batch_tracking_dlq" {
+  name                      = "${var.environment}-batch-tracking-dlq"
+  message_retention_seconds = 1209600 # 14 days
+
+  tags = {
+    Environment = var.environment
+    Project     = "ClaimVision"
+  }
+}
+
+resource "aws_sqs_queue" "batch_tracking" {
+  name                      = "${var.environment}-batch-tracking-queue"
+  visibility_timeout_seconds = 60
+  message_retention_seconds = 1209600 # 14 days
+  
+  redrive_policy = jsonencode({
+    deadLetterTargetArn = aws_sqs_queue.batch_tracking_dlq.arn
+    maxReceiveCount     = 5
+  })
+
+  tags = {
+    Environment = var.environment
+    Project     = "ClaimVision"
+  }
+}

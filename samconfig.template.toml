@@ -36,6 +36,7 @@ parameter_overrides = [
   "EnableDNS=true",
   "HostedZoneId={{HOSTED_ZONE_ID}}",
   "ApiDomainName={{API_DOMAIN_NAME}}",
+  "WsDomainName={{WS_DOMAIN_NAME}}",
   "FrontendOrigin={{FRONTEND_ORIGIN}}",
   "EFSAccessPointARN={{EFS_ACCESS_POINT_ARN}}",
   "EFSFileSystemId={{EFS_FILE_SYSTEM_ID}}",
@@ -57,6 +58,11 @@ parameter_overrides = [
   "EmailQueueName={{EMAIL_QUEUE_NAME}}",
   "S3UploadNotificationQueueARN={{S3_UPLOAD_NOTIFICATION_QUEUE_ARN}}",
   "S3UploadNotificationQueueURL={{S3_UPLOAD_NOTIFICATION_QUEUE_URL}}",
+  "OutboundMessagesQueueURL={{OUTBOUND_MESSAGES_QUEUE_URL}}",
+  "OutboundMessagesQueueARN={{OUTBOUND_MESSAGES_QUEUE_ARN}}",
+  "OutboundMessagesQueueName={{OUTBOUND_MESSAGES_QUEUE_NAME}}",
+  "BatchTrackingQueueURL={{BATCH_TRACKING_QUEUE_URL}}",
+  "BatchTrackingQueueARN={{BATCH_TRACKING_QUEUE_ARN}}",
 ]
 
 [cognito.deploy.parameters]

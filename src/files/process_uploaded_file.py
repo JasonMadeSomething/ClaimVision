@@ -22,6 +22,7 @@ from models.group_membership import GroupMembership
 from models.room import Room
 from utils.lambda_utils import get_s3_client, get_sqs_client
 from utils.logging_utils import get_logger, log_structured, LogLevel
+from batch.batch_tracker import file_processed, file_uploaded
 
 # Configure logging
 logger = get_logger(__name__)
@@ -656,6 +657,31 @@ def lambda_handler(event, _context):
                     "timestamp": datetime.now(timezone.utc).isoformat()
                 }
                 
+                # Check if there's a batch_id in the metadata (from the URL query parameters)
+                batch_id = metadata.get('batch_id')
+                if not batch_id:
+                    # Log error and continue without batch tracking - this indicates a real issue
+                    log_structured(logger, LogLevel.ERROR, "No batch_id found in metadata, batch tracking disabled for this file", 
+                                  file_id=file_info['file_id'])
+                    # We'll still process the file but won't send batch tracking events
+                else:
+                    file_info['batch_id'] = batch_id
+                    
+                    # Send batch tracking event for file upload confirmation
+                    try:
+                        file_uploaded(
+                            batch_id=batch_id,
+                            file_id=file_info['file_id'],
+                            file_name=file_info['file_name'],
+                            user_id=file_info['user_id'],
+                            claim_id=file_info['claim_id']
+                        )
+                        log_structured(logger, LogLevel.INFO, "Sent batch tracking event for file upload confirmation", 
+                                      file_id=file_info['file_id'], batch_id=batch_id)
+                    except Exception as bt_error:
+                        log_structured(logger, LogLevel.WARNING, "Failed to send batch tracking event", 
+                                      error=str(bt_error), file_id=file_info['file_id'])
+                
                 # Get group_id from user if not in metadata
                 if not metadata.get('group_id'):
                     try:
@@ -689,6 +715,23 @@ def lambda_handler(event, _context):
                 if is_zip_file(file_info['file_name']):
                     # Process ZIP file
                     zip_results = process_zip_file(bucket, s3_key, file_info['file_name'], file_info['claim_id'], file_info.get('group_id'), file_info.get('user_id'))
+                    
+                    # Add batch tracking for each extracted file
+                    for zip_result in zip_results:
+                        try:
+                            file_processed(
+                                batch_id=file_info.get('batch_id'),
+                                file_id=zip_result.get('file_id', str(uuid.uuid4())),
+                                success=zip_result.get('status') == 'success',
+                                file_url=f"s3://{bucket}/{zip_result.get('s3_key')}",
+                                user_id=file_info['user_id'],
+                                claim_id=file_info['claim_id'],
+                                error=zip_result.get('error') if zip_result.get('status') != 'success' else None
+                            )
+                        except Exception as bt_error:
+                            log_structured(logger, LogLevel.WARNING, "Failed to send batch tracking event for ZIP file", 
+                                          error=str(bt_error), file_name=zip_result.get('file_name'))
+                    
                     results.extend(zip_results)
                     continue
                 
@@ -701,7 +744,27 @@ def lambda_handler(event, _context):
                     uuid.UUID(file_info.get('group_id')), 
                     uuid.UUID(file_info.get('user_id'))
                 )
+                
+                # Add batch_id to the queue result
+                queue_result['batch_id'] = file_info.get('batch_id')
                 results.append(queue_result)
+                
+                # Send batch tracking event for file queued for processing
+                try:
+                    file_processed(
+                        batch_id=file_info.get('batch_id'),
+                        file_id=file_info['file_id'],
+                        success=queue_result.get('status') == 'success',
+                        file_url=f"s3://{bucket}/{s3_key}",
+                        user_id=file_info['user_id'],
+                        claim_id=file_info['claim_id'],
+                        error=queue_result.get('error') if queue_result.get('status') != 'success' else None
+                    )
+                    log_structured(logger, LogLevel.INFO, "Sent batch tracking event for file queued for processing", 
+                                  file_id=file_info['file_id'], batch_id=file_info.get('batch_id'))
+                except Exception as bt_error:
+                    log_structured(logger, LogLevel.WARNING, "Failed to send batch tracking event", 
+                                  error=str(bt_error), file_id=file_info['file_id'])
                 
                 # Create database record for the file
                 try:
