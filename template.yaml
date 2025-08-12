@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+﻿AWSTemplateFormatVersion: '2010-09-09'
 Transform: AWS::Serverless-2016-10-31
 
 Parameters:
@@ -1311,7 +1311,7 @@ Resources:
             Path: /rooms
             Method: GET
             RestApiId: !Ref ClaimVisionAPI
-            
+
   # Add Room to Claim Function
   AddRoomToClaimFunction:
     Type: AWS::Serverless::Function
@@ -1571,7 +1571,7 @@ Resources:
   #  Properties:
   #    Handler: files.replace_file.lambda_handler
   #    Runtime: python3.12
-  #    VpcConfig: !If 
+  #    VpcConfig: !If
   #      - HasVpc
   #      - SubnetIds: !Ref SubnetIds
   #        SecurityGroupIds: !Ref SecurityGroupIds
@@ -2394,7 +2394,7 @@ Outputs:
       - CreateDNS
       - !Sub wss://${WsDomainName}
       - !Sub wss://${WebSocketApi}.execute-api.${AWS::Region}.amazonaws.com/${Env}
-  
+  # WebSocket Connections Table Name
   WebSocketConnectionsTableName:
     Description: Name of the DynamoDB table for WebSocket connections
     Value: !Ref WebSocketConnectionsTable
