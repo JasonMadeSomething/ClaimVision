@@ -139,6 +139,35 @@ resource "aws_vpc_endpoint" "ssm" {
   }
 }
 
+# API Gateway VPC Interface Endpoint (for WebSocket API)
+resource "aws_vpc_endpoint" "apigateway" {
+  vpc_id             = aws_vpc.claimvision_vpc.id
+  service_name       = "com.amazonaws.${var.region}.execute-api"
+  vpc_endpoint_type  = "Interface"
+  subnet_ids         = [aws_subnet.public_subnet_1.id, aws_subnet.public_subnet_2.id]
+  security_group_ids = [aws_security_group.vpc_endpoint_sg.id]
+  private_dns_enabled = true
+  
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect    = "Allow"
+        Principal = "*"
+        Action    = [
+          "execute-api:Invoke",
+          "execute-api:ManageConnections"
+        ]
+        Resource  = "*"
+      }
+    ]
+  })
+
+  tags = {
+    Name = "ClaimVisionAPIGatewayEndpoint-${var.env}"
+  }
+}
+
 # Security Group for VPC Endpoints
 resource "aws_security_group" "vpc_endpoint_sg" {
   name        = "vpc-endpoint-sg-${var.env}"
