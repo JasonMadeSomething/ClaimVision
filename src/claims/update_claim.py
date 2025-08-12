@@ -8,8 +8,7 @@ from utils.logging_utils import get_logger
 from datetime import datetime, date
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError, OperationalError
 from utils import response
-from utils.lambda_utils import standard_lambda_handler, extract_uuid_param, enhanced_lambda_handler
-from models import Claim
+from utils.lambda_utils import enhanced_lambda_handler
 from utils.access_control import has_permission, AccessDeniedError
 from utils.vocab_enums import ResourceTypeEnum, PermissionAction
 
@@ -45,7 +44,10 @@ def lambda_handler(event, context, db_session, user, body, path_params, resource
     Returns:
         dict: API response containing the updated claim details or an error message.
     """
-    claim = resources['claim']
+    try:
+        claim = resources['claim']
+        claim_id = path_params['claim_id']
+        
         # Check if user has permission to update the claim
         if not has_permission(
             user=user,
