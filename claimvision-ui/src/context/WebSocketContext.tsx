@@ -81,9 +81,26 @@ export const WebSocketProvider = ({ children }: { children: React.ReactNode }) =
       return;
     }
 
+    // Check if token is expired before attempting connection
+    try {
+      const payload = JSON.parse(atob(idToken.split('.')[1]));
+      const now = Math.floor(Date.now() / 1000);
+      if (payload.exp && payload.exp <= now) {
+        console.warn('[WS] Token expired, cannot connect. Exp:', payload.exp, 'Now:', now);
+        setStatus("error");
+        return;
+      }
+      console.warn('[WS] Token valid, expires at:', new Date(payload.exp * 1000).toISOString());
+    } catch (e) {
+      console.warn('[WS] Invalid token format:', e);
+      setStatus("error");
+      return;
+    }
+
     try {
       setStatus("connecting");
       const url = `${endpoint}?token=${encodeURIComponent(idToken)}`;
+      console.warn('[WS] Attempting connection to:', endpoint);
       const ws = new WebSocket(url);
       wsRef.current = ws;
 

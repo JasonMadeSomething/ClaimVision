@@ -4,9 +4,11 @@ ENV ?= dev
 TF_DIR=terraform
 TF_OUTPUT_FILE=terraform_outputs.json
 
-.PHONY: all plan apply terraform_outputs cognito_deploy samconfig sam_build sam_deploy deploy clean
+.PHONY: all plan apply terraform_outputs cognito_deploy samconfig sam_build sam_deploy deploy clean force_all force_deploy
 
 all: deploy
+
+force_all: force_deploy
 
 plan:
 	cd $(TF_DIR) && terraform init && terraform plan -out=tfplan
@@ -33,7 +35,12 @@ sam_build:
 sam_deploy:
 	-sam deploy --no-confirm-changeset --config-file samconfig.toml
 
+sam_force_deploy:
+	-sam deploy --no-confirm-changeset --config-file samconfig.toml --force-upload
+
 deploy: plan apply terraform_outputs cognito_deploy samconfig sam_build sam_deploy
+
+force_deploy: plan apply terraform_outputs cognito_deploy samconfig sam_build sam_force_deploy
 
 clean:
 	rm -f tfplan

@@ -7,7 +7,6 @@ This script creates all the necessary database tables and populates them with in
 
 import os
 import sys
-import uuid
 import json
 from datetime import datetime, timezone
 
@@ -28,7 +27,7 @@ from models.room import Room
 def get_database_url():
     """
     Construct the database URL from environment variables.
-    
+
     Returns
     -------
     str
@@ -147,7 +146,7 @@ def create_default_data(session):
     seed_vocab(session)
 
     session.flush()  # Flush to get the ID
-    
+
     # Commit changes
     session.commit()
     print("Default data created successfully.")
@@ -156,26 +155,26 @@ def main():
     """Main function to initialize the database."""
     # Get environment variables
     database_url = get_database_url()
-    
+
     # Create engine and session
     engine = create_engine(database_url)
     Session = sessionmaker(bind=engine)
     session = Session()
-    
+
     try:
         # Check if the database is accessible
         session.execute(text("SELECT 1"))
         print("Database connection successful.")
-        
+
         # Drop existing tables
         drop_tables(engine)
-        
+
         # Create tables
         create_tables(engine)
-        
+
         # Create default data
         create_default_data(session)
-        
+
         print("Database initialization completed successfully.")
     except Exception as e:
         print(f"Error initializing database: {str(e)}")
